@@ -116,17 +116,26 @@ class StarGraph:
         self.ghosts: dict[str, GhostAnchor] = {}
         self.cortical_index: list[tuple[list[float], str]] = []  # (embedding, anchor_id)
         self.schemas: dict[str, Schema] = {}
+        # v0.4: ANN index for sub-linear retrieval
+        self._ann_index = None  # lazy init on first use
 
     def _key(self, a: str, b: str) -> tuple[str, str]:
         return (a, b) if a < b else (b, a)
 
     # ── CRUD ──────────────────────────────────────────────
 
+    def _get_ann_index(self):
+        if self._ann_index is None:
+            from .index import ANNIndex
+            self._ann_index = ANNIndex()
+        return self._ann_index
+
     def add_anchor(self, anchor: Anchor) -> str:
         self.anchors[anchor.id] = anchor
-        # Add to cortical index if stable enough
-        if anchor.embedding and anchor.vector.stability > 0.5:
+        if anchor.embedding:
             self.cortical_index.append((anchor.embedding, anchor.id))
+            if self._ann_index is not None:
+                self._ann_index.add(anchor.id, anchor.embedding)
         return anchor.id
 
     def add_edge(self, src: str, tgt: str, weight: float = 0.5,
@@ -150,6 +159,8 @@ class StarGraph:
         for adj in self._adjacency.values():
             adj.discard(anchor_id)
         self.cortical_index = [(e, aid) for e, aid in self.cortical_index if aid != anchor_id]
+        if self._ann_index is not None:
+            self._ann_index.remove(anchor_id)
 
     # ── Navigation / Resonance ────────────────────────────
 
@@ -225,10 +236,32 @@ class StarGraph:
     def cortical_lookup(self, embedding: list[float], top_k: int = 10) -> list[tuple[str, float]]:
         """Direct embedding-based lookup — the 'cortical' retrieval pathway.
 
-        For well-consolidated memories that no longer need hippocampal indexing.
+        Uses ANNIndex for sub-linear retrieval when embeddings are available.
+        Falls back to linear scan for small graphs or when index is cold.
         """
-        if not self.cortical_index:
+        if not self.cortical_index and self._ann_index is None:
             return []
+
+        # Use ANNIndex for sub-linear lookup
+        ann = self._get_ann_index()
+        if ann.size > 0:
+            # Ensure index is built
+            if not self._ids_in_ann_sync():
+                ann.clear()
+                for aid, a in self.anchors.items():
+                    if a.embedding:
+                        ann.add(aid, a.embedding)
+                ann.rebuild()
+            results = ann.query(embedding, k=top_k * 2)
+            # Weight by retention_score and filter to existing anchors
+            weighted = []
+            for aid, sim in results:
+                if aid in self.anchors:
+                    weighted.append((aid, sim * self.anchors[aid].retention_score))
+            weighted.sort(key=lambda x: -x[1])
+            return weighted[:top_k]
+
+        # Fallback: linear scan (for cold start / small graphs)
         scores = []
         for cort_emb, aid in self.cortical_index:
             if aid not in self.anchors:
@@ -241,6 +274,11 @@ class StarGraph:
             scores.append((sim * self.anchors[aid].retention_score, aid))
         scores.sort(key=lambda x: -x[0])
         return [(aid, s) for s, aid in scores[:top_k]]
+
+    def _ids_in_ann_sync(self) -> bool:
+        """Check if ANN index matches current anchors (cheap heuristic)."""
+        ann = self._get_ann_index()
+        return ann.size == len(self.anchors) and ann.size > 0
 
     # ── Contradiction detection ──────────────────────────
 

@@ -1,27 +1,26 @@
-"""Star Graph Memory System — v0.2.
+"""Star Graph Memory System — v0.4 real mechanisms.
 
-A hippocampal-inspired memory architecture for AI agents.
+A hippocampal-inspired cognitive memory architecture for AI agents.
 
 Two retrieval pathways:
   Hippocampal: oscillatory phase-locking + spreading activation
-  Cortical:    direct embedding lookup (consolidated memories)
+  Cortical:    ANN-indexed embedding lookup (consolidated memories)
 
 Sleep cycles implement 9 phases:
-  SWR Replay → Systems Consolidation → Emotional Stripping →
+  Prioritized SWR Replay → Systems Consolidation → Emotional Stripping →
   Schema Extraction → Merge → Adaptive Prune → Bridge →
   Hebbian Update → Synaptic Homeostasis
 
-Key v0.2 additions:
-  - Oscillatory resonance (Arnold tongue model)
-  - Predictive coding (prediction error minimization)
-  - Memory reconsolidation (retrieval as rewriting)
-  - Ghost anchors (savings effect)
-  - Schema formation (abstraction across episodes)
-  - Systems consolidation (hippocampal → cortical transfer)
-  - Emotional stripping (decouple emotion from information)
+v0.4 — mechanism, not metaphor:
+  - Real embeddings (sentence-transformers / sklearn TF-IDF)
+  - Meaningful phase derivation: f(timestamp, importance, emotion)
+  - Prioritized Experience Replay (like RL PER, biologically motivated)
+  - ANN-indexed sub-linear retrieval (sklearn NearestNeighbors)
+  - Embedding similarity replaces character bigrams throughout
+  - Deterministic mode for reproducible benchmarks (seed.py)
 """
 
-__version__ = "0.3.0-dev"
+__version__ = "0.4.0-dev"
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator
 from .graph import StarGraph, Edge, Constellation, Schema
@@ -33,3 +32,6 @@ from .retriever import (
     VectorSimilarityRetriever,
     compare_retrievers,
 )
+from .embedding import EmbeddingProvider, get_embedder
+from .index import ANNIndex
+from .seed import seed_everything, is_deterministic

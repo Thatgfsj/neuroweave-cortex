@@ -156,8 +156,31 @@ class Anchor:
         vec_kw.setdefault("surprise", surprise)
         vector_kw = {k: v for k, v in vec_kw.items() if k in vec_fields}
         anchor_kw = {k: v for k, v in vec_kw.items() if k not in vec_fields}
-        freq = 0.3 + 0.6 * (abs(hash(text)) % 1000) / 1000.0
-        phase = (abs(hash(text + "phase")) % 6283) / 1000.0
+        # Derive meaningful oscillator params (not hash-based noise)
+        try:
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            freq = embedder.derive_frequency(
+                importance=vector_kw.get("importance", importance),
+                emotional_valence=vector_kw.get("emotional_valence", emotional_valence),
+                text_length=len(text),
+            )
+            # Auto-encode text if no embedding provided
+            if embedding is None:
+                embedding = embedder.encode(text)
+            phase = embedder.derive_phase(
+                text, embedding,
+                importance=vector_kw.get("importance", importance),
+                emotional_valence=vector_kw.get("emotional_valence", emotional_valence),
+                timestamp=vec_kw.pop("_timestamp", None),
+            )
+            coupling = 0.25 + 0.15 * abs(vector_kw.get("emotional_valence", emotional_valence))
+        except Exception:
+            import math as _math
+            freq = 0.5
+            phase = _math.fmod(abs(hash(text)) * 0.001, 2 * _math.pi)
+            coupling = 0.3
+
         return cls(
             id=anchor_id,
             text=text[:280],
@@ -166,7 +189,7 @@ class Anchor:
             oscillator=Oscillator(
                 natural_frequency=freq,
                 phase_offset=phase,
-                coupling_strength=0.3,
+                coupling_strength=min(1.0, coupling),
             ),
             source_session=source_session,
             tags=tags or [],

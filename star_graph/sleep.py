@@ -1,12 +1,12 @@
-"""Sleep-based memory consolidation — v0.2 deep mechanisms.
+"""Sleep-based memory consolidation — v0.4 real mechanisms.
 
-A full sleep cycle now implements:
-1. SWR Replay — compressed replay of recent anchors
+A full sleep cycle implements:
+1. Prioritized SWR Replay — priority = f(emotion, novelty, freq, centrality, unresolved)
 2. Systems Consolidation — hippocampal → cortical transfer
 3. Emotional Stripping — decouple emotion from information
-4. Schema Extraction — abstract common patterns across episodes
-5. Merge Similar — fuse near-duplicate anchors
-6. Adaptive Prune — remove weak anchors, leave ghosts for savings
+4. Schema Extraction — abstract common patterns via embedding similarity
+5. Merge Similar — fuse near-duplicate anchors by semantic similarity
+6. Adaptive Prune — remove weak anchors, leave ghosts (interference-aware)
 7. Bridge Constellations — discover surprising connections
 8. Hebbian Update — strengthen co-activated, weaken dormant
 9. Synaptic Homeostasis — global downscaling, keep only strong
@@ -24,59 +24,47 @@ from .graph import StarGraph, Edge, Constellation, Schema
 
 
 class SleepCycle:
-    """One complete sleep/consolidation cycle — deeply biologically inspired."""
+    """One complete sleep/consolidation cycle."""
 
     def __init__(self, graph: StarGraph):
         self.graph = graph
         self.log: list[str] = []
         self._cycle_count: int = 0
+        self._embedder = None
+
+    def _get_embedder(self):
+        if self._embedder is None:
+            from .embedding import get_embedder
+            self._embedder = get_embedder()
+        return self._embedder
 
     def run(self, recent_anchors: list[Anchor] | None = None,
             similarity_threshold: float = 0.85,
             retention_threshold: float = 0.15,
             edge_prune_threshold: float = 0.1) -> dict:
-        """Execute a full sleep cycle."""
         started = time.time()
         self._cycle_count += 1
         stats_before = self.graph.stats()
 
-        # Phase 1: SWR Replay
         if recent_anchors:
             self._swr_replay(recent_anchors, similarity_threshold)
 
-        # Phase 2: Systems Consolidation
         self._systems_consolidation()
-
-        # Phase 3: Emotional Stripping
         self._emotional_stripping()
-
-        # Phase 4: Schema Extraction
         schemas_formed = self._schema_extraction()
-
-        # Phase 5: Merge Similar
         merged = self._merge_similar(similarity_threshold)
-
-        # Phase 6: Adaptive Prune
         pruned_anchors = self._prune_anchors(retention_threshold)
         ghosts_created = self._ghost_count
         pruned_edges = self._prune_edges(edge_prune_threshold)
-
-        # Phase 7: Bridge
         bridges = self._bridge_distant()
-
-        # Phase 8: Hebbian Update
         self._hebbian_update()
-
-        # Phase 9: Synaptic Homeostasis
         self._synaptic_homeostasis()
-
-        # Post-cycle: update cortical index
         self._refresh_cortical_index()
 
         stats_after = self.graph.stats()
         elapsed = time.time() - started
 
-        result = {
+        return {
             "cycle": self._cycle_count,
             "duration_seconds": round(elapsed, 2),
             "merged": merged,
@@ -89,30 +77,56 @@ class SleepCycle:
             "stats_after": stats_after,
             "log": self.log,
         }
-        return result
 
     _ghost_count = 0
 
-    # ── Phase 1: SWR Replay ─────────────────────────────
+    # ── Phase 1: Prioritized SWR Replay ──────────────────
 
     def _swr_replay(self, recent: list[Anchor], threshold: float) -> None:
-        """Sharp-wave ripple replay: compressed (~20×) replay of recent anchors.
+        """Prioritized experience replay — like RL's PER but biologically motivated.
 
-        During SWRs, the hippocampus replays recent experiences in compressed
-        time. Not all memories are replayed equally — those with higher
-        emotional valence and surprise are prioritized.
+        Priority = weighted combination of:
+          |emotional_valence| × 0.25  — emotional salience
+          surprise × 0.25              — novelty (unexpected = needs consolidation)
+          retrieval frequency × 0.20   — how often accessed
+          graph centrality × 0.15      — hub position in the graph
+          |1 - stability| × 0.15       — unresolved / still-labile memories
         """
-        # Prioritize: high emotion, high surprise, high importance
-        prioritized = sorted(recent, key=lambda a: (
-            abs(a.vector.emotional_valence) * 0.4
-            + a.vector.surprise * 0.35
-            + a.vector.importance * 0.25
-        ), reverse=True)
+        for anchor in recent:
+            centrality = len(self.graph._adjacency.get(anchor.id, set()))
+            centrality_norm = min(1.0, centrality / max(1, len(self.graph.anchors)))
+
+            anchor._replay_priority = (
+                abs(anchor.vector.emotional_valence) * 0.25
+                + anchor.vector.surprise * 0.25
+                + anchor.vector.frequency * 0.20
+                + centrality_norm * 0.15
+                + abs(1.0 - anchor.vector.stability) * 0.15
+            )
+
+        prioritized = sorted(recent, key=lambda a: a._replay_priority, reverse=True)
+
+        # Stochastic sampling: top 50% always replayed, rest sampled by priority
+        top_half = max(1, len(prioritized) // 2)
+        guaranteed = prioritized[:top_half]
+        remaining = prioritized[top_half:]
+        if remaining:
+            import random
+            weights = [a._replay_priority for a in remaining]
+            total_w = sum(weights)
+            if total_w > 0:
+                probs = [w / total_w for w in weights]
+                sample_count = max(1, len(remaining) // 3)
+                sampled = random.choices(remaining, weights=probs, k=sample_count)
+                prioritized = guaranteed + sampled
+            else:
+                prioritized = guaranteed
+
+        embedder = self._get_embedder()
 
         for anchor in prioritized:
             existing = self.graph.anchors.get(anchor.id)
             if existing:
-                # Reactivation strengthens existing
                 existing.replay_count += 1
                 existing.activate()
                 existing.vector.importance = (
@@ -121,37 +135,38 @@ class SleepCycle:
                 existing.vector.surprise = max(existing.vector.surprise, anchor.vector.surprise)
                 existing.tags = list(set(existing.tags + anchor.tags))
             else:
+                # Ensure embedding for new anchors
+                if not anchor.embedding:
+                    anchor.embedding = embedder.encode(anchor.text)
                 self.graph.add_anchor(anchor)
 
-            # Connect to similar existing anchors
+            # Connect using real embedding similarity (not bigrams)
+            anchor_emb = existing.embedding if existing else anchor.embedding
+            if not anchor_emb:
+                anchor_emb = embedder.encode(anchor.text)
+
             for other_id, other in self.graph.anchors.items():
                 if other_id == anchor.id:
                     continue
-                overlap = self._text_overlap(anchor.text, other.text)
-                if overlap > threshold:
+                if not other.embedding:
+                    continue
+                sim = self._embedding_similarity(anchor_emb, other.embedding)
+                if sim > threshold:
                     edge_type = self._infer_edge_type(anchor, other)
-                    # Higher weight for emotionally-charged connections
-                    weight = overlap * (1.0 + 0.3 * abs(anchor.vector.emotional_valence))
+                    weight = sim * (1.0 + 0.3 * abs(anchor.vector.emotional_valence))
                     self.graph.add_edge(anchor.id, other_id,
                                         weight=min(1.0, weight),
                                         edge_type=edge_type)
 
         self.log.append(f"SWR Replay: replayed {len(prioritized)} anchors "
-                        f"(compression ~{max(1, len(prioritized)//3)}:1)")
+                        f"(priority-based sampling, compression ~{max(1, len(recent)//3)}:1)")
 
     # ── Phase 2: Systems Consolidation ──────────────────
 
     def _systems_consolidation(self) -> None:
-        """Gradual transfer from hippocampal to cortical storage.
-
-        Each replay during sleep reduces hippocampal dependency.
-        Well-consolidated memories can be retrieved directly (cortical lookup)
-        without needing graph traversal.
-        """
-        TAU = 20.0  # consolidation time constant (cycles)
+        TAU = 20.0
 
         for anchor in self.graph.anchors.values():
-            # Consolidation driven by replay count
             replay_factor = anchor.replay_count / max(1, self._cycle_count)
             anchor.vector.hippocampal_dependency = math.exp(
                 -replay_factor * self._cycle_count / TAU
@@ -159,15 +174,11 @@ class SleepCycle:
             anchor.vector.hippocampal_dependency = max(0.05,
                 anchor.vector.hippocampal_dependency)
 
-            # As consolidation progresses:
             if anchor.is_cortical:
-                # Semanticization: gradually simplify text toward gist
                 if anchor.vector.stability > 0.8 and len(anchor.text) > 100:
-                    # Keep first sentence (usually the core statement)
                     sentences = anchor.text.replace('！', '。').replace('？', '。').split('。')
                     anchor.text = sentences[0].strip()[:200]
 
-                # Weaken episodic edges, strengthen semantic ones
                 for neighbor in self.graph._adjacency.get(anchor.id, set()):
                     key = self.graph._key(anchor.id, neighbor)
                     edge = self.graph.edges.get(key)
@@ -177,7 +188,6 @@ class SleepCycle:
                         elif edge.edge_type in ("topical", "causal"):
                             edge.strengthen(0.01)
 
-            # Stability increases with consolidation
             anchor.vector.stability = min(1.0,
                 1.0 - 0.9 * anchor.vector.hippocampal_dependency)
 
@@ -188,19 +198,12 @@ class SleepCycle:
     # ── Phase 3: Emotional Stripping ────────────────────
 
     def _emotional_stripping(self) -> None:
-        """Decouple emotional charge from informational content.
-
-        Adaptive: you retain that the snake was dangerous without
-        re-experiencing the full fear response. Emotional valence decays
-        but importance is preserved (the lesson remains).
-        """
-        DECAY = 0.75  # per sleep cycle
+        DECAY = 0.75
 
         for anchor in self.graph.anchors.values():
             if anchor.vector.stability > 0.5:
                 old_valence = anchor.vector.emotional_valence
                 anchor.vector.emotional_valence *= DECAY
-                # Preserve importance: "this mattered" persists
                 anchor.vector.importance = max(
                     anchor.vector.importance * 0.97,
                     abs(old_valence) * 0.25 + 0.15
@@ -211,16 +214,15 @@ class SleepCycle:
     # ── Phase 4: Schema Extraction ──────────────────────
 
     def _schema_extraction(self) -> int:
-        """Extract abstract schemas from constellations with enough instances.
+        """Extract abstract schemas using real embedding similarity.
 
-        Schemas capture the invariant structure across related episodes.
-        They guide encoding of new similar experiences (assimilation).
+        Groups anchors by tag, then validates structural similarity via
+        embedding cosine distance (not bigram overlap).
         """
         MIN_INSTANCES = 3
-        MIN_SIMILARITY = 0.7
+        MIN_SIMILARITY = 0.6
         formed = 0
 
-        # Group anchors by tag overlap
         tag_groups: dict[str, list[Anchor]] = defaultdict(list)
         for anchor in self.graph.anchors.values():
             for tag in anchor.tags:
@@ -230,7 +232,6 @@ class SleepCycle:
             if len(group) < MIN_INSTANCES:
                 continue
 
-            # Check if already covered by a schema
             existing_schema = any(
                 s for s in self.graph.schemas.values()
                 if tag in s.tags
@@ -238,22 +239,24 @@ class SleepCycle:
             if existing_schema:
                 continue
 
-            # Try to extract a common template
-            # For now: take the most stable anchor's text as template
             sorted_group = sorted(group, key=lambda a: -a.vector.stability)
-            template_anchor = sorted_group[0]
 
-            # Check similarity within group
+            # Use embedding similarity for schema validation
             similarities = []
-            for i, a in enumerate(sorted_group[:MIN_INSTANCES]):
-                for b in sorted_group[i+1:MIN_INSTANCES]:
-                    sim = self._text_overlap(a.text, b.text)
+            for i in range(min(MIN_INSTANCES, len(sorted_group))):
+                for j in range(i + 1, min(MIN_INSTANCES, len(sorted_group))):
+                    if sorted_group[i].embedding and sorted_group[j].embedding:
+                        sim = self._embedding_similarity(
+                            sorted_group[i].embedding, sorted_group[j].embedding)
+                    else:
+                        sim = 0.0
                     similarities.append(sim)
 
             avg_sim = sum(similarities) / max(1, len(similarities))
             if avg_sim < MIN_SIMILARITY:
                 continue
 
+            template_anchor = sorted_group[0]
             schema_id = f"schema_{tag}_{self._cycle_count}"
             schema = Schema(
                 id=schema_id,
@@ -266,18 +269,17 @@ class SleepCycle:
             self.graph.schemas[schema_id] = schema
             formed += 1
 
-            # Tag instances with schema reference
             for a in sorted_group[:MIN_INSTANCES]:
                 a.schema_ref = schema_id
 
         if formed:
-            self.log.append(f"Schema Extraction: formed {formed} new schemas")
+            self.log.append(f"Schema Extraction: formed {formed} new schemas (embedding-based)")
         return formed
 
     # ── Phase 5: Merge Similar ──────────────────────────
 
     def _merge_similar(self, threshold: float) -> int:
-        """Merge near-duplicate anchors. Older becomes core, newer enriches it."""
+        """Merge near-duplicate anchors using embedding similarity."""
         merged = 0
         ids = list(self.graph.anchors.keys())
         processed: set[str] = set()
@@ -290,14 +292,19 @@ class SleepCycle:
                     continue
                 a = self.graph.anchors[aid_a]
                 b = self.graph.anchors[aid_b]
-                overlap = self._text_overlap(a.text, b.text)
+
+                # Prefer embedding similarity, fall back to bigrams
+                if a.embedding and b.embedding:
+                    overlap = self._embedding_similarity(a.embedding, b.embedding)
+                else:
+                    overlap = self._text_overlap(a.text, b.text)
+
                 if overlap > threshold:
                     core, variant = (a, b) if a.created_at < b.created_at else (b, a)
                     core.vector.importance = max(core.vector.importance, variant.vector.importance)
                     core.vector.frequency = (core.vector.frequency + variant.vector.frequency) / 2
                     core.vector.stability = min(1.0, core.vector.stability + 0.15)
                     core.tags = list(set(core.tags + variant.tags))
-                    # Redirect edges from variant to core
                     for neighbor in list(self.graph._adjacency.get(variant.id, set())):
                         k = self.graph._key(variant.id, neighbor)
                         old = self.graph.edges.pop(k, None)
@@ -313,7 +320,6 @@ class SleepCycle:
                     self.graph.remove_anchor(variant.id)
                     processed.add(variant.id)
                     merged += 1
-                    # If the outer-loop anchor was the one removed, skip remaining inner
                     if variant is a:
                         break
 
@@ -324,12 +330,7 @@ class SleepCycle:
     # ── Phase 6: Adaptive Prune ─────────────────────────
 
     def _prune_anchors(self, threshold: float) -> list[str]:
-        """Remove anchors below retention threshold, but leave ghosts.
-
-        Ghosts enable the savings effect: if similar content reappears,
-        relearning is faster than original learning.
-        """
-        # Check contradictions — weaker anchor in contradiction pairs gets penalty
+        """Interference-aware pruning: contradiction penalties + ghosts."""
         contradictions = self.graph.find_contradictions()
         penalties: dict[str, float] = defaultdict(float)
         for aid_a, aid_b, _ in contradictions:
@@ -354,11 +355,9 @@ class SleepCycle:
                 self.graph.remove_anchor(aid)
                 self._ghost_count += 1
 
-        # Also prune old ghosts (beyond revival)
         now = time.time()
         stale_ghosts = []
         for gid, ghost in self.graph.ghosts.items():
-            # Ghosts older than 30 days with no revivals get removed
             if (now - ghost.pruned_at) > 30 * 86400 and ghost.revival_count == 0:
                 stale_ghosts.append(gid)
         for gid in stale_ghosts:
@@ -384,7 +383,6 @@ class SleepCycle:
     # ── Phase 7: Bridge Distant ─────────────────────────
 
     def _bridge_distant(self) -> int:
-        """Discover surprising connections between distant constellations."""
         from .resonance import Resonator
         resonator = Resonator(self.graph)
 
@@ -418,7 +416,6 @@ class SleepCycle:
     # ── Phase 8: Hebbian Update ─────────────────────────
 
     def _hebbian_update(self) -> None:
-        """Strengthen recently co-activated edges, weaken dormant ones."""
         now = time.time()
         for edge in self.graph.edges.values():
             hours = (now - edge.last_activated_at) / 3600
@@ -431,28 +428,18 @@ class SleepCycle:
     # ── Phase 9: Synaptic Homeostasis ───────────────────
 
     def _synaptic_homeostasis(self) -> None:
-        """Global downscaling: keep only the strongest connections.
-
-        During sleep, overall synaptic weights are downscaled to maintain
-        energy efficiency. Only the strongest weights survive. This prevents
-        saturation and maintains the dynamic range for new learning.
-        """
         if not self.graph.edges:
             return
 
-        # Compute mean weight
         weights = [e.weight for e in self.graph.edges.values()]
         mean_w = sum(weights) / len(weights)
 
-        # Downscale proportional to mean
-        # Target: keep mean around 0.3
         target_mean = 0.3
         if mean_w > target_mean:
             scale = target_mean / mean_w
             for edge in self.graph.edges.values():
-                edge.weight *= (0.5 + 0.5 * scale)  # partial scaling
+                edge.weight *= (0.5 + 0.5 * scale)
 
-        # Global decay on all anchors
         for anchor in self.graph.anchors.values():
             hours = (time.time() - anchor.last_activated_at) / 3600
             anchor.decay(hours)
@@ -460,15 +447,36 @@ class SleepCycle:
     # ── Helpers ─────────────────────────────────────────
 
     def _refresh_cortical_index(self) -> None:
-        """Update the cortical index after consolidation."""
         self.graph.cortical_index = [
             (a.embedding, a.id)
             for a in self.graph.anchors.values()
             if a.embedding and a.is_cortical
         ]
+        # Sync ANN index
+        ann = self.graph._get_ann_index() if self.graph._ann_index is not None else None
+        if ann is not None and ann.size != len(self.graph.anchors):
+            ann.clear()
+            for a in self.graph.anchors.values():
+                if a.embedding:
+                    ann.add(a.id, a.embedding)
+            ann.rebuild()
+
+    @staticmethod
+    def _embedding_similarity(a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two embeddings."""
+        min_len = min(len(a), len(b))
+        if min_len == 0:
+            return 0.0
+        dot = sum(a[i] * b[i] for i in range(min_len))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(x * x for x in b))
+        if na < 1e-8 or nb < 1e-8:
+            return 0.0
+        return dot / (na * nb)
 
     @staticmethod
     def _text_overlap(a: str, b: str) -> float:
+        """Fallback: character bigram Jaccard (only when embeddings unavailable)."""
         def bigrams(s):
             return {s[i:i + 2] for i in range(len(s) - 1)}
         ba, bb = bigrams(a), bigrams(b)

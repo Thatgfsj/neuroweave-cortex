@@ -1,10 +1,14 @@
-"""Pluggable retrieval backends — v0.3 decoupled retrieval.
+"""Pluggable retrieval backends — v0.4 real mechanisms.
 
-Abstract Retriever base with two concrete implementations:
-- OscillationResonanceRetriever: phase-locking resonance (innovative)
-- VectorSimilarityRetriever: cosine similarity (baseline)
+Two concrete retrievers:
+- OscillationResonanceRetriever: phase-locking resonance with real embedding-derived phases
+- VectorSimilarityRetriever: cosine similarity with ANN-indexed sub-linear lookup
 
-This allows empirical validation: is oscillation resonance actually better?
+Phase derivation is now meaningful:
+  theta_phase = f(timestamp, importance, emotional_valence)
+  driving_phase = f(embedding principal angles)
+
+No more hash-based random phases.
 """
 
 from __future__ import annotations
@@ -23,7 +27,6 @@ from .graph import StarGraph, Constellation
 
 @dataclass
 class RetrievalResult:
-    """Standardized retrieval result for comparison."""
     constellations: list[Constellation]
     latency_ms: float
     method: str
@@ -31,8 +34,6 @@ class RetrievalResult:
 
 
 class Retriever(ABC):
-    """Abstract retrieval interface."""
-
     def __init__(self, graph: StarGraph):
         self.graph = graph
 
@@ -48,9 +49,10 @@ class Retriever(ABC):
 
 
 class VectorSimilarityRetriever(Retriever):
-    """Baseline: cosine similarity between query embedding and anchor embeddings.
+    """Cosine similarity with ANN-indexed sub-linear retrieval.
 
-    This is what Mem0, vector DBs, and most RAG systems use.
+    Uses the graph's ANNIndex when embeddings are available, falling
+    back to linear scan for cold start / small graphs.
     """
 
     @property
@@ -62,22 +64,38 @@ class VectorSimilarityRetriever(Retriever):
         t0 = time.perf_counter()
 
         if not embedding:
-            embedding = self._simple_embed(query)
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            embedding = embedder.encode(query)
 
-        # Score all anchors by cosine similarity
-        scored = []
-        for anchor in self.graph.anchors.values():
-            if anchor.embedding:
-                sim = self._cosine_sim(embedding, anchor.embedding)
-                scored.append((sim * anchor.retention_score, anchor))
-            else:
-                # Fallback: text overlap
-                sim = self._text_overlap(query, anchor.text)
-                scored.append((sim * anchor.retention_score, anchor))
+        ann = self.graph._get_ann_index() if self.graph._ann_index is not None else None
 
-        scored.sort(key=lambda x: -x[0])
+        if ann is not None and ann.size > 0:
+            if not self.graph._ids_in_ann_sync():
+                ann.clear()
+                for a in self.graph.anchors.values():
+                    if a.embedding:
+                        ann.add(a.id, a.embedding)
+                ann.rebuild()
+            results = ann.query(embedding, k=top_k * 3)
+            scored = []
+            for aid, sim in results:
+                if aid in self.graph.anchors:
+                    anchor = self.graph.anchors[aid]
+                    scored.append((sim * anchor.retention_score, anchor))
+            scored.sort(key=lambda x: -x[0])
+        else:
+            # Fallback linear scan
+            scored = []
+            for anchor in self.graph.anchors.values():
+                if anchor.embedding:
+                    sim = self._cosine_sim(embedding, anchor.embedding)
+                    scored.append((sim * anchor.retention_score, anchor))
+                else:
+                    sim = self._text_overlap(query, anchor.text)
+                    scored.append((sim * anchor.retention_score, anchor))
+            scored.sort(key=lambda x: -x[0])
 
-        # Build pseudo-constellations from top anchors
         constellations = []
         for i in range(min(top_k, len(scored))):
             score, anchor = scored[i]
@@ -110,71 +128,70 @@ class VectorSimilarityRetriever(Retriever):
             return 0.0
         return len(ba & bb) / len(ba | bb)
 
-    @staticmethod
-    def _simple_embed(text: str, dim: int = 64) -> list[float]:
-        """Deterministic pseudo-embedding from text (no model needed)."""
-        h = hash(text)
-        np.random.seed(abs(h) % (2**31))
-        vec = np.random.randn(dim).tolist()
-        norm = math.sqrt(sum(x**2 for x in vec))
-        return [x / norm for x in vec]
-
 
 class OscillationResonanceRetriever(Retriever):
-    """Phase-locking resonance retrieval.
+    """Phase-locking resonance retrieval with meaningful phase derivation.
 
     Mathematical definition:
-      Res(q, m) = |z_q · z_m| / (||z_q|| ||z_m||) × cos(Δφ)
+      Res(q, m) = (1-w) × |z_q · z_m| / (||z_q|| ||z_m||) + w × cos(Δφ)
 
-    where z_q, z_m are complex phasors derived from query and anchor,
-    and Δφ is the phase difference.
+    Phase is now derived from real embedding structure, not hash():
+      - Query phase: principal angular components of embedding
+      - Anchor phase: f(timestamp, importance, emotional_valence)
+      - Frequency: f(importance, emotional_valence, text_length)
 
-    This captures BOTH semantic similarity (phasor magnitude alignment)
-    AND sequence/context position (phase alignment).
+    This captures BOTH:
+      - Semantic similarity (phasor magnitude alignment via embeddings)
+      - Temporal/emotional context position (phase alignment via meaningful φ)
     """
 
     def __init__(self, graph: StarGraph, spread_steps: int = 3,
                  phase_weight: float = 0.3):
         super().__init__(graph)
         self.spread_steps = spread_steps
-        self.phase_weight = phase_weight  # how much phase matters vs magnitude
+        self.phase_weight = phase_weight
 
     @property
     def name(self) -> str:
         return "OscillationResonance"
 
     def _to_phasor(self, anchor: Anchor) -> complex:
-        """Convert anchor's oscillator state to a complex phasor.
-
-        Magnitude = retention_score (how "loud" this memory is)
-        Phase = oscillator's natural phase offset (where it is in the cycle)
-        """
         mag = anchor.retention_score
         phase = anchor.oscillator.phase_offset
         return mag * complex(math.cos(phase), math.sin(phase))
 
     def _derive_driving_phasor(self, query: str,
-                                embedding: list[float] | None = None) -> complex:
-        """Derive the driving oscillation from the query."""
-        if embedding:
-            # Use embedding statistics
+                                embedding: list[float] | None = None) -> tuple[complex, float]:
+        """Derive driving phasor from query using real embedding statistics.
+
+        No more hash() — uses embedding principal angles for phase and
+        spectral centroid for frequency.
+        """
+        if embedding and len(embedding) >= 4:
             arr = np.array(embedding)
-            mag = float(np.std(arr)) + 0.3  # variance → magnitude
+            var = float(np.var(arr))
+            mag = 0.4 + 0.6 * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
             angles = np.arctan2(arr[1::2], arr[::2])
             phase = float(np.mean(angles)) % (2 * math.pi)
+            spectrum = np.abs(arr)
+            if np.sum(spectrum) > 1e-8:
+                centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
+                freq = 0.3 + 0.7 * (centroid / len(spectrum))
+            else:
+                freq = 0.5
         else:
-            # Deterministic from text hash
-            h = abs(hash(query))
-            mag = 0.5 + 0.5 * ((h % 1000) / 1000.0)
-            phase = ((h // 1000) % 6283) / 1000.0
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            emb = embedder.encode(query)
+            return self._derive_driving_phasor(query, emb)
 
-        return mag * complex(math.cos(phase), math.sin(phase))
+        phasor = mag * complex(math.cos(phase), math.sin(phase))
+        return (phasor, freq)
 
     def _resonance_score(self, query_phasor: complex, anchor: Anchor) -> float:
-        """Compute Res(q, m) = |z_q · z_m| / (||z_q|| ||z_m||) × cos(Δφ)."""
+        """Compute Res(q, m) = (1-w) × mag_sim + w × cos(Δφ)."""
         anchor_phasor = self._to_phasor(anchor)
 
-        # Phasor dot product magnitude (normalized)
         dot = abs(query_phasor.real * anchor_phasor.real +
                   query_phasor.imag * anchor_phasor.imag)
         mag_product = abs(query_phasor) * abs(anchor_phasor)
@@ -182,7 +199,6 @@ class OscillationResonanceRetriever(Retriever):
             return 0.0
         mag_sim = dot / mag_product
 
-        # Phase difference
         query_phase = math.atan2(query_phasor.imag, query_phasor.real)
         anchor_phase = math.atan2(anchor_phasor.imag, anchor_phasor.real)
         phase_diff = abs(query_phase - anchor_phase)
@@ -190,45 +206,45 @@ class OscillationResonanceRetriever(Retriever):
             phase_diff = 2 * math.pi - phase_diff
         phase_sim = math.cos(phase_diff)
 
-        # Combined: magnitude similarity + phase alignment (clamped to [0,1])
         return min(1.0, (1.0 - self.phase_weight) * mag_sim + self.phase_weight * max(0.0, phase_sim))
 
     def retrieve(self, query: str, embedding: list[float] | None = None,
                  top_k: int = 3) -> RetrievalResult:
         t0 = time.perf_counter()
 
-        # Step 1: Derive driving phasor from query
-        driving = self._derive_driving_phasor(query, embedding)
+        if not embedding:
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            embedding = embedder.encode(query)
 
-        # Step 2: Compute resonance for all anchors
+        driving_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
+
+        # Compute resonance for all anchors
         resonance_map: dict[str, float] = {}
         for anchor in self.graph.anchors.values():
-            score = self._resonance_score(driving, anchor)
+            score = self._resonance_score(driving_phasor, anchor)
             if score > 0.05:
                 resonance_map[anchor.id] = score
 
-        # Step 3: Also check cortical index for consolidated memories
-        if embedding:
-            cortical = self.graph.cortical_lookup(embedding, top_k=10)
-            for aid, sim in cortical:
-                if aid not in resonance_map:
-                    resonance_map[aid] = sim * 0.7  # cortical hits weighted lower
+        # Also check cortical index
+        cortical = self.graph.cortical_lookup(embedding, top_k=10)
+        for aid, sim in cortical:
+            if aid not in resonance_map:
+                resonance_map[aid] = sim * 0.7
 
-        # Step 4: Spread activation from top seeds
+        # Spread activation from top seeds
         sorted_seeds = sorted(resonance_map.items(), key=lambda x: -x[1])[:top_k * 2]
         activation = self.graph.spread_activation(
             [aid for aid, _ in sorted_seeds],
             steps=self.spread_steps,
         )
 
-        # Step 5: Merge resonance + activation
         combined: dict[str, float] = {}
         for aid in set(list(resonance_map.keys()) + list(activation.keys())):
             r = resonance_map.get(aid, 0.0)
             a = activation.get(aid, 0.0)
             combined[aid] = 0.6 * r + 0.4 * a
 
-        # Step 6: Build constellations from top activated anchors
         sorted_anchors = sorted(combined.items(), key=lambda x: -x[1])
 
         constellations = []
@@ -241,7 +257,6 @@ class OscillationResonanceRetriever(Retriever):
                     for a in c.anchors:
                         seen.add(a.id)
 
-        # Deduplicate and limit
         unique = []
         seen_c: set[str] = set()
         for c in constellations:
@@ -265,10 +280,6 @@ def compare_retrievers(graph: StarGraph, queries: list[str],
                        embeddings: list[list[float]] | None = None,
                        ground_truth: list[list[str]] | None = None
                        ) -> list[dict]:
-    """Run both retrievers on the same queries and compare results.
-
-    Returns comparison metrics for each query.
-    """
     vec_ret = VectorSimilarityRetriever(graph)
     osc_ret = OscillationResonanceRetriever(graph)
 
@@ -295,7 +306,6 @@ def compare_retrievers(graph: StarGraph, queries: list[str],
         }
 
         if gt:
-            # Compute recall@k for each method
             comparison["vector_similarity"]["recall@3"] = _recall_at_k(
                 vec_result, gt, k=3)
             comparison["oscillation_resonance"]["recall@3"] = _recall_at_k(
@@ -307,7 +317,6 @@ def compare_retrievers(graph: StarGraph, queries: list[str],
 
 
 def _recall_at_k(result: RetrievalResult, ground_truth_ids: list[str], k: int = 3) -> float:
-    """Compute recall@k: fraction of ground truth found in top k results."""
     retrieved_ids = set()
     for c in result.constellations[:k]:
         for a in c.anchors:
