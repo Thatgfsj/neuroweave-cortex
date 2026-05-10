@@ -87,12 +87,12 @@ from star_graph.storage import Storage
 graph = StarGraph()
 
 # Create anchors with emotional tags
-a1 = Anchor.create("Discussed Genette's narrative layering theory",
-                    tags=["narratology", "literature"], emotional_valence=0.6)
-a2 = Anchor.create("User prefers Python for crawlers, Rust for large programs",
+a1 = Anchor.create("Discussed microservices architecture and deployment patterns",
+                    tags=["architecture", "backend"], emotional_valence=0.6)
+a2 = Anchor.create("User prefers Python for automation, Rust for performance-critical work",
                     tags=["preferences", "tech-stack"])
-a3 = Anchor.create("Applied narrative levels to Mo Yan's Carpenter and Dog analysis",
-                    tags=["narratology", "thesis"], emotional_valence=0.8)
+a3 = Anchor.create("Decided to use Postgres with connection pooling for the API service",
+                    tags=["architecture", "database"], emotional_valence=0.8)
 graph.add_anchor(a1)
 graph.add_anchor(a2)
 graph.add_anchor(a3)
@@ -102,13 +102,13 @@ graph.add_edge(a1.id, a3.id, weight=0.9, edge_type="topical")
 
 # Resonance retrieval (hippocampal pathway)
 resonator = Resonator(graph)
-constellations = resonator.resonate("莫言叙事层次分析")
+constellations = resonator.resonate("microservices deployment architecture")
 for c in constellations:
     for a in c.anchors:
         print(f"[{a.retention_score:.2f}] {a.text}")
 
 # Predictive retrieval with action decision
-constellation, action = resonator.predictive_retrieve("莫言小说中的叙事者")
+constellation, action = resonator.predictive_retrieve("database connection pooling for APIs")
 print(f"Action: {action}")  # 'confirm', 'update', or 'novel'
 
 # Run 9-phase sleep cycle
@@ -125,8 +125,8 @@ store.save(graph)
 ## CLI Commands
 
 ```bash
-sg-add "Discussed Genette's narrative layering" --tags narratology --emotional 0.6
-sg-query "莫言小说叙事结构"
+sg-add "Discussed microservices deployment patterns" --tags architecture --emotional 0.6
+sg-query "database connection pooling best practices"
 sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
 ```
