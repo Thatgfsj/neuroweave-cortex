@@ -1,35 +1,76 @@
-# Star Graph Memory
+# Star Graph Memory · 星图记忆
 
-A hippocampal-inspired long-term memory system for AI agents. Conversations are compressed into **anchor points** (≤200 chars) connected in a navigable **star graph**. Consolidation happens during **sleep cycles** — replay, merge, prune, and bridge.
+A hippocampal-inspired long-term memory system for AI agents.
 
-## Core Concepts
+Conversations are compressed into **anchor points** (≤200 chars) connected in a navigable **star graph**. Retrieval uses **oscillatory phase-locking resonance** — not keyword search. Consolidation happens during **9-phase sleep cycles**.
 
-### Anchor Points
-Each anchor is a ≤200-character summary of a conversation turn or session, augmented with a dynamic vector (importance, frequency, recency, emotional valence, stability, surprise). Anchors are not static records — they evolve as they're used or forgotten.
+## Theory
 
-### Star Graph
-Anchors are nodes. Edges are typed (temporal, topical, causal, bridge) and weighted. Connected subgraphs form **constellations** — linked strings of related memories that are retrieved together, not as isolated facts.
+The system is grounded in seven neuroscience principles:
 
-### Resonance (Retrieval)
-Instead of keyword search or vector similarity, memories are found by **resonance**: the current context activates seed anchors, spreading activation propagates through the graph, and the constellation that lights up is what you recall. This mirrors how a smell triggers not just one memory but an entire scene.
+| Principle | Mechanism |
+|-----------|-----------|
+| **Sharp-Wave Ripples** | Compressed (~15×) replay of prioritized recent memories during sleep |
+| **Memory Reconsolidation** | Prediction error gates: confirm / update / create-new |
+| **Phase Precession** | Theta-gamma oscillatory resonance encodes sequences in phase offsets |
+| **Schema Formation** | Abstraction of common patterns across episodes (mPFC analog) |
+| **Predictive Coding** | Free energy minimization unifies encoding, retrieval, and sleep |
+| **Emotional Modulation** | Two-factor tagging (NE+CORT) boosts encoding; REM strips charge |
+| **Adaptive Forgetting** | Precision-weighted decay; ghosts enable savings effect on relearning |
 
-### Sleep (Consolidation)
-Nightly cycles that mimic hippocampal replay:
-1. **Replay** — Recent anchors are replayed against existing memory
-2. **Merge** — Near-duplicate anchors fuse into core+variant structures
-3. **Prune** — Weak anchors and dormant edges are removed
-4. **Bridge** — Surprising connections between distant constellations are discovered
-5. **Hebbian update** — Co-activated edges strengthen; dormant ones fade
+## Architecture
+
+```
+                  ┌─────────────────────────┐
+                  │   New Experience / Query  │
+                  └───────────┬─────────────┘
+                              │
+                  ┌───────────▼─────────────┐
+                  │   RESONANCE ENGINE        │
+                  │   - Oscillatory phase-    │
+                  │     locking (hippocampal) │
+                  │   - Cortical direct       │
+                  │     lookup                │
+                  │   - Prediction error      │
+                  │     minimization          │
+                  └───────────┬─────────────┘
+                              │
+            ┌─────────────────┼─────────────────┐
+            │                 │                 │
+   ┌────────▼──────┐  ┌──────▼──────┐  ┌───────▼──────┐
+   │  CONFIRM       │  │  UPDATE      │  │  NOVEL        │
+   │  Strengthen    │  │  Reconsolid. │  │  New Anchor   │
+   └────────┬──────┘  └──────┬──────┘  └───────┬──────┘
+            │                 │                 │
+            └─────────────────┼─────────────────┘
+                              │
+                  ┌───────────▼─────────────┐
+                  │   STAR GRAPH              │
+                  │   - Anchors + Oscillators │
+                  │   - Ghosts (savings)      │
+                  │   - Schemas               │
+                  │   - Cortical Index        │
+                  └───────────┬─────────────┘
+                              │
+                  ┌───────────▼─────────────┐
+                  │   9-PHASE SLEEP ENGINE    │
+                  │   1. SWR Replay           │
+                  │   2. Systems Consolid.    │
+                  │   3. Emotional Stripping  │
+                  │   4. Schema Extraction    │
+                  │   5. Merge Similar        │
+                  │   6. Adaptive Prune+Ghosts│
+                  │   7. Bridge Constellations│
+                  │   8. Hebbian Update       │
+                  │   9. Synaptic Homeostasis │
+                  └───────────────────────────┘
+```
 
 ## Installation
 
 ```bash
 pip install star-graph-memory
-```
-
-Or from source:
-
-```bash
+# or from source:
 git clone https://github.com/Thatgfsj/star-graph-memory.git
 cd star-graph-memory
 pip install -e .
@@ -43,11 +84,15 @@ from star_graph.sleep import SleepCycle
 from star_graph.resonance import Resonator
 from star_graph.storage import Storage
 
-# Create a graph and add anchors
 graph = StarGraph()
-a1 = Anchor.create("Discussed narrative layering theory with user — Genette's framework")
-a2 = Anchor.create("User prefers Python for crawlers, Rust for large programs")
-a3 = Anchor.create("Applied Genette's narrative levels to Mo Yan's short story analysis")
+
+# Create anchors with emotional tags
+a1 = Anchor.create("Discussed Genette's narrative layering theory",
+                    tags=["narratology", "literature"], emotional_valence=0.6)
+a2 = Anchor.create("User prefers Python for crawlers, Rust for large programs",
+                    tags=["preferences", "tech-stack"])
+a3 = Anchor.create("Applied narrative levels to Mo Yan's Carpenter and Dog analysis",
+                    tags=["narratology", "thesis"], emotional_valence=0.8)
 graph.add_anchor(a1)
 graph.add_anchor(a2)
 graph.add_anchor(a3)
@@ -55,72 +100,54 @@ graph.add_anchor(a3)
 # Connect related anchors
 graph.add_edge(a1.id, a3.id, weight=0.9, edge_type="topical")
 
-# Retrieve by resonance
+# Resonance retrieval (hippocampal pathway)
 resonator = Resonator(graph)
-results = resonator.resonate("莫言叙事层次分析")
-for c in results:
-    for anchor in c.anchors:
-        print(f"[{anchor.retention_score:.2f}] {anchor.text}")
+constellations = resonator.resonate("莫言叙事层次分析")
+for c in constellations:
+    for a in c.anchors:
+        print(f"[{a.retention_score:.2f}] {a.text}")
 
-# Run sleep consolidation
+# Predictive retrieval with action decision
+constellation, action = resonator.predictive_retrieve("莫言小说中的叙事者")
+print(f"Action: {action}")  # 'confirm', 'update', or 'novel'
+
+# Run 9-phase sleep cycle
 cycle = SleepCycle(graph)
 result = cycle.run()
-print(result["stats_after"])
+print(f"Merged: {result['merged']}, Pruned: {result['pruned_anchors']}")
+print(f"Ghosts: {result['ghosts_created']}, Schemas: {result['schemas_formed']}")
 
-# Persist
+# Persist (includes ghosts, schemas, cortical index)
 store = Storage()
 store.save(graph)
 ```
 
-## CLI
+## CLI Commands
 
 ```bash
-# Add an anchor
-sg-add "Discussed Genette's narrative layering with user" --tags narratology,literature
-
-# Query by resonance
+sg-add "Discussed Genette's narrative layering" --tags narratology --emotional 0.6
 sg-query "莫言小说叙事结构"
-
-# Trigger sleep cycle
+sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
 ```
 
 ## Sleep Daemon
 
-Install as a scheduled task to run nightly at 2 AM:
-
 ```powershell
-# Windows
+# Install nightly task (2 AM)
 powershell -ExecutionPolicy Bypass -File scripts/install_sleep_task.ps1
-
-# Linux/macOS (cron)
-# 0 2 * * * python /path/to/sleep_daemon.py --mode scheduled
 ```
 
-Or run in idle-watch mode (triggers when user is away):
-
 ```bash
+# Idle-watch mode
 python scripts/sleep_daemon.py --mode idle --idle-threshold 15
 ```
 
-## Architecture
+## Deeper Reading
 
-```
-star_graph/
-├── anchor.py      # Anchor data model + dynamic vector
-├── graph.py       # Star graph: nodes, edges, constellations, spreading activation
-├── resonance.py   # Resonance-based retrieval + bridge scoring
-├── sleep.py       # Sleep cycle: replay → merge → prune → bridge → Hebbian
-├── storage.py     # JSON persistence (swap with SQLite/vector DB for production)
-└── cli.py         # CLI entry points
-scripts/
-├── sleep_daemon.py        # Background sleep daemon
-└── install_sleep_task.ps1  # Windows Task Scheduler installer
-```
+- `docs/research.md` — full theoretical framework and neuroscience references
+- See the research agent's output for literature citations across all seven principles
 
-## Design Principles
+## License
 
-- **Not a database** — Memories are navigated, not queried. Spreading activation over a graph, not SELECT with WHERE
-- **Not a vector store** — Semantic similarity is a bridge-building tool, not the retrieval mechanism. Resonance > cosine similarity
-- **Sleep is maintenance, not downtime** — Like biological sleep, consolidation is when the real work of memory happens
-- **Memories evolve** — An anchor's retention score changes with use. Important memories survive; trivia fades. No manual curation needed
+MIT

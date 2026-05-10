@@ -1,42 +1,38 @@
 """Star graph — nodes (anchors) connected by weighted, typed edges.
 
-The graph supports:
-- Spreading activation for constellation discovery
-- Weighted, typed edges (causal, temporal, topical, personal)
-- Merge operations for similar anchors
-- Prune operations for weak/dormant connections
+v0.2 adds: ghost anchors for savings effect, cortical index for direct
+retrieval, contradiction detection, schema references.
 """
 
 from __future__ import annotations
 
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .anchor import Anchor, AnchorVector
+from .anchor import Anchor, AnchorVector, GhostAnchor
 
 
 @dataclass
 class Edge:
     """A typed, weighted connection between two anchors."""
 
-    source: str          # anchor id
-    target: str          # anchor id
-    weight: float = 0.5  # 0..1
-    edge_type: str = "topical"  # causal, temporal, topical, personal
+    source: str
+    target: str
+    weight: float = 0.5
+    edge_type: str = "topical"  # causal, temporal, topical, personal, revision, bridge
     co_activation_count: int = 0
     created_at: float = field(default_factory=time.time)
     last_activated_at: float = field(default_factory=time.time)
 
     def strengthen(self, delta: float = 0.05) -> None:
-        """Hebbian-like strengthening on co-activation."""
         self.weight = min(1.0, self.weight + delta)
         self.co_activation_count += 1
         self.last_activated_at = time.time()
 
     def weaken(self, delta: float = 0.02) -> None:
-        """Decay when not used."""
         self.weight = max(0.0, self.weight - delta)
 
     @property
@@ -50,11 +46,10 @@ class Constellation:
 
     anchors: list[Anchor]
     edges: list[Edge]
-    label: str = ""  # auto-generated label for the constellation
+    label: str = ""
 
     @property
     def centroid_vector(self) -> AnchorVector:
-        """Average vector of all anchors in this constellation."""
         if not self.anchors:
             return AnchorVector()
         vecs = [a.vector for a in self.anchors]
@@ -72,23 +67,66 @@ class Constellation:
     def total_weight(self) -> float:
         return sum(e.weight for e in self.edges)
 
+    @property
+    def dominant_oscillation(self) -> tuple[float, float]:
+        """The dominant frequency and phase of this constellation."""
+        if not self.anchors:
+            return (0.5, 0.0)
+        freqs = [a.oscillator.natural_frequency for a in self.anchors]
+        phases = [a.oscillator.phase_offset for a in self.anchors]
+        return (
+            sum(freqs) / len(freqs),
+            sum(phases) / len(phases),
+        )
+
+
+@dataclass
+class Schema:
+    """Abstract pattern extracted from multiple related anchors.
+
+    After repeated sleep cycles, common structures across episodes
+    are extracted as schemas. Schemas guide encoding of new memories.
+    """
+
+    id: str
+    template: str                  # abstract pattern description
+    slots: dict[str, str]          # slot_name -> description
+    instance_ids: list[str]        # anchor IDs instantiating this schema
+    confidence: float = 0.0        # 0..1
+    created_at: float = field(default_factory=time.time)
+    tags: list[str] = field(default_factory=list)
+
+    def match(self, text: str, embedding: list[float] | None = None) -> tuple[float, dict]:
+        """Try to match text against this schema. Returns (confidence, slot_values)."""
+        # Simple implementation: check if schema keywords appear
+        template_words = set(self.template.lower().split())
+        text_words = set(text.lower().split())
+        overlap = len(template_words & text_words) / max(1, len(template_words))
+        return overlap, {}
+
 
 class StarGraph:
-    """The core star-graph memory structure."""
+    """The core star-graph memory structure with cortical index and ghosts."""
 
     def __init__(self):
         self.anchors: dict[str, Anchor] = {}
-        self.edges: dict[tuple[str, str], Edge] = {}  # (src, tgt) sorted
+        self.edges: dict[tuple[str, str], Edge] = {}
         self._adjacency: dict[str, set[str]] = defaultdict(set)
+        # v0.2 additions
+        self.ghosts: dict[str, GhostAnchor] = {}
+        self.cortical_index: list[tuple[list[float], str]] = []  # (embedding, anchor_id)
+        self.schemas: dict[str, Schema] = {}
 
     def _key(self, a: str, b: str) -> tuple[str, str]:
-        """Canonical edge key (sorted)."""
         return (a, b) if a < b else (b, a)
 
     # ── CRUD ──────────────────────────────────────────────
 
     def add_anchor(self, anchor: Anchor) -> str:
         self.anchors[anchor.id] = anchor
+        # Add to cortical index if stable enough
+        if anchor.embedding and anchor.vector.stability > 0.5:
+            self.cortical_index.append((anchor.embedding, anchor.id))
         return anchor.id
 
     def add_edge(self, src: str, tgt: str, weight: float = 0.5,
@@ -104,38 +142,27 @@ class StarGraph:
 
     def remove_anchor(self, anchor_id: str) -> None:
         if anchor_id in self.anchors:
-            del self.anchors[anchor_id]
-        # Remove all edges involving this anchor
-        to_remove = []
-        for (a, b) in self.edges:
-            if a == anchor_id or b == anchor_id:
-                to_remove.append((a, b))
+            self.anchors.pop(anchor_id)
+        to_remove = [(a, b) for (a, b) in self.edges if a == anchor_id or b == anchor_id]
         for key in to_remove:
-            del self.edges[key]
-        if anchor_id in self._adjacency:
-            del self._adjacency[anchor_id]
+            self.edges.pop(key, None)
+        self._adjacency.pop(anchor_id, None)
         for adj in self._adjacency.values():
             adj.discard(anchor_id)
+        self.cortical_index = [(e, aid) for e, aid in self.cortical_index if aid != anchor_id]
 
     # ── Navigation / Resonance ────────────────────────────
 
     def neighbors(self, anchor_id: str, min_weight: float = 0.0) -> list[tuple[str, float]]:
-        """Get neighbors with edge weights."""
         result = []
         for other in self._adjacency.get(anchor_id, set()):
-            key = self._key(anchor_id, other)
-            edge = self.edges.get(key)
+            edge = self.edges.get(self._key(anchor_id, other))
             if edge and edge.weight >= min_weight:
                 result.append((other, edge.weight))
         return sorted(result, key=lambda x: -x[1])
 
     def spread_activation(self, seed_ids: list[str], steps: int = 3,
                           decay: float = 0.6) -> dict[str, float]:
-        """Spreading activation from seed anchors.
-
-        Returns a dict of anchor_id -> activation value.
-        Similar to how the brain's associative networks fire.
-        """
         activation: dict[str, float] = {aid: 1.0 for aid in seed_ids if aid in self.anchors}
         current = dict(activation)
 
@@ -154,7 +181,6 @@ class StarGraph:
         return activation
 
     def find_constellation(self, seed_id: str, max_size: int = 20) -> Constellation:
-        """Find the constellation (connected subgraph) containing the seed."""
         if seed_id not in self.anchors:
             return Constellation(anchors=[], edges=[])
 
@@ -179,30 +205,113 @@ class StarGraph:
 
         return Constellation(anchors=anchors, edges=edges)
 
-    # ── Bulk operations ───────────────────────────────────
+    # ── Phase-locked resonance ───────────────────────────
+
+    def oscillatory_resonance(self, driving_freq: float, driving_phase: float,
+                              min_strength: float = 0.1) -> dict[str, float]:
+        """Find anchors that phase-lock with a driving oscillation.
+
+        This is the core of resonance-based retrieval: instead of keyword
+        search, find anchors whose natural frequency matches the context's
+        driving oscillation. Phase-locked anchors fire synchronously.
+        """
+        resonance_map: dict[str, float] = {}
+        for anchor in self.anchors.values():
+            strength = anchor.oscillator.resonance(driving_freq, driving_phase)
+            if strength >= min_strength:
+                resonance_map[anchor.id] = strength
+        return resonance_map
+
+    def cortical_lookup(self, embedding: list[float], top_k: int = 10) -> list[tuple[str, float]]:
+        """Direct embedding-based lookup — the 'cortical' retrieval pathway.
+
+        For well-consolidated memories that no longer need hippocampal indexing.
+        """
+        if not self.cortical_index:
+            return []
+        scores = []
+        for cort_emb, aid in self.cortical_index:
+            if aid not in self.anchors:
+                continue
+            min_len = min(len(cort_emb), len(embedding))
+            dot = sum(cort_emb[i] * embedding[i] for i in range(min_len))
+            na = math.sqrt(sum(x**2 for x in cort_emb))
+            nb = math.sqrt(sum(x**2 for x in embedding))
+            sim = dot / (na * nb + 1e-8)
+            scores.append((sim * self.anchors[aid].retention_score, aid))
+        scores.sort(key=lambda x: -x[0])
+        return [(aid, s) for s, aid in scores[:top_k]]
+
+    # ── Contradiction detection ──────────────────────────
+
+    def find_contradictions(self, threshold: float = 0.7) -> list[tuple[str, str, float]]:
+        """Find anchor pairs that may contradict each other.
+
+        Contradiction = high semantic similarity but opposite emotional valence
+        or mutually exclusive tags.
+        """
+        contradictions = []
+        ids = list(self.anchors.keys())
+        for i, aid_a in enumerate(ids):
+            for aid_b in ids[i + 1:]:
+                a = self.anchors[aid_a]
+                b = self.anchors[aid_b]
+                # Opposite valence on similar topics
+                if a.embedding and b.embedding:
+                    dot = sum(x * y for x, y in zip(a.embedding, b.embedding))
+                    na = math.sqrt(sum(x**2 for x in a.embedding))
+                    nb = math.sqrt(sum(x**2 for x in b.embedding))
+                    sim = dot / (na * nb + 1e-8)
+                    valence_opposed = abs(a.vector.emotional_valence - b.vector.emotional_valence) > 1.0
+                    if sim > threshold and valence_opposed:
+                        contradictions.append((aid_a, aid_b, sim))
+        return contradictions
+
+    # ── Ghost operations ─────────────────────────────────
+
+    def add_ghost(self, anchor: Anchor) -> None:
+        """Create a ghost from an anchor being pruned."""
+        self.ghosts[anchor.id] = GhostAnchor.from_anchor(anchor)
+
+    def check_ghosts(self, embedding: list[float] | None,
+                     revival_threshold: float = 0.75) -> Optional[Anchor]:
+        """Check if new content resonates with any ghosts (savings effect)."""
+        if not embedding:
+            return None
+        for ghost_id, ghost in list(self.ghosts.items()):
+            resonance = ghost.resonance(embedding)
+            if resonance > revival_threshold:
+                del self.ghosts[ghost_id]
+                return ghost.revive("", embedding)
+        return None
+
+    # ── Analysis ─────────────────────────────────────────
 
     def get_prune_candidates(self, threshold: float = 0.15) -> list[str]:
-        """Find anchors below retention threshold."""
         return [aid for aid, a in self.anchors.items()
                 if a.retention_score < threshold]
 
     def get_dormant_edges(self, threshold: float = 0.1) -> list[tuple[str, str]]:
-        """Find edges that have weakened below threshold."""
         return [key for key, e in self.edges.items() if e.weight < threshold]
 
     def stats(self) -> dict:
         return {
             "anchors": len(self.anchors),
             "edges": len(self.edges),
+            "ghosts": len(self.ghosts),
+            "schemas": len(self.schemas),
+            "cortical_index": len(self.cortical_index),
             "avg_retention": sum(a.retention_score for a in self.anchors.values())
             / max(1, len(self.anchors)),
             "avg_edge_weight": sum(e.weight for e in self.edges.values())
             / max(1, len(self.edges)),
             "constellations": self.count_constellations(),
+            "avg_hippocampal_dep": sum(
+                a.vector.hippocampal_dependency for a in self.anchors.values()
+            ) / max(1, len(self.anchors)),
         }
 
     def count_constellations(self) -> int:
-        """Count connected components (constellations)."""
         visited: set[str] = set()
         count = 0
         for aid in self.anchors:
