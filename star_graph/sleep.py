@@ -127,7 +127,7 @@ class SleepCycle:
         for anchor in prioritized:
             existing = self.graph.anchors.get(anchor.id)
             if existing:
-                existing.replay_count += 1
+                existing.transition('replay')  # ACTIVE/DORMANT → REHEARSING
                 existing.activate()
                 existing.vector.importance = (
                     0.7 * existing.vector.importance + 0.3 * anchor.vector.importance
@@ -135,7 +135,6 @@ class SleepCycle:
                 existing.vector.surprise = max(existing.vector.surprise, anchor.vector.surprise)
                 existing.tags = list(set(existing.tags + anchor.tags))
             else:
-                # Ensure embedding for new anchors
                 if not anchor.embedding:
                     anchor.embedding = embedder.encode(anchor.text)
                 self.graph.add_anchor(anchor)
@@ -211,13 +210,14 @@ class SleepCycle:
 
         self.log.append("Emotional Stripping: decoupled emotion from consolidated memories")
 
-    # ── Phase 4: Schema Extraction ──────────────────────
+    # ── Phase 4: Schema Extraction + Abstraction Emergence ─
 
     def _schema_extraction(self) -> int:
-        """Extract abstract schemas using real embedding similarity.
+        """Extract schemas AND discover emergent abstract categories.
 
-        Groups anchors by tag, then validates structural similarity via
-        embedding cosine distance (not bigram overlap).
+        Two-stage process:
+        1. Tag-based schema extraction (legacy, for tagged anchors)
+        2. Embedding-cluster-based abstraction (new — emergent categories)
         """
         MIN_INSTANCES = 3
         MIN_SIMILARITY = 0.6
@@ -274,7 +274,57 @@ class SleepCycle:
 
         if formed:
             self.log.append(f"Schema Extraction: formed {formed} new schemas (embedding-based)")
-        return formed
+
+        # Phase 4b: Abstraction Emergence — discover emergent categories
+        abstract_formed = self._abstraction_emergence()
+
+        return formed + abstract_formed
+
+    def _abstraction_emergence(self) -> int:
+        """Discover emergent higher-order categories from anchor clusters.
+
+        Uses embedding-cluster-based detection. When multiple anchors share
+        a semantic subspace, generates AbstractNode capturing the invariant.
+
+        Example: "likes Python" + "writes Flask" + "deploys FastAPI"
+                 -> AbstractNode "Backend Python Developer"
+        """
+        try:
+            from .abstraction import AbstractionEngine
+        except ImportError:
+            return 0
+
+        if not hasattr(self, '_abstraction_engine'):
+            self._abstraction_engine = AbstractionEngine(
+                min_cluster_size=3,
+                similarity_threshold=0.55,
+            )
+
+        # Collect anchor embeddings
+        anchors = {}
+        embeddings = {}
+        for aid, a in self.graph.anchors.items():
+            if a.embedding and a.state.name in ('ACTIVE', 'DORMANT', 'CONSOLIDATING'):
+                anchors[aid] = a
+                embeddings[aid] = a.embedding
+
+        new_abstracts = self._abstraction_engine.discover(anchors, embeddings)
+
+        for abstract in new_abstracts:
+            # Store in graph
+            self.graph.abstracts[abstract.id] = abstract
+            # Tag source anchors with abstraction reference
+            for aid in abstract.source_anchor_ids:
+                if aid in self.graph.anchors:
+                    self.graph.anchors[aid].tags.append(f"abstract:{abstract.label}")
+
+        if new_abstracts:
+            self.log.append(
+                f"Abstraction Emergence: discovered {len(new_abstracts)} "
+                f"new concepts: {[a.label for a in new_abstracts]}"
+            )
+
+        return len(new_abstracts)
 
     # ── Phase 5: Merge Similar ──────────────────────────
 
@@ -351,21 +401,41 @@ class SleepCycle:
         self._ghost_count = 0
         for aid in candidates:
             if aid in self.graph.anchors:
-                self.graph.add_ghost(self.graph.anchors[aid])
+                anchor = self.graph.anchors[aid]
+                # Collect residual edges before removal
+                residual_edges = {}
+                for neighbor in self.graph._adjacency.get(aid, set()):
+                    key = self.graph._key(aid, neighbor)
+                    edge = self.graph.edges.get(key)
+                    if edge:
+                        residual_edges[neighbor] = edge.weight * 0.3  # attenuated
+
+                # Create rich ghost via ghost subsystem
+                if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
+                    self.graph._ghost_subsystem.create(anchor, residual_edges)
+                else:
+                    self.graph.add_ghost(anchor)
+
+                anchor.transition('prune')
                 self.graph.remove_anchor(aid)
                 self._ghost_count += 1
 
-        now = time.time()
-        stale_ghosts = []
-        for gid, ghost in self.graph.ghosts.items():
-            if (now - ghost.pruned_at) > 30 * 86400 and ghost.revival_count == 0:
-                stale_ghosts.append(gid)
-        for gid in stale_ghosts:
-            del self.graph.ghosts[gid]
+        # Decay ghosts via subsystem
+        if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
+            stale_count = self.graph._ghost_subsystem.decay_all()
+        else:
+            now = time.time()
+            stale_ghosts = []
+            for gid, ghost in self.graph.ghosts.items():
+                if isinstance(ghost, GhostAnchor) and (now - ghost.pruned_at) > 30 * 86400 and ghost.revival_count == 0:
+                    stale_ghosts.append(gid)
+            for gid in stale_ghosts:
+                del self.graph.ghosts[gid]
+            stale_count = len(stale_ghosts)
 
         if candidates:
             self.log.append(f"Adaptive Prune: removed {len(candidates)} anchors "
-                            f"({self._ghost_count} ghosts, {len(stale_ghosts)} stale ghosts cleared)")
+                            f"({self._ghost_count} ghosts, {stale_count} stale ghosts cleared)")
         return candidates
 
     def _prune_edges(self, threshold: float) -> list[tuple[str, str]]:

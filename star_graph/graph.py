@@ -118,6 +118,8 @@ class StarGraph:
         self.schemas: dict[str, Schema] = {}
         # v0.4: ANN index for sub-linear retrieval
         self._ann_index = None  # lazy init on first use
+        self.abstracts: dict[str, any] = {}  # AbstractNode dict, lazy import
+        self._ghost_subsystem = None  # GhostSubsystem, lazy init
 
     def _key(self, a: str, b: str) -> tuple[str, str]:
         return (a, b) if a < b else (b, a)

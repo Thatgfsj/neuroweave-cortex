@@ -1,19 +1,52 @@
 """Anchor point — the fundamental unit of star-graph memory.
 
-Each anchor is a ≤200-char summary of a conversation turn or session,
-augmented with a dynamic importance vector that evolves over time.
+Each anchor is a summary of a conversation turn or session, augmented with
+a dynamic importance vector and a 6-state memory lifecycle.
 
-v0.2 adds: oscillatory resonance properties, predictive coding fields,
-reconsolidation support, ghost anchors for savings effect.
+v0.4 adds: MemoryState machine (ACTIVE→REHEARSING→CONSOLIDATING→DORMANT→GHOST→REACTIVATED),
+meaningful oscillator derivation from embeddings, and interference-aware retention.
 """
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+class MemoryState(enum.Enum):
+    """Six-state memory lifecycle — not just 'stored' or 'deleted'.
+
+    Each state governs retrieval behavior, update plasticity, and decay rate.
+    """
+    ACTIVE = "active"              # Just created or recently retrieved — full plasticity
+    REHEARSING = "rehearsing"      # Being replayed during sleep SWR — temporarily elevated
+    CONSOLIDATING = "consolidating"  # Undergoing hippocampal→cortical transfer
+    DORMANT = "dormant"            # Stable, low-activity, cortical retrieval only
+    GHOST = "ghost"                # Pruned but with residual trace (savings effect)
+    REACTIVATED = "reactivated"    # Ghost revived — lower stability, elevated surprise
+
+
+# State transition rules: (current, event) → next
+# Events: 'create', 'replay', 'consolidate', 'retrieve', 'prune', 'revive', 'stabilize'
+_TRANSITIONS = {
+    (MemoryState.ACTIVE, 'replay'): MemoryState.REHEARSING,
+    (MemoryState.ACTIVE, 'consolidate'): MemoryState.CONSOLIDATING,
+    (MemoryState.ACTIVE, 'prune'): MemoryState.GHOST,
+    (MemoryState.REHEARSING, 'consolidate'): MemoryState.CONSOLIDATING,
+    (MemoryState.REHEARSING, 'retrieve'): MemoryState.ACTIVE,
+    (MemoryState.CONSOLIDATING, 'stabilize'): MemoryState.DORMANT,
+    (MemoryState.CONSOLIDATING, 'retrieve'): MemoryState.ACTIVE,
+    (MemoryState.DORMANT, 'retrieve'): MemoryState.ACTIVE,
+    (MemoryState.DORMANT, 'prune'): MemoryState.GHOST,
+    (MemoryState.DORMANT, 'replay'): MemoryState.REHEARSING,
+    (MemoryState.GHOST, 'revive'): MemoryState.REACTIVATED,
+    (MemoryState.REACTIVATED, 'consolidate'): MemoryState.CONSOLIDATING,
+    (MemoryState.REACTIVATED, 'stabilize'): MemoryState.DORMANT,
+}
 
 
 @dataclass
@@ -51,21 +84,15 @@ class AnchorVector:
 
 @dataclass
 class AnchorPrediction:
-    """What this anchor predicts about future states.
+    """What this anchor predicts about future states."""
 
-    The predictive coding framework: every memory encodes not just the past
-    but an implicit prediction about what comes next.
-    """
-
-    next_topic_embedding: Optional[list[float]] = None  # expected continuation
-    emotional_tone: float = 0.0      # -1..+1 expected emotional context
-    expected_duration: float = 10.0  # expected conversation duration (minutes)
-    confidence: float = 0.5          # how confident is this prediction
+    next_topic_embedding: Optional[list[float]] = None
+    emotional_tone: float = 0.0
+    expected_duration: float = 10.0
+    confidence: float = 0.5
 
     def error(self, actual: AnchorPrediction) -> float:
-        """Compute prediction error against actual outcome."""
         errors = []
-        # Topic error
         if self.next_topic_embedding and actual.next_topic_embedding:
             dot = sum(a * b for a, b in zip(
                 self.next_topic_embedding, actual.next_topic_embedding))
@@ -73,57 +100,38 @@ class AnchorPrediction:
             nb = math.sqrt(sum(x**2 for x in actual.next_topic_embedding))
             topic_err = 1.0 - (dot / (na * nb + 1e-8))
             errors.append(topic_err)
-        # Tone error
         errors.append(abs(self.emotional_tone - actual.emotional_tone))
         return sum(errors) / len(errors) if errors else 0.0
 
 
 @dataclass
 class Oscillator:
-    """Oscillatory properties for phase-locked resonance retrieval.
+    """Oscillatory properties for phase-locked resonance retrieval."""
 
-    Each anchor has a natural frequency and phase. When context provides
-    a driving oscillation, anchors with matching frequencies phase-lock
-    and fire together — forming a constellation through synchrony.
-    """
-
-    natural_frequency: float = 0.5   # 0.1..1.0  preferred oscillation frequency
-    phase_offset: float = 0.0        # 0..2π     characteristic phase
-    coupling_strength: float = 0.3   # 0..1      how strongly it couples to drivers
-    damping: float = 0.1             # oscillation decay rate
+    natural_frequency: float = 0.5   # 0.1..1.0
+    phase_offset: float = 0.0        # 0..2π
+    coupling_strength: float = 0.3   # 0..1
+    damping: float = 0.1
 
     def resonance(self, driving_freq: float, driving_phase: float) -> float:
-        """Compute resonance strength with a driving oscillation.
-
-        Uses the Arnold tongue model: resonance when frequencies are close
-        and phases align within a critical window.
-        """
         freq_diff = abs(self.natural_frequency - driving_freq)
         phase_diff = abs(self.phase_offset - driving_phase)
-
-        # Normalize phase difference to [0, π]
         if phase_diff > math.pi:
             phase_diff = 2 * math.pi - phase_diff
-
-        # Arnold tongue: frequency window narrows as coupling weakens
         critical_width = 0.15 * self.coupling_strength
-
         if freq_diff > critical_width:
             return 0.0
-
-        # Within the tongue: strength depends on both frequency match and phase alignment
         freq_match = math.exp(-(freq_diff ** 2) / (2 * critical_width ** 2))
         phase_match = math.cos(phase_diff)
-
         return self.coupling_strength * freq_match * max(0.0, phase_match)
 
 
 @dataclass
 class Anchor:
-    """A single memory anchor point with predictive and oscillatory properties."""
+    """A single memory anchor point with state machine and oscillatory properties."""
 
     id: str
-    text: str                         # suggested ≤200 char summary (soft limit)
+    text: str
     vector: AnchorVector = field(default_factory=AnchorVector)
     embedding: Optional[list[float]] = None
     prediction: Optional[AnchorPrediction] = None
@@ -132,8 +140,11 @@ class Anchor:
     last_activated_at: float = field(default_factory=time.time)
     source_session: str = ""
     tags: list[str] = field(default_factory=list)
-    schema_ref: Optional[str] = None  # ID of schema this instantiates
-    replay_count: int = 0             # times replayed during sleep
+    schema_ref: Optional[str] = None
+    replay_count: int = 0
+    # v0.4: state machine
+    state: MemoryState = MemoryState.ACTIVE
+    state_history: list[tuple[MemoryState, float]] = field(default_factory=list)
 
     @classmethod
     def create(cls, text: str, source_session: str = "",
@@ -143,11 +154,9 @@ class Anchor:
                tags: list[str] | None = None,
                importance: float = 0.5,
                **vec_kw) -> Anchor:
-        """Create a new anchor from a summary."""
         anchor_id = hashlib.blake2b(
             (text + source_session).encode(), digest_size=8
         ).hexdigest()
-        # Separate AnchorVector fields from Anchor fields
         vec_fields = {"importance", "frequency", "recency",
                       "emotional_valence", "stability", "surprise",
                       "hippocampal_dependency"}
@@ -156,7 +165,8 @@ class Anchor:
         vec_kw.setdefault("surprise", surprise)
         vector_kw = {k: v for k, v in vec_kw.items() if k in vec_fields}
         anchor_kw = {k: v for k, v in vec_kw.items() if k not in vec_fields}
-        # Derive meaningful oscillator params (not hash-based noise)
+
+        # Derive meaningful oscillator params from real signal
         try:
             from .embedding import get_embedder
             embedder = get_embedder()
@@ -165,7 +175,6 @@ class Anchor:
                 emotional_valence=vector_kw.get("emotional_valence", emotional_valence),
                 text_length=len(text),
             )
-            # Auto-encode text if no embedding provided
             if embedding is None:
                 embedding = embedder.encode(text)
             phase = embedder.derive_phase(
@@ -193,31 +202,75 @@ class Anchor:
             ),
             source_session=source_session,
             tags=tags or [],
+            state=MemoryState.ACTIVE,
+            state_history=[(MemoryState.ACTIVE, time.time())],
             **anchor_kw,
         )
+
+    # ── State machine ──────────────────────────────────
+
+    def transition(self, event: str) -> MemoryState:
+        """Attempt a state transition. Returns new state (no-op if invalid)."""
+        key = (self.state, event)
+        new_state = _TRANSITIONS.get(key)
+        if new_state is not None:
+            self.state = new_state
+            self.state_history.append((new_state, time.time()))
+            self._on_enter_state(new_state)
+        return self.state
+
+    def _on_enter_state(self, state: MemoryState) -> None:
+        """State-entry side effects."""
+        now = time.time()
+        if state == MemoryState.REHEARSING:
+            self.replay_count += 1
+            self.last_activated_at = now
+        elif state == MemoryState.CONSOLIDATING:
+            self.vector.stability = min(1.0, self.vector.stability + 0.1)
+        elif state == MemoryState.DORMANT:
+            self.vector.stability = max(self.vector.stability, 0.7)
+        elif state == MemoryState.GHOST:
+            pass  # GhostAnchor handles this
+        elif state == MemoryState.REACTIVATED:
+            self.vector.stability = 0.2
+            self.vector.surprise = 0.8
+            self.vector.recency = 1.0
+            self.last_activated_at = now
+
+    @property
+    def is_retrievable(self) -> bool:
+        """Can this anchor be returned in retrieval results?"""
+        return self.state not in (MemoryState.GHOST,)
+
+    @property
+    def is_plastic(self) -> bool:
+        """Can this anchor be modified/updated?"""
+        return self.state in (MemoryState.ACTIVE, MemoryState.REHEARSING, MemoryState.REACTIVATED)
 
     # ── Dynamics ──────────────────────────────────────
 
     def decay(self, elapsed_hours: float, half_life: float = 168.0) -> None:
+        # State-dependent decay: ghost decays faster, dormant slower
+        if self.state == MemoryState.GHOST:
+            half_life *= 0.3
+        elif self.state == MemoryState.DORMANT:
+            half_life *= 1.5
+        elif self.state == MemoryState.REACTIVATED:
+            half_life *= 0.7
         self.vector.recency *= 0.5 ** (elapsed_hours / half_life)
         self.vector.recency = max(0.01, self.vector.recency)
 
     def activate(self) -> None:
-        """Called when this anchor is retrieved/used.
-
-        Activation triggers reconsolidation: stability temporarily drops
-        (memory becomes labile), allowing update on next prediction check.
-        """
+        """Called when this anchor is retrieved/used — triggers reconsolidation."""
         self.vector.frequency = min(1.0, self.vector.frequency + 0.05)
         self.vector.recency = 1.0
         self.vector.stability *= 0.7  # labile during reconsolidation window
         self.last_activated_at = time.time()
+        # Retrieve from dormant → active
+        if self.state == MemoryState.DORMANT:
+            self.transition('retrieve')
 
     def consolidate(self, prediction_error: float) -> str:
-        """Reconsolidation based on prediction error.
-
-        Returns: 'strengthen', 'update', or 'novel'
-        """
         STRENGTHEN = 0.15
         UPDATE = 0.50
 
@@ -237,23 +290,29 @@ class Anchor:
     @property
     def retention_score(self) -> float:
         v = self.vector
-        return (
+        base = (
             0.25 * v.importance
             + 0.20 * v.frequency
             + 0.20 * v.recency
             + 0.15 * v.stability
             + 0.10 * v.surprise
-            + 0.10 * (1.0 - v.hippocampal_dependency)  # cortical = more retained
+            + 0.10 * (1.0 - v.hippocampal_dependency)
         )
+        # State-dependent modifier
+        if self.state == MemoryState.REHEARSING:
+            base *= 1.3  # boosted during replay
+        elif self.state == MemoryState.GHOST:
+            base *= 0.3  # ghost = weak
+        elif self.state == MemoryState.REACTIVATED:
+            base *= 0.7
+        return max(0.0, min(1.0, base))
 
     @property
     def is_cortical(self) -> bool:
-        """Has this memory been consolidated to cortex?"""
         return self.vector.hippocampal_dependency < 0.3
 
     @property
     def is_labile(self) -> bool:
-        """Is this memory currently in a reconsolidation window?"""
         return self.vector.stability < 0.4
 
 
@@ -261,12 +320,12 @@ class Anchor:
 class GhostAnchor:
     """A pruned anchor's residual trace — enables the savings effect.
 
-    When an anchor is pruned, it leaves a ghost. If similar content appears
-    later, the ghost resonates and enables faster relearning (savings).
+    When an anchor enters GHOST state, it leaves this residual. If similar
+    content appears later, the ghost resonates and enables faster relearning.
     """
 
     id: str
-    residue: list[float]     # partial embedding (kept small intentionally)
+    residue: list[float]
     original_tags: list[str]
     pruned_at: float
     revival_count: int = 0
@@ -274,8 +333,8 @@ class GhostAnchor:
 
     @classmethod
     def from_anchor(cls, anchor: Anchor) -> GhostAnchor:
-        """Create a ghost from a pruned anchor."""
         residue = anchor.embedding[:16] if anchor.embedding else []
+        anchor.transition('prune')  # ACTIVE/DORMANT → GHOST
         return cls(
             id=anchor.id,
             residue=residue,
@@ -285,7 +344,6 @@ class GhostAnchor:
         )
 
     def resonance(self, new_embedding: list[float] | None) -> float:
-        """How strongly does this ghost resonate with new content?"""
         if not self.residue or not new_embedding:
             return 0.0
         residue = self.residue[:min(len(self.residue), len(new_embedding))]
@@ -296,17 +354,19 @@ class GhostAnchor:
         return dot / (nr * nn + 1e-8)
 
     def revive(self, new_text: str, new_embedding: list[float] | None = None) -> Anchor:
-        """Create a revived anchor — faster than new learning."""
         self.revival_count += 1
-        return Anchor(
+        anchor = Anchor(
             id=self.id,
-            text=new_text[:280],  # soft limit, prefer ≤200
+            text=new_text[:280],
             vector=AnchorVector(
                 importance=self.original_importance * 0.6 + 0.1 * self.revival_count,
                 frequency=0.1,
                 recency=1.0,
                 stability=0.2,
-                surprise=0.8,  # surprising to see this again
+                surprise=0.8,
             ),
             embedding=new_embedding,
+            state=MemoryState.REACTIVATED,
         )
+        anchor.transition('revive')  # Will try GHOST→REACTIVATED
+        return anchor
