@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "star-graph-memory"
-version = "0.2.0"
+version = "0.3.0-dev"
 description = "Hippocampal-inspired star graph memory with oscillatory resonance, predictive coding, and 9-phase sleep consolidation. AI long-term memory via anchor points, spreading activation, and nightly replay/merge/prune/bridge cycles."
 requires-python = ">=3.11"
 license = {text = "MIT"}

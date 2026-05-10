@@ -299,21 +299,23 @@ class SleepCycle:
                     core.tags = list(set(core.tags + variant.tags))
                     # Redirect edges from variant to core
                     for neighbor in list(self.graph._adjacency.get(variant.id, set())):
-                        key = self.graph._key(variant.id, neighbor)
-                        old_edge = self.graph.edges.pop(key, None)
-                        if old_edge:
-                            new_key = self.graph._key(core.id, neighbor)
-                            if new_key not in self.graph.edges:
-                                self.graph.edges[new_key] = Edge(
-                                    source=new_key[0], target=new_key[1],
-                                    weight=old_edge.weight,
-                                    edge_type=old_edge.edge_type,
+                        k = self.graph._key(variant.id, neighbor)
+                        old = self.graph.edges.pop(k, None)
+                        if old:
+                            nk = self.graph._key(core.id, neighbor)
+                            if nk not in self.graph.edges:
+                                self.graph.edges[nk] = Edge(
+                                    source=nk[0], target=nk[1],
+                                    weight=old.weight, edge_type=old.edge_type,
                                 )
                                 self.graph._adjacency[core.id].add(neighbor)
                                 self.graph._adjacency[neighbor].add(core.id)
                     self.graph.remove_anchor(variant.id)
                     processed.add(variant.id)
                     merged += 1
+                    # If the outer-loop anchor was the one removed, skip remaining inner
+                    if variant is a:
+                        break
 
         if merged:
             self.log.append(f"Merge: fused {merged} duplicate anchor pairs")

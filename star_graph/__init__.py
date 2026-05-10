@@ -21,4 +21,15 @@ Key v0.2 additions:
   - Emotional stripping (decouple emotion from information)
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0-dev"
+
+from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator
+from .graph import StarGraph, Edge, Constellation, Schema
+from .sleep import SleepCycle
+from .online import OnlineConsolidator
+from .retriever import (
+    Retriever,
+    OscillationResonanceRetriever,
+    VectorSimilarityRetriever,
+    compare_retrievers,
+)

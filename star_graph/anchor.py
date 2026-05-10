@@ -123,7 +123,7 @@ class Anchor:
     """A single memory anchor point with predictive and oscillatory properties."""
 
     id: str
-    text: str                         # ≤200 char summary
+    text: str                         # suggested ≤200 char summary (soft limit)
     vector: AnchorVector = field(default_factory=AnchorVector)
     embedding: Optional[list[float]] = None
     prediction: Optional[AnchorPrediction] = None
@@ -140,20 +140,28 @@ class Anchor:
                embedding: list[float] | None = None,
                emotional_valence: float = 0.0,
                surprise: float = 0.5,
+               tags: list[str] | None = None,
+               importance: float = 0.5,
                **vec_kw) -> Anchor:
         """Create a new anchor from a summary."""
         anchor_id = hashlib.blake2b(
             (text + source_session).encode(), digest_size=8
         ).hexdigest()
+        # Separate AnchorVector fields from Anchor fields
+        vec_fields = {"importance", "frequency", "recency",
+                      "emotional_valence", "stability", "surprise",
+                      "hippocampal_dependency"}
+        vec_kw.setdefault("importance", importance)
         vec_kw.setdefault("emotional_valence", emotional_valence)
         vec_kw.setdefault("surprise", surprise)
-        # Derive oscillator properties from text characteristics
-        freq = 0.3 + 0.6 * hash(text) % 1000 / 1000.0  # pseudo-random but deterministic
-        phase = (hash(text + "phase") % 6283) / 1000.0  # 0..2π
+        vector_kw = {k: v for k, v in vec_kw.items() if k in vec_fields}
+        anchor_kw = {k: v for k, v in vec_kw.items() if k not in vec_fields}
+        freq = 0.3 + 0.6 * (abs(hash(text)) % 1000) / 1000.0
+        phase = (abs(hash(text + "phase")) % 6283) / 1000.0
         return cls(
             id=anchor_id,
-            text=text[:200],
-            vector=AnchorVector(**vec_kw),
+            text=text[:280],
+            vector=AnchorVector(**vector_kw),
             embedding=embedding,
             oscillator=Oscillator(
                 natural_frequency=freq,
@@ -161,6 +169,8 @@ class Anchor:
                 coupling_strength=0.3,
             ),
             source_session=source_session,
+            tags=tags or [],
+            **anchor_kw,
         )
 
     # ── Dynamics ──────────────────────────────────────
@@ -267,7 +277,7 @@ class GhostAnchor:
         self.revival_count += 1
         return Anchor(
             id=self.id,
-            text=new_text[:200],
+            text=new_text[:280],  # soft limit, prefer ≤200
             vector=AnchorVector(
                 importance=self.original_importance * 0.6 + 0.1 * self.revival_count,
                 frequency=0.1,
