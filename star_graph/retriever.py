@@ -373,6 +373,53 @@ class OscillationResonanceRetriever(Retriever):
             diff = 2 * math.pi - diff
         return 0.5 + 0.5 * math.cos(diff)
 
+    def _to_phasor(self, anchor: Anchor) -> complex:
+        mag = anchor.retention_score
+        phase = anchor.oscillator.phase_offset
+        return mag * complex(math.cos(phase), math.sin(phase))
+
+    def _derive_driving_phasor(self, query: str,
+                                embedding: list[float] | None = None) -> tuple[complex, float]:
+        if embedding and len(embedding) >= 4:
+            arr = np.array(embedding)
+            var = float(np.var(arr))
+            mag = 0.4 + 0.6 * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
+            angles = np.arctan2(arr[1::2], arr[::2])
+            phase = float(np.mean(angles)) % (2 * math.pi)
+            spectrum = np.abs(arr)
+            if np.sum(spectrum) > 1e-8:
+                centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
+                freq = 0.3 + 0.7 * (centroid / len(spectrum))
+            else:
+                freq = 0.5
+        else:
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            emb = embedder.encode(query)
+            return self._derive_driving_phasor(query, emb)
+
+        phasor = mag * complex(math.cos(phase), math.sin(phase))
+        return (phasor, freq)
+
+    def _resonance_score(self, query_phasor: complex, anchor: Anchor) -> float:
+        anchor_phasor = self._to_phasor(anchor)
+
+        dot = abs(query_phasor.real * anchor_phasor.real +
+                  query_phasor.imag * anchor_phasor.imag)
+        mag_product = abs(query_phasor) * abs(anchor_phasor)
+        if mag_product < 1e-8:
+            return 0.0
+        mag_sim = dot / mag_product
+
+        query_phase = math.atan2(query_phasor.imag, query_phasor.real)
+        anchor_phase = math.atan2(anchor_phasor.imag, anchor_phasor.real)
+        phase_diff = abs(query_phase - anchor_phase)
+        if phase_diff > math.pi:
+            phase_diff = 2 * math.pi - phase_diff
+        phase_sim = math.cos(phase_diff)
+
+        return min(1.0, (1.0 - self.phase_weight) * mag_sim + self.phase_weight * max(0.0, phase_sim))
+
     def _trace_components(self, query_phasor: complex, driving_freq: float,
                           anchor: Anchor) -> dict[str, float]:
         anchor_phasor = self._to_phasor(anchor)
@@ -415,55 +462,40 @@ class OscillationResonanceRetriever(Retriever):
         query_phase = self._query_phase(embedding)
         rc = Config.get().retrieval
 
-        resonance_map: dict[str, float] = {}
-        trace_components: dict[str, dict[str, float]] = {}
-        trace_pathways: dict[str, set[str]] = {}
+        # Score every anchor: (1-w)*semantic_sim + w*phase_coherence, weighted by retention
+        scored: list[tuple[float, Anchor, dict[str, float]]] = []
         for anchor in self.graph.anchors.values():
-            components = self._trace_components(driving_phasor, driving_freq, anchor)
-            score = components["resonance"]
-            if score > 0.05:
-                resonance_map[anchor.id] = score
-                trace_components[anchor.id] = components
-                trace_pathways.setdefault(anchor.id, set()).add("oscillation_resonance")
+            if anchor.embedding:
+                semantic_sim = self._cosine_sim(embedding, anchor.embedding)
+            else:
+                semantic_sim = self._text_overlap(query, anchor.text)
+            phase_coh = self._phase_coherence(query_phase, anchor)
+            score = (1.0 - self.phase_weight) * semantic_sim + self.phase_weight * phase_coh
+            score *= anchor.retention_score
+            scored.append((score, anchor, {
+                "semantic_similarity": semantic_sim,
+                "phase_coherence": phase_coh,
+                "retention": anchor.retention_score,
+            }))
+        scored.sort(key=lambda x: -x[0])
 
-        cortical = self.graph.cortical_lookup(embedding, top_k=rc.cortical.top_k)
-        for aid, sim in cortical:
-            if aid in self.graph.anchors:
-                trace_components.setdefault(aid, {
-                    "retention": self.graph.anchors[aid].retention_score,
-                })
-                trace_components[aid]["cortical_similarity"] = sim
-                trace_pathways.setdefault(aid, set()).add("cortical_lookup")
-            if aid not in resonance_map:
-                resonance_map[aid] = sim * rc.spreading.resonance_map_bonus
-
-        sorted_anchors = sorted(resonance_map.items(), key=lambda x: -x[1])
-        combined = resonance_map  # for trace compatibility
+        sorted_anchors = scored
 
         constellations = []
-        for aid, score in sorted_anchors[:top_k]:
-            if aid in self.graph.anchors:
-                a = self.graph.anchors[aid]
-                constellations.append(Constellation(anchors=[a], edges=[]))
+        for score, anchor, comps in sorted_anchors[:top_k]:
+            constellations.append(Constellation(anchors=[anchor], edges=[]))
 
         latency = (time.perf_counter() - t0) * 1000
-        top_score = min(1.0, sorted_anchors[0][1] if sorted_anchors else 0.0)
+        top_score = sorted_anchors[0][0] if sorted_anchors else 0.0
+
         trace_rows: list[tuple[Anchor, float, str, dict[str, float]]] = []
-        seen_trace: set[str] = set()
-        for c in constellations:
-            for anchor in c.anchors:
-                if anchor.id in seen_trace:
-                    continue
-                seen_trace.add(anchor.id)
-                components = dict(trace_components.get(anchor.id, {}))
-                score = combined.get(anchor.id, 0.0)
-                pathways = set(trace_pathways.get(anchor.id, set()))
-                trace_rows.append((
-                    anchor,
-                    score,
-                    "+".join(sorted(pathways)) or "oscillation_resonance",
-                    components,
-                ))
+        for score, anchor, comps in sorted_anchors[:top_k]:
+            trace_rows.append((
+                anchor,
+                score,
+                "oscillation_resonance",
+                comps,
+            ))
 
         return RetrievalResult(
             constellations=constellations,

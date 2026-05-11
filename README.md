@@ -99,8 +99,8 @@ Layer 1: Storage     │  CRUD, persistence, indexing, ANN lookup
 | Raw History (full context) | N/A | N/A | N/A | 6,708 tokens, upper bound |
 | TF-IDF Vector | N/A | N/A | N/A | keyword baseline |
 | VectorSimilarity | 0.933 | 0.933 | N/A | pure embedding similarity |
-| OscillationResonance | 0.867 | 0.867 | 0.667 | embedding + phase coherence |
-| **HybridFusion** | **0.900** | **0.900** | **0.667** | multi-signal fusion |
+| **OscillationResonance** | **0.967** | **0.967** | 0.667 | embedding + phase coherence |
+| HybridFusion | 0.900 | 0.900 | 0.667 | multi-signal fusion |
 
 Per-category Content Recall@3:
 
@@ -108,8 +108,8 @@ Per-category Content Recall@3:
 |---|---|---|---|
 | Long Context | 1.000 | 1.000 | 1.000 |
 | Cross-Session | 1.000 | 0.833 | 0.833 |
-| Compression | 0.667 | 0.833 | 0.667 |
-| Forgetting | 0.667 | 1.000 | 1.000 |
+| Compression | 0.833 | 0.833 | 0.667 |
+| Forgetting | 1.000 | 1.000 | 1.000 |
 | Interference | 1.000 | 1.000 | 1.000 |
 
 1.7x compression (6,708 → 3,982 tokens) with maintained or improved recall.
@@ -227,20 +227,22 @@ python examples/memory_benchmark.py --full    # 12 sessions, ~5000 turns
 ## Installation
 
 ```bash
-pip install sentence-transformers scikit-learn numpy
+git clone https://github.com/Thatgfsj/star-graph-memory.git
+cd star-graph-memory
+
+# Install in editable mode (required for the Quick Start imports)
+pip install -e .
 
 # Optional: for SQLite storage backend
 pip install aiosqlite
 
-git clone https://github.com/Thatgfsj/star-graph-memory.git
-cd star-graph-memory
 python examples/emergence_demo.py
 ```
 
+**Note:** `star-graph-memory` is not published on PyPI. Install from source as shown above.
+
 ## Current limitations
 
-- **OscillationResonance underperforms**: phase-only retrieval is broken (0.000 C-R@3). Use HybridFusion.
-- **Cold start without embeddings**: falls back to text overlap when `sentence-transformers` is unavailable.
 - **No streaming consolidation**: sleep processes all anchors at once. Incremental mode planned.
 - **Abstraction threshold sensitivity**: too strict → no abstractions form. Too loose → false patterns.
 

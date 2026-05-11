@@ -84,31 +84,48 @@ class AnchorVector:
     """Dynamic importance/state vector attached to each anchor.
 
     Governs memory dynamics: what gets kept, what fades, what connects to what.
+
+    Core decay dimensions (multiplicative):
+      retention = relevance × recency × frequency × success_feedback × confidence
     """
 
     importance: float = 0.5        # 0..1  content significance
-    frequency: float = 0.0         # normalized activation count
+    frequency: float = 0.0         # normalized activation count (0..1)
     recency: float = 1.0           # 1.0 = just created, decays over time
     emotional_valence: float = 0.0 # -1..+1  negative/neutral/positive
     stability: float = 0.0         # 0..1  resistance to change (consolidated)
     surprise: float = 0.5          # 0..1  how unexpected this memory was
     hippocampal_dependency: float = 1.0  # 1.0 = fully hippocampal, 0 = cortical
+    # v0.5: multiplicative decay fields
+    success_feedback: float = 0.5  # 0..1  how often this memory led to good outcomes
+    confidence: float = 0.5        # 0..1  how reliable/repeatable this memory is
+    novelty: float = 0.5           # 0..1  how new/unique this memory is (high = novel)
+    task_relevance: float = 0.5    # 0..1  relevance to current/active tasks
+    future_reusability: float = 0.5  # 0..1  estimated long-term value
+    decay_rate: float = 0.01       # per-day natural decay coefficient
 
     def to_list(self) -> list[float]:
         return [
             self.importance, self.frequency, self.recency,
             self.emotional_valence, self.stability, self.surprise,
             self.hippocampal_dependency,
+            self.success_feedback, self.confidence,
+            self.novelty, self.task_relevance, self.future_reusability,
+            self.decay_rate,
         ]
 
     @classmethod
     def from_list(cls, values: list[float]) -> AnchorVector:
-        defaults = [0.5, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0]
+        defaults = [0.5, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0,
+                    0.5, 0.5, 0.5, 0.5, 0.5, 0.01]
         merged = values + defaults[len(values):]
         return cls(
             importance=merged[0], frequency=merged[1], recency=merged[2],
             emotional_valence=merged[3], stability=merged[4], surprise=merged[5],
             hippocampal_dependency=merged[6],
+            success_feedback=merged[7], confidence=merged[8],
+            novelty=merged[9], task_relevance=merged[10], future_reusability=merged[11],
+            decay_rate=merged[12],
         )
 
 
@@ -324,25 +341,99 @@ class Anchor:
     # ── Properties ────────────────────────────────────
 
     @property
+    def relevance(self) -> float:
+        """Composite relevance: importance × task_relevance × (1+|valence|×0.2)."""
+        v = self.vector
+        base = v.importance * max(v.task_relevance, 0.01)
+        # Emotional memories get slight boost (0-20%)
+        emotional_boost = 1.0 + abs(v.emotional_valence) * 0.2
+        return max(0.01, min(1.0, base * emotional_boost))
+
+    @property
+    def decay_factor(self) -> float:
+        """Natural decay: exponential based on age and decay_rate."""
+        from .config import Config
+        c = Config.get().anchor.retention
+        hours_since = (time.time() - self.last_activated_at) / 3600
+        days_since = hours_since / 24
+        # Exponential decay with configurable half-life
+        half_life_days = c.decay_half_life_days
+        decay = math.exp(-days_since * math.log(2) / half_life_days)
+        # Stability slows decay
+        decay = decay + (1.0 - decay) * self.vector.stability * 0.5
+        return max(0.01, decay)
+
+    @property
+    def importance_score(self) -> float:
+        """Compute importance from multiple signals.
+
+        importance = novelty × 0.25 + |emotional_weight| × 0.25
+                   + task_relevance × 0.25 + future_reusability × 0.25
+        """
+        v = self.vector
+        return max(0.01, min(1.0,
+            v.novelty * 0.25
+            + abs(v.emotional_valence) * 0.25
+            + v.task_relevance * 0.25
+            + v.future_reusability * 0.25
+        ))
+
+    @property
     def retention_score(self) -> float:
+        """Multiplicative memory decay model using geometric mean.
+
+        retention = (relevance × recency × frequency′ × success_feedback × confidence)^(1/5)
+
+        Geometric mean preserves multiplicative interaction (a near-zero factor hurts)
+        while keeping scores in a normal range. Compared to raw product, it doesn't
+        collapse to near-zero just because one dimension is untested.
+        """
         from .config import Config
         c = Config.get().anchor.retention
         v = self.vector
-        base = (
-            c.importance_weight * v.importance
-            + c.frequency_weight * v.frequency
-            + c.recency_weight * v.recency
-            + c.stability_weight * v.stability
-            + c.surprise_weight * v.surprise
-            + c.cortical_weight * (1.0 - v.hippocampal_dependency)
-        )
+
+        factors = [
+            max(0.01, self.relevance),
+            max(0.01, v.recency),
+            max(0.01, v.frequency + 0.01),
+            max(0.01, v.success_feedback),
+            max(0.01, v.confidence),
+        ]
+        n = len(factors)
+        product = 1.0
+        for f in factors:
+            product *= f
+        score = product ** (1.0 / n)
+
+        # Apply state modifiers
         if self.state == MemoryState.REHEARSING:
-            base *= c.rehearsing_boost
+            score *= c.rehearsing_boost
         elif self.state == MemoryState.GHOST:
-            base *= c.ghost_penalty
+            score *= c.ghost_penalty
         elif self.state == MemoryState.REACTIVATED:
-            base *= c.reactivated_penalty
-        return max(0.0, min(1.0, base))
+            score *= c.reactivated_penalty
+
+        # Apply natural decay
+        score *= self.decay_factor
+
+        # Confidence penalty: each contradiction reduces confidence
+        confidence_penalty = max(0.1, 1.0 - getattr(self, '_contradiction_count', 0) * 0.15)
+        score *= confidence_penalty
+
+        return max(0.0, min(1.0, score))
+
+    @property
+    def confidence_score(self) -> float:
+        """How trustworthy this memory is — factors in source count, verification, contradictions."""
+        v = self.vector
+        base = v.confidence
+        # Source verification: implicit penalty for unverified memories
+        source_factor = min(1.0, getattr(self, '_source_count', 1) * 0.33)
+        # Age of last verification
+        last_verified = getattr(self, '_last_verified', self.created_at)
+        hours_since_verify = (time.time() - last_verified) / 3600
+        verify_freshness = math.exp(-hours_since_verify / (24 * 7))  # 1-week half-life
+        return max(0.01, min(1.0, base * source_factor * verify_freshness))
 
     @property
     def is_cortical(self) -> bool:
@@ -351,6 +442,29 @@ class Anchor:
     @property
     def is_labile(self) -> bool:
         return self.vector.stability < 0.4
+
+    @property
+    def is_stale(self) -> bool:
+        """Memory that hasn't been accessed/verified recently."""
+        hours_since = (time.time() - self.last_activated_at) / 3600
+        return hours_since > 168  # 1 week
+
+    def record_success(self, benefit: float = 0.1):
+        """Call when this memory contributed to a successful outcome."""
+        self.vector.success_feedback = min(1.0, self.vector.success_feedback + benefit)
+        self.vector.confidence = min(1.0, self.vector.confidence + benefit * 0.5)
+
+    def record_failure(self, penalty: float = 0.1):
+        """Call when this memory was involved in a failure."""
+        self.vector.success_feedback = max(0.01, self.vector.success_feedback - penalty)
+        self.vector.confidence = max(0.01, self.vector.confidence - penalty * 0.5)
+        self._contradiction_count = getattr(self, '_contradiction_count', 0) + 1
+
+    def record_verification(self):
+        """Call when this memory's accuracy is verified."""
+        self._last_verified = time.time()
+        self._source_count = getattr(self, '_source_count', 1) + 1
+        self.vector.confidence = min(1.0, self.vector.confidence + 0.05)
 
 
 @dataclass

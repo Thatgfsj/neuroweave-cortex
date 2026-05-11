@@ -366,6 +366,13 @@ class StarGraph:
             if not current:
                 break
 
+        # Normalize to [0,1] — summed contributions from multiple neighbors
+        # can explode past 1.0 in dense graphs with multiple steps.
+        if activation:
+            max_val = max(activation.values())
+            if max_val > 1.0:
+                activation = {k: v / max_val for k, v in activation.items()}
+
         return activation
 
     def find_constellation(self, seed_id: str, max_size: int = 20) -> Constellation:

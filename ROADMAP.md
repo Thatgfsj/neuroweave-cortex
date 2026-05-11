@@ -1,93 +1,68 @@
 # Star Graph Memory — Roadmap
 
-## v0.3.0 — "Verifiable" (2026 Q3, June-July)
+## v0.4 (current — 2026-05)
 
-**Goal**: Every mechanism has a test. Every claim is measurable.
+Completed infrastructure for a cognitive memory runtime:
 
-### P0 — Engineering Verifiability
-- [x] End-to-end runnable example (`examples/memory_basic.py`)
-- [x] 13-test suite covering sleep consolidation + oscillation retrieval
-- [x] Bugfixes: merge KeyError, score clamping, anchor create TypeError
-- [x] Chinese README with architecture diagram and quick start
-- [ ] `sentence-transformers` integration for real embeddings
-- [ ] GitHub Actions CI: `pytest` + `flake8` on push/PR
-- [ ] `tune_threshold.py`: Bayesian optimization of retention/similarity/homeostasis params
-- [ ] Re-run oscillation resonance recall benchmarks with real embeddings
+- [x] 6-state memory lifecycle (ACTIVE → REHEARSING → CONSOLIDATING → DORMANT → GHOST → REACTIVATED)
+- [x] Ghost subsystem with fuzzy recall and revival
+- [x] Abstraction engine (emergent categories from anchor clusters)
+- [x] 5-phase systematized sleep architecture with SleepReport
+- [x] Memory evolution engine (decay, boost, conflict, interference)
+- [x] Cognitive Memory Scheduler (context-aware type selection + adaptive compression)
+- [x] HybridFusion retriever (semantic + temporal + graph structure + Personalized PageRank)
+- [x] Edge versioning with confidence, source_type, and lifecycle management
+- [x] MemoryManager high-level facade (remember/recall/sleep/save/load)
+- [x] SQLite storage backend with WAL mode
+- [x] Explainable confidence scores
+- [x] 5-category benchmark suite with content-based metrics
+- [x] Async sleep with progress callbacks
+- [x] 13-test suite passing
 
-### P1 — Core Mechanism Decoupling
-- [x] `retriever.py`: Abstract `Retriever`, `OscillationResonanceRetriever`, `VectorSimilarityRetriever`
-- [x] `compare_retrievers()`: side-by-side comparison framework with latency + recall@k
-- [x] `docs/neuro_mapping.md`: neuroscience→algorithm mapping table
-- [x] `docs/benchmark.md`: comparison vs Mem0, HippoRAG, MemGPT, LangChain
-- [ ] `mem0_adapter.py`: drop-in replacement for Mem0 users (`from star_graph.adapter import Memory`)
+## v0.5 (planned — 2026-06)
 
----
+Integration and ecosystem:
 
-## v0.4.0 — "Scalable" (2026 Q3-Q4, Aug-Oct)
+- [ ] MCP server — expose as a Model Context Protocol server for Claude, GPT, and other MCP clients
+- [ ] REST API — HTTP endpoints (`POST /remember`, `POST /recall`, `POST /sleep`)
+- [ ] LangChain memory adapter — drop-in replacement for ConversationBufferMemory
+- [ ] Streaming sleep — incremental consolidation for graphs >10K anchors
+- [ ] Fix oscillation resonance — derive phase from actual temporal context, not embedding statistics
+- [ ] Multi-agent memory — shared graph with agent-specific views and access control
+- [ ] Memory reflection tool — self-audit: "what do I know? what's stale? what's contradicted?"
+- [ ] Production SQLite backend with migration support and backup
 
-**Goal**: Handle 10K+ anchors with sub-100ms retrieval.
+## v0.6 (planned — 2026-07)
 
-### P2 — Ecosystem & Scale
-- [ ] FAISS/HNSW embedding index for `cortical_lookup()` (currently linear scan)
-- [ ] Incremental sleep: don't replay all anchors, only recent + high-surprise
-- [ ] Benchmark suite: standard dataset (e.g., Multi-session Chat) with recall/precision/latency
-- [ ] VS Code extension: memory visualization (constellation graph view)
-- [ ] Token-aware anchor creation: embedding via local model (all-MiniLM-L6-v2)
+Scale and robustness:
 
-### P2 — Documentation & Community
-- [x] `ROADMAP.md` (this file)
-- [ ] English README polish: architecture deep-dive, API reference
-- [ ] Tutorial: "Building a Memory-Aware Chatbot in 50 Lines"
-- [ ] CONTRIBUTING.md: dev setup, test conventions, PR template
-- [ ] CHANGELOG.md: per-version change tracking
+- [ ] Incremental indexing — add anchors without full index rebuild
+- [ ] Configurable memory type profiles per domain (coding agent vs. chatbot vs. research agent)
+- [ ] Long-term personality formation from accumulated episodic memory
+- [ ] Predictive retrieval — anticipate what the agent will need next
+- [ ] Memory safety — forgetting by request, access control, audit trails
+- [ ] Visual graph explorer — functional, minimal, for debugging not prettiness
 
----
+## v1.0 (future)
 
-## v0.5.0 — "Integrated" (2026 Q4-Q1, Nov-Feb)
+- [ ] Distributed memory — federated graphs across agents
+- [ ] Cross-agent memory transfer — bootstrap new agents from consolidated memory
+- [ ] Cross-modal anchors — text + code + structured data in same graph
+- [ ] Production deployment guide and operator handbook
 
-**Goal**: Drop into existing AI agent frameworks with zero friction.
+## Research questions
 
-### Integration Layer
-- [ ] LangChain `BaseMemory` adapter
-- [ ] LlamaIndex `BaseMemory` adapter
-- [ ] OpenAI custom GPT action
-- [ ] REST API server (`sg-server`): `POST /remember`, `POST /recall`, `POST /sleep`
-- [ ] gRPC API for low-latency integration
+- **Personality emergence**: can long-running memory produce stable behavioral traits?
+- **Fidelity under compression**: at what compression ratio does recall quality break?
+- **Cross-agent transfer**: can one agent's consolidated memory bootstrap another?
+- **Adversarial memory**: can memories be poisoned? how to detect and recover?
+- **Forgetting curves**: what parameters produce the most human-like forgetting patterns?
 
-### Advanced Mechanisms
-- [ ] Cross-modal anchors: text + image + code embeddings in same graph
-- [ ] Temporal edge decay curves (not just linear/log decay — power-law with plateaus)
-- [ ] Hierarchical constellations: sub-constellations for nested topic structures
-- [ ] Attention-weighted replay: not all anchors replayed equally during SWR
-
----
-
-## v0.6.0 — "Biological" (2027 Q1-Q2, Feb-May)
-
-**Goal**: Full biological fidelity — every known hippocampal mechanism mapped.
-
-### Advanced Neuroscience
-- [ ] Pattern separation (dentate gyrus): automatically separate similar-but-distinct anchors
-- [ ] Pattern completion (CA3): partial cues retrieve full constellations
-- [ ] Sharp-wave ripple content analysis: what gets replayed and why
-- [ ] Noradrenergic tone modulation: global arousal state affects encoding/retrieval thresholds
-- [ ] Cortical remapping: schema reorganization after contradictory evidence accumulation
-
-### Deployment
-- [ ] SQLite/postgres backend for persistent multi-process access
-- [ ] Docker image with pre-configured embedding model
-- [ ] Multi-agent memory: shared graph with agent-specific edge weights
-- [ ] Federated sleep: coordinate consolidation across multiple agents
-
----
-
-## Version History
+## Version history
 
 | Version | Date | Highlights |
 |---|---|---|
-| **0.1.0** | 2026-05 | Core StarGraph, AnchorVector, edges, constellations, basic sleep |
-| **0.2.0** | 2026-05 | Oscillators, GhostAnchor, Schema, reconsolidation, 9-phase sleep, resonance engine |
-| **0.3.0-dev** | 2026-05 | Pluggable retrievers, OnlineConsolidator, test suite (13 tests), Chinese docs, bugfixes |
-| **0.4.0** | target 2026-09 | FAISS index, incremental sleep, benchmark suite, VS Code viz |
-| **0.5.0** | target 2026-12 | LangChain/LlamaIndex adapters, REST API, cross-modal anchors |
-| **0.6.0** | target 2027-04 | Pattern separation/completion, multi-agent, federated sleep |
+| 0.1.0 | 2026-05 | Core graph, anchors, edges, constellations, basic sleep |
+| 0.2.0 | 2026-05 | Oscillators, ghost anchors, schemas, reconsolidation, resonance engine |
+| 0.3.0 | 2026-05 | Pluggable retrievers, online consolidator, 13-test suite, Chinese docs |
+| 0.4.0 | 2026-05 | Evolution engine, scheduler, hybrid fusion, edge versioning, benchmarks, manager facade |
