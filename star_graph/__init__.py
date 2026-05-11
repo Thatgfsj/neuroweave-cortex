@@ -26,6 +26,9 @@ from .graph import StarGraph, Edge, Constellation, Schema
 from .sleep import SleepCycle
 from .online import OnlineConsolidator
 from .retriever import (
+    RetrievalResult,
+    RetrievalTrace,
+    RetrievalTraceEntry,
     Retriever,
     OscillationResonanceRetriever,
     VectorSimilarityRetriever,
