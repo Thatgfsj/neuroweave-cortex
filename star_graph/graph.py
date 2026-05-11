@@ -23,12 +23,16 @@ from .config import Config
 
 @dataclass
 class Edge:
-    """A typed, weighted connection between two anchors."""
+    """A typed, weighted connection between two anchors.
+
+    Simple edge — kept for backward compatibility. For rich temporal edges
+    with versioning, confidence, and lifecycle, use RichEdge.
+    """
 
     source: str
     target: str
     weight: float = 0.5
-    edge_type: str = "topical"  # causal, temporal, topical, personal, revision, bridge
+    edge_type: str = "topical"  # causal, temporal, topical, personal, revision, bridge, contradiction
     co_activation_count: int = 0
     created_at: float = field(default_factory=time.time)
     last_activated_at: float = field(default_factory=time.time)
@@ -44,6 +48,152 @@ class Edge:
     @property
     def is_active(self) -> bool:
         return self.weight > 0.1
+
+
+@dataclass
+class RichEdge:
+    """A temporal, versioned edge with confidence and lifecycle management.
+
+    Unlike simple Edge, a RichEdge tracks:
+    - How the relationship was established (explicit vs inferred)
+    - How confident we are in it
+    - How many times it's been reinforced across sessions
+    - When it decays and at what rate
+    - Version history for contradiction resolution
+    - Whether it's been superseded by a newer belief
+
+    Retrieval scoring:
+      score = graph_proximity + confidence + recency_bonus + reinforcement_bonus
+
+    This is the foundation for temporal memory, contradiction resolution,
+    and memory lifecycle management — what separates a graph DB from a
+    cognitive memory system.
+    """
+
+    source: str
+    target: str
+    weight: float = 0.5
+    edge_type: str = "topical"
+    relation: str = ""            # human-readable: "likes", "uses", "built", "prefers"
+    confidence: float = 0.5       # 0..1: explicit=0.95, implicit=0.42, inferred=0.3
+    source_type: str = "implicit" # "explicit" | "implicit" | "inferred" | "reinforced"
+    reinforcement_count: int = 0  # times confirmed across sessions
+    co_activation_count: int = 0  # times co-activated (Hebbian)
+    decay_rate: float = 0.01      # per-hour decay factor
+    created_at: float = field(default_factory=time.time)
+    last_activated_at: float = field(default_factory=time.time)
+    last_reinforced_at: float = 0.0
+    is_stale: bool = False        # marked when newer belief contradicts
+    stale_since: float = 0.0
+    replaced_by: str = ""         # edge_key that supersedes this one
+    version_history: list[dict] = field(default_factory=list)  # [{old_w, new_w, ts, reason}]
+    source_session: str = ""      # which session created this edge
+
+    def strengthen(self, delta: float = 0.05) -> None:
+        old_w = self.weight
+        self.weight = min(1.0, self.weight + delta)
+        self.co_activation_count += 1
+        self.last_activated_at = time.time()
+        self._log_version(old_w, self.weight, "strengthen")
+
+    def weaken(self, delta: float = 0.02) -> None:
+        old_w = self.weight
+        self.weight = max(0.0, self.weight - delta)
+        self._log_version(old_w, self.weight, "weaken")
+
+    def reinforce(self, source_session: str = "") -> None:
+        """Called when the same relationship is confirmed in another session."""
+        self.reinforcement_count += 1
+        self.last_reinforced_at = time.time()
+        self.source_type = "reinforced"
+        # Each reinforcement boosts confidence toward 1.0 with diminishing returns
+        boost = 0.1 * (1.0 - self.confidence)
+        old_c = self.confidence
+        self.confidence = min(1.0, self.confidence + boost)
+        self._log_version(old_c, self.confidence, f"reinforced (session={source_session})")
+
+    def mark_stale(self, replaced_by_edge_key: str = "") -> None:
+        """Mark this edge as stale — a newer belief contradicts it."""
+        self.is_stale = True
+        self.stale_since = time.time()
+        self.replaced_by = replaced_by_edge_key
+        self._log_version(self.weight, self.weight * 0.3, "stale")
+
+    def apply_decay(self, elapsed_hours: float) -> None:
+        """Apply temporal decay: w_t = w_0 * e^(-λt)."""
+        if self.is_stale:
+            old_w = self.weight
+            self.weight *= math.exp(-self.decay_rate * 2 * elapsed_hours)
+        else:
+            old_w = self.weight
+            self.weight *= math.exp(-self.decay_rate * elapsed_hours)
+        self.weight = max(0.0, self.weight)
+        if abs(old_w - self.weight) > 0.001:
+            self._log_version(old_w, self.weight, f"decay ({elapsed_hours:.1f}h)")
+
+    def _log_version(self, old_value: float, new_value: float, reason: str) -> None:
+        self.version_history.append({
+            "timestamp": time.time(),
+            "old_value": round(old_value, 4),
+            "new_value": round(new_value, 4),
+            "reason": reason,
+        })
+        # Keep only last 20 versions
+        if len(self.version_history) > 20:
+            self.version_history = self.version_history[-20:]
+
+    @property
+    def is_active(self) -> bool:
+        return self.weight > 0.1 and not self.is_stale
+
+    @property
+    def retrieval_score(self) -> float:
+        """Composite retrieval score for ranking during graph traversal.
+
+        score = weight + 0.2*confidence + 0.1*recency_bonus + 0.15*reinforcement_bonus
+        """
+        hours_since = (time.time() - self.last_activated_at) / 3600
+        recency_bonus = math.exp(-hours_since / 168)  # decays over 1 week
+        reinforcement_bonus = min(1.0, self.reinforcement_count * 0.2)
+        staleness_penalty = 0.3 if self.is_stale else 1.0
+
+        return staleness_penalty * (
+            self.weight
+            + 0.2 * self.confidence
+            + 0.1 * recency_bonus
+            + 0.15 * reinforcement_bonus
+        )
+
+    @classmethod
+    def explicit(cls, source: str, target: str, relation: str = "",
+                 weight: float = 0.7, session: str = "") -> "RichEdge":
+        """Create an edge from explicit user statement — high confidence."""
+        return cls(
+            source=source, target=target, weight=weight,
+            relation=relation, confidence=0.95, source_type="explicit",
+            source_session=session, edge_type="topical",
+        )
+
+    @classmethod
+    def inferred(cls, source: str, target: str, relation: str = "",
+                 weight: float = 0.4) -> "RichEdge":
+        """Create an edge from implicit inference — lower confidence."""
+        return cls(
+            source=source, target=target, weight=weight,
+            relation=relation, confidence=0.42, source_type="inferred",
+            edge_type="topical",
+        )
+
+    @classmethod
+    def from_edge(cls, edge: Edge) -> "RichEdge":
+        """Upgrade a simple Edge to RichEdge."""
+        return cls(
+            source=edge.source, target=edge.target,
+            weight=edge.weight, edge_type=edge.edge_type,
+            confidence=0.5, source_type="implicit",
+            created_at=edge.created_at,
+            last_activated_at=edge.last_activated_at,
+        )
 
 
 @dataclass
@@ -147,11 +297,22 @@ class StarGraph:
         return anchor.id
 
     def add_edge(self, src: str, tgt: str, weight: float = 0.5,
-                 edge_type: str = "topical") -> Optional[Edge]:
+                 edge_type: str = "topical", confidence: float | None = None,
+                 source_type: str = "implicit") -> Optional[Edge]:
         if src not in self.anchors or tgt not in self.anchors:
             return None
         key = self._key(src, tgt)
-        edge = Edge(source=key[0], target=key[1], weight=weight, edge_type=edge_type)
+
+        # Use RichEdge when confidence or explicit source_type is specified
+        if confidence is not None or source_type != "implicit":
+            edge = RichEdge(
+                source=key[0], target=key[1], weight=weight,
+                edge_type=edge_type, confidence=confidence or 0.5,
+                source_type=source_type,
+            )
+        else:
+            edge = Edge(source=key[0], target=key[1], weight=weight, edge_type=edge_type)
+
         self.edges[key] = edge
         self._adjacency[src].add(tgt)
         self._adjacency[tgt].add(src)

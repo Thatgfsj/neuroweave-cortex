@@ -1,27 +1,117 @@
 """Sleep-based memory consolidation — v0.4 real mechanisms.
 
-A full sleep cycle implements:
-1. Prioritized SWR Replay — priority = f(emotion, novelty, freq, centrality, unresolved)
-2. Systems Consolidation — hippocampal → cortical transfer
-3. Emotional Stripping — decouple emotion from information
-4. Schema Extraction — abstract common patterns via embedding similarity
-5. Merge Similar — fuse near-duplicate anchors by semantic similarity
-6. Adaptive Prune — remove weak anchors, leave ghosts (interference-aware)
-7. Bridge Constellations — discover surprising connections
-8. Hebbian Update — strengthen co-activated, weaken dormant
-9. Synaptic Homeostasis — global downscaling, keep only strong
+5-Phase Systematized Architecture:
+  N1 (Replay Indexing):     SWR replay, priority sampling, centrality analysis
+  N2 (Weak Merge):          Merge similar, bridge constellations, edge formation
+  N3 (Compression):         Systems consolidation, schema extraction, Hebbian update
+  REM (Emotional Decoupling): Emotional stripping, synaptic homeostasis
+  Wake-prep (Schema Synthesis): Adaptive prune, edge prune, cortical index refresh
+
+Each phase produces metrics captured in SleepReport for rich, human-readable output.
 """
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections import defaultdict
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Callable, Awaitable
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator
 from .graph import StarGraph, Edge, Constellation, Schema
 from .config import Config
+
+
+# ── Sleep Report ────────────────────────────────────────
+
+@dataclass
+class PhaseMetrics:
+    """Metrics for one sleep phase."""
+    phase: str = ""
+    duration_ms: float = 0.0
+    items_processed: int = 0
+    details: dict = field(default_factory=dict)
+
+
+@dataclass
+class SleepReport:
+    """Rich, human-readable report from one full sleep cycle."""
+    cycle: int = 0
+    total_duration_ms: float = 0.0
+    phases: list[PhaseMetrics] = field(default_factory=list)
+
+    # Aggregate counts
+    memories_replayed: int = 0
+    memories_merged: int = 0
+    memories_pruned: int = 0
+    ghosts_created: int = 0
+    schemas_formed: int = 0
+    abstractions_formed: int = 0
+    bridges_created: int = 0
+    edges_pruned: int = 0
+    emotional_decoupled: int = 0
+    cortical_transferred: int = 0
+
+    # Before/after
+    anchors_before: int = 0
+    anchors_after: int = 0
+    edges_before: int = 0
+    edges_after: int = 0
+    avg_retention_before: float = 0.0
+    avg_retention_after: float = 0.0
+    compression_ratio: float = 1.0
+
+    def summary(self) -> str:
+        """One-line summary of the sleep cycle."""
+        parts = []
+        if self.memories_replayed:
+            parts.append(f"Replayed {self.memories_replayed}")
+        if self.memories_merged:
+            parts.append(f"Merged {self.memories_merged}")
+        if self.schemas_formed:
+            parts.append(f"Created {self.schemas_formed} schemas")
+        if self.memories_pruned:
+            parts.append(f"Pruned {self.memories_pruned} ({self.ghosts_created} ghosts)")
+        if self.bridges_created:
+            parts.append(f"Bridged {self.bridges_created}")
+        if not parts:
+            return "Sleep cycle complete — no significant changes"
+        return " | ".join(parts)
+
+    def detailed(self) -> str:
+        """Multi-line detailed report."""
+        lines = [
+            f"╔══════════════════════════════════════════════════╗",
+            f"║  Sleep Cycle #{self.cycle} Report ({self.total_duration_ms:.0f}ms)",
+            f"╠══════════════════════════════════════════════════╣",
+        ]
+        for p in self.phases:
+            name = p.phase.ljust(26)
+            lines.append(f"║  {name} {p.items_processed:>4} items ({p.duration_ms:>6.0f}ms)")
+        lines.append(f"╠══════════════════════════════════════════════════╣")
+        lines.append(f"║  Anchors:  {self.anchors_before:>4} → {self.anchors_after:<4} "
+                     f"(compression: {self.compression_ratio:.2f}x)")
+        lines.append(f"║  Edges:    {self.edges_before:>4} → {self.edges_after:<4}")
+        lines.append(f"║  Retention:{self.avg_retention_before:>5.3f} → "
+                     f"{self.avg_retention_after:<5.3f}")
+        lines.append(f"╠══════════════════════════════════════════════════╣")
+        if self.memories_merged:
+            lines.append(f"║  Merged:   {self.memories_merged} near-duplicate anchors")
+        if self.schemas_formed:
+            lines.append(f"║  Schemas:  {self.schemas_formed} new abstractions")
+        if self.memories_pruned:
+            lines.append(f"║  Pruned:   {self.memories_pruned} low-retention anchors "
+                         f"→ {self.ghosts_created} ghosts")
+        if self.emotional_decoupled:
+            lines.append(f"║  Emotion:  decoupled from {self.emotional_decoupled} memories")
+        if self.cortical_transferred:
+            lines.append(f"║  Cortical: {self.cortical_transferred} memories transferred")
+        if self.bridges_created:
+            lines.append(f"║  Bridges:  {self.bridges_created} cross-constellation links")
+        lines.append(f"╚══════════════════════════════════════════════════╝")
+        return "\n".join(lines)
 
 
 class SleepCycle:
@@ -32,6 +122,7 @@ class SleepCycle:
         self.cfg = config if config is not None else Config.get()
         self.log: list[str] = []
         self._cycle_count: int = 0
+        self._ghost_count: int = 0
         self._embedder = None
 
     def _get_embedder(self):
@@ -83,7 +174,202 @@ class SleepCycle:
             "log": self.log,
         }
 
-    _ghost_count = 0
+    # ── 5-Phase Systematized Architecture ────────────────
+
+    def run_phased(self, recent_anchors: list[Anchor] | None = None,
+                   similarity_threshold: float | None = None,
+                   retention_threshold: float | None = None,
+                   edge_prune_threshold: float | None = None) -> SleepReport:
+        """Run sleep with 5-phase systematized architecture and rich reporting.
+
+        N1: Replay Indexing — SWR replay with priority sampling
+        N2: Weak Merge — merge similar + bridge constellations
+        N3: Compression — systems consolidation + schema extraction + Hebbian
+        REM: Emotional Decoupling — emotional stripping + homeostasis
+        Wake-prep: Schema Synthesis — prune + refresh indices
+
+        Returns a SleepReport with per-phase metrics and before/after comparison.
+        """
+        similarity_threshold = similarity_threshold if similarity_threshold is not None else self.cfg.sleep.merge.default_threshold
+        retention_threshold = retention_threshold if retention_threshold is not None else self.cfg.sleep.prune.default_retention_threshold
+        edge_prune_threshold = edge_prune_threshold if edge_prune_threshold is not None else self.cfg.sleep.prune.default_edge_threshold
+
+        self._cycle_count += 1
+        started = time.time()
+        stats_before = self.graph.stats()
+        report = SleepReport(
+            cycle=self._cycle_count,
+            anchors_before=stats_before["anchors"],
+            edges_before=stats_before["edges"],
+            avg_retention_before=stats_before["avg_retention"],
+        )
+
+        # ── N1: Replay Indexing ──
+        t0 = time.time()
+        if recent_anchors:
+            self._swr_replay(recent_anchors, similarity_threshold)
+        report.phases.append(PhaseMetrics(
+            phase="N1 Replay Indexing",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=len(recent_anchors) if recent_anchors else 0,
+            details={"method": "priority-weighted sampling"},
+        ))
+        report.memories_replayed = len(recent_anchors) if recent_anchors else 0
+
+        # ── N2: Weak Merge ──
+        t0 = time.time()
+        merged = self._merge_similar(similarity_threshold)
+        bridges = self._bridge_distant()
+        report.phases.append(PhaseMetrics(
+            phase="N2 Weak Merge",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=merged + bridges,
+            details={"merged": merged, "bridges": bridges},
+        ))
+        report.memories_merged = merged
+        report.bridges_created = bridges
+
+        # ── N3: Compression ──
+        t0 = time.time()
+        self._systems_consolidation()
+        schemas = self._schema_extraction()
+        self._hebbian_update()
+        # Count abstractions
+        abstraction_count = sum(
+            1 for a in self.graph.abstracts.values()
+            if getattr(a, 'confidence', 0) > self.cfg.abstraction.stable_confidence
+        )
+        cortical_count = sum(1 for a in self.graph.anchors.values() if a.is_cortical)
+        report.phases.append(PhaseMetrics(
+            phase="N3 Compression",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=schemas,
+            details={"schemas": schemas, "abstractions": abstraction_count,
+                     "cortical": cortical_count},
+        ))
+        report.schemas_formed = schemas
+        report.abstractions_formed = abstraction_count
+        report.cortical_transferred = cortical_count
+
+        # ── REM: Emotional Decoupling ──
+        t0 = time.time()
+        self._emotional_stripping()
+        self._synaptic_homeostasis()
+        emotion_count = sum(
+            1 for a in self.graph.anchors.values()
+            if abs(a.vector.emotional_valence) < 0.1 and a.vector.stability > 0.5
+        )
+        report.phases.append(PhaseMetrics(
+            phase="REM Emotional Decoupling",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=emotion_count,
+        ))
+        report.emotional_decoupled = emotion_count
+
+        # ── Wake-prep: Schema Synthesis ──
+        t0 = time.time()
+        pruned_anchors = self._prune_anchors(retention_threshold)
+        ghosts_created = self._ghost_count
+        pruned_edges = self._prune_edges(edge_prune_threshold)
+        self._refresh_cortical_index()
+        report.phases.append(PhaseMetrics(
+            phase="Wake-prep Schema Synthesis",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=len(pruned_anchors) + len(pruned_edges),
+            details={"pruned_anchors": len(pruned_anchors),
+                     "pruned_edges": len(pruned_edges),
+                     "ghosts": ghosts_created},
+        ))
+        report.memories_pruned = len(pruned_anchors)
+        report.ghosts_created = ghosts_created
+        report.edges_pruned = len(pruned_edges)
+
+        # ── Final stats ──
+        stats_after = self.graph.stats()
+        report.total_duration_ms = (time.time() - started) * 1000
+        report.anchors_after = stats_after["anchors"]
+        report.edges_after = stats_after["edges"]
+        report.avg_retention_after = stats_after["avg_retention"]
+        report.compression_ratio = (
+            report.anchors_before / max(1, report.anchors_after)
+        )
+
+        return report
+
+    # ── Async variants ────────────────────────────────────
+
+    async def run_async(self, recent_anchors: list[Anchor] | None = None,
+                        similarity_threshold: float | None = None,
+                        retention_threshold: float | None = None,
+                        edge_prune_threshold: float | None = None,
+                        on_progress: Callable[[str, float], Awaitable[None]] | None = None,
+                        ) -> dict:
+        """Async version of run() — non-blocking with progress callbacks.
+
+        Args:
+            on_progress: async callback(phase_name, progress_0_to_1)
+        """
+        loop = asyncio.get_running_loop()
+        steps = 9
+        results = {}
+
+        for i, (name, fn) in enumerate([
+            ("SWR Replay", lambda: self._swr_replay(
+                recent_anchors or [],
+                similarity_threshold or self.cfg.sleep.merge.default_threshold)),
+            ("Systems Consolidation", self._systems_consolidation),
+            ("Emotional Stripping", self._emotional_stripping),
+            ("Schema Extraction", self._schema_extraction),
+            ("Merge Similar", lambda: self._merge_similar(
+                similarity_threshold or self.cfg.sleep.merge.default_threshold)),
+            ("Prune Anchors", lambda: self._prune_anchors(
+                retention_threshold or self.cfg.sleep.prune.default_retention_threshold)),
+            ("Prune Edges", lambda: self._prune_edges(
+                edge_prune_threshold or self.cfg.sleep.prune.default_edge_threshold)),
+            ("Bridge Distant", self._bridge_distant),
+            ("Hebbian + Homeostasis", self._hebbian_and_homeostasis),
+        ]):
+            if on_progress:
+                await on_progress(name, i / steps)
+            await loop.run_in_executor(None, fn)
+            if on_progress:
+                await on_progress(name, (i + 1) / steps)
+
+        return results
+
+    async def run_phased_async(self,
+                               recent_anchors: list[Anchor] | None = None,
+                               similarity_threshold: float | None = None,
+                               retention_threshold: float | None = None,
+                               edge_prune_threshold: float | None = None,
+                               on_phase: Callable[[PhaseMetrics], Awaitable[None]] | None = None,
+                               ) -> SleepReport:
+        """Async 5-phase sleep with per-phase progress callbacks.
+
+        Args:
+            on_phase: async callback called after each phase completes
+        """
+        loop = asyncio.get_running_loop()
+
+        # Run the full phased cycle in executor
+        report = await loop.run_in_executor(
+            None,
+            lambda: self.run_phased(
+                recent_anchors, similarity_threshold,
+                retention_threshold, edge_prune_threshold,
+            )
+        )
+
+        if on_phase:
+            for phase in report.phases:
+                await on_phase(phase)
+
+        return report
+
+    def _hebbian_and_homeostasis(self) -> None:
+        self._hebbian_update()
+        self._synaptic_homeostasis()
+        self._refresh_cortical_index()
 
     # ── Phase 1: Prioritized SWR Replay ──────────────────
 
@@ -372,10 +658,8 @@ class SleepCycle:
                         if old:
                             nk = self.graph._key(core.id, neighbor)
                             if nk not in self.graph.edges:
-                                self.graph.edges[nk] = Edge(
-                                    source=nk[0], target=nk[1],
-                                    weight=old.weight, edge_type=old.edge_type,
-                                )
+                                new_edge = self._transfer_edge(old, nk)
+                                self.graph.edges[nk] = new_edge
                                 self.graph._adjacency[core.id].add(neighbor)
                                 self.graph._adjacency[neighbor].add(core.id)
                     self.graph.remove_anchor(variant.id)
@@ -566,6 +850,23 @@ class SleepCycle:
         if not ba or not bb:
             return 0.0
         return len(ba & bb) / len(ba | bb)
+
+    @staticmethod
+    def _transfer_edge(old: Edge, new_key: tuple[str, str]) -> Edge:
+        """Transfer an edge to a new key, preserving RichEdge properties."""
+        from .graph import RichEdge
+        if isinstance(old, RichEdge):
+            return RichEdge(
+                source=new_key[0], target=new_key[1],
+                weight=old.weight, edge_type=old.edge_type,
+                confidence=old.confidence, source_type=old.source_type,
+                reinforcement_count=old.reinforcement_count,
+                decay_rate=old.decay_rate, is_stale=old.is_stale,
+                stale_since=old.stale_since, replaced_by=old.replaced_by,
+                version_history=list(old.version_history),
+            )
+        return Edge(source=new_key[0], target=new_key[1],
+                    weight=old.weight, edge_type=old.edge_type)
 
     @staticmethod
     def _infer_edge_type(a: Anchor, b: Anchor) -> str:

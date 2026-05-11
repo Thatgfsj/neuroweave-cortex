@@ -1,4 +1,10 @@
-"""Persistence layer — v0.2 with ghosts, schemas, cortical index, oscillators."""
+"""Persistence layer — v0.4 with pluggable backends.
+
+JSONStorage: single-file JSON (fine for <10K anchors, simple deployment).
+SQLiteStorage: indexed SQLite (for 10K+ anchors, in star_graph/sqlite_storage.py).
+
+Storage is kept as a backward-compatible alias for JSONStorage.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +16,14 @@ from typing import Optional
 
 from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator, GhostAnchor
 from .graph import StarGraph, Edge, Schema
+from .storage_backend import StorageBackend
 
 
 DEFAULT_PATH = Path.home() / ".star_graph" / "memory.json"
 
 
-class Storage:
-    """JSON file-backed storage for the star graph."""
+class JSONStorage(StorageBackend):
+    """JSON file-backed storage implementing the StorageBackend interface."""
 
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else DEFAULT_PATH
@@ -185,3 +192,7 @@ class Storage:
     @property
     def exists(self) -> bool:
         return self.path.exists()
+
+
+# Backward-compatible alias
+Storage = JSONStorage

@@ -22,8 +22,8 @@ Key v0.4 additions:
 __version__ = "0.4.0-dev"
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator, MemoryState
-from .graph import StarGraph, Edge, Constellation, Schema
-from .sleep import SleepCycle
+from .graph import StarGraph, Edge, RichEdge, Constellation, Schema
+from .sleep import SleepCycle, SleepReport, PhaseMetrics
 from .online import OnlineConsolidator
 from .retriever import (
     RetrievalResult,
@@ -32,6 +32,9 @@ from .retriever import (
     Retriever,
     OscillationResonanceRetriever,
     VectorSimilarityRetriever,
+    HybridFusionRetriever,
+    ExplainableScore,
+    personalized_pagerank,
     compare_retrievers,
 )
 from .embedding import EmbeddingProvider, get_embedder
@@ -44,3 +47,15 @@ from .competition import MemoryCompetition
 from .config import Config, config, override, reload_defaults, load_config
 from .layers import enforce_layer_boundaries, layer_summary, get_layer, check_import
 from .anchor import EmbedderRegistry
+from .storage import Storage, JSONStorage
+from .storage_backend import StorageBackend
+from .sqlite_storage import SQLiteStorage
+from .evolution import MemoryEvolutionEngine, EvolutionEvent, BeliefTransition
+from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryType, MemoryItem, MemoryContext
+from .manager import MemoryManager, ManagerStats
+
+# MCP server is optional — requires `pip install mcp`
+try:
+    from .mcp_server import server as mcp_server
+except ImportError:
+    mcp_server = None

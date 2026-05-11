@@ -1,0 +1,167 @@
+{
+  "config": {
+    "sessions": 6,
+    "turns_per_session": 80,
+    "total_turns": 480
+  },
+  "sleep_stats": {
+    "anchors_before": 350,
+    "anchors_after": 292,
+    "merged": 58,
+    "pruned": 0,
+    "ghosts": 0,
+    "schemas": 19,
+    "compression_ratio": 0.834
+  },
+  "categories": {
+    "long_context": {
+      "num_queries": 2,
+      "description": "long_context",
+      "star_graph": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "mrr": 0.0,
+        "interference_score": 0.0
+      },
+      "vector_only": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0
+      },
+      "hybrid_fusion": {
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "interference_score": 0.0
+      }
+    },
+    "cross_session": {
+      "num_queries": 2,
+      "description": "cross_session",
+      "star_graph": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "mrr": 0.0,
+        "interference_score": 0.0
+      },
+      "vector_only": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 0.833,
+        "content_recall@5": 0.833
+      },
+      "hybrid_fusion": {
+        "content_recall@3": 0.833,
+        "content_recall@5": 0.833,
+        "interference_score": 0.0
+      }
+    },
+    "compression": {
+      "num_queries": 2,
+      "description": "compression",
+      "star_graph": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 0.667,
+        "content_recall@5": 0.667,
+        "mrr": 0.0,
+        "interference_score": 0.0
+      },
+      "vector_only": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 0.833,
+        "content_recall@5": 0.833
+      },
+      "hybrid_fusion": {
+        "content_recall@3": 0.667,
+        "content_recall@5": 0.667,
+        "interference_score": 0.0
+      }
+    },
+    "forgetting": {
+      "num_queries": 2,
+      "description": "forgetting",
+      "star_graph": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 0.667,
+        "content_recall@5": 0.667,
+        "mrr": 0.0,
+        "interference_score": 0.0
+      },
+      "vector_only": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0
+      },
+      "hybrid_fusion": {
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "interference_score": 0.0
+      }
+    },
+    "interference": {
+      "num_queries": 2,
+      "description": "interference",
+      "star_graph": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "mrr": 0.0,
+        "interference_score": 0.667
+      },
+      "vector_only": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0
+      },
+      "hybrid_fusion": {
+        "content_recall@3": 1.0,
+        "content_recall@5": 1.0,
+        "interference_score": 0.667
+      }
+    }
+  },
+  "baselines": {},
+  "aggregate": {
+    "star_graph": {
+      "content_recall@3": 0.867,
+      "content_recall@5": 0.867,
+      "interference_score": 0.667,
+      "tokens": 3982
+    },
+    "vector_only": {
+      "content_recall@3": 0.933,
+      "content_recall@5": 0.933
+    },
+    "hybrid_fusion": {
+      "content_recall@3": 0.9,
+      "content_recall@5": 0.9,
+      "interference_score": 0.667
+    },
+    "raw_history": {
+      "tokens": 6708
+    },
+    "tfidf": {
+      "tokens": 6708
+    }
+  }
+}

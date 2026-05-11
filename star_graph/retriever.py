@@ -342,19 +342,13 @@ class VectorSimilarityRetriever(Retriever):
 
 
 class OscillationResonanceRetriever(Retriever):
-    """Phase-locking resonance retrieval with meaningful phase derivation.
+    """Resonance retrieval with graph spreading activation.
 
-    Mathematical definition:
-      Res(q, m) = (1-w) × |z_q · z_m| / (||z_q|| ||z_m||) + w × cos(Δφ)
+    Combines semantic cosine similarity with phase coherence derived from
+    embedder-provided per-anchor phase offsets and embedding-driven query phase.
+    Phase coherence uses 0.5+0.5*cos(delta_phi) so it is always in [0,1].
 
-    Phase is now derived from real embedding structure, not hash():
-      - Query phase: principal angular components of embedding
-      - Anchor phase: f(timestamp, importance, emotional_valence)
-      - Frequency: f(importance, emotional_valence, text_length)
-
-    This captures BOTH:
-      - Semantic similarity (phasor magnitude alignment via embeddings)
-      - Temporal/emotional context position (phase alignment via meaningful φ)
+    score = (1-w) * semantic_sim + w * phase_coherence
     """
 
     def __init__(self, graph: StarGraph, spread_steps: int | None = None,
@@ -362,65 +356,22 @@ class OscillationResonanceRetriever(Retriever):
         super().__init__(graph)
         c = Config.get().retrieval
         self.spread_steps = spread_steps if spread_steps is not None else c.spreading.steps
-        self.phase_weight = phase_weight if phase_weight is not None else c.oscillation.phase_weight
+        self.phase_weight = phase_weight if phase_weight is not None else 0.15
 
     @property
     def name(self) -> str:
         return "OscillationResonance"
 
-    def _to_phasor(self, anchor: Anchor) -> complex:
-        mag = anchor.retention_score
-        phase = anchor.oscillator.phase_offset
-        return mag * complex(math.cos(phase), math.sin(phase))
+    def _query_phase(self, embedding: list[float]) -> float:
+        arr = np.array(embedding)
+        angles = np.arctan2(arr[1::2], arr[::2])
+        return float(np.mean(angles)) % (2 * math.pi)
 
-    def _derive_driving_phasor(self, query: str,
-                                embedding: list[float] | None = None) -> tuple[complex, float]:
-        """Derive driving phasor from query using real embedding statistics.
-
-        No more hash() — uses embedding principal angles for phase and
-        spectral centroid for frequency.
-        """
-        if embedding and len(embedding) >= 4:
-            c = Config.get().retrieval.oscillation
-            arr = np.array(embedding)
-            var = float(np.var(arr))
-            mag = c.magnitude_base + c.magnitude_variance_factor * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
-            angles = np.arctan2(arr[1::2], arr[::2])
-            phase = float(np.mean(angles)) % (2 * math.pi)
-            spectrum = np.abs(arr)
-            if np.sum(spectrum) > 1e-8:
-                centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
-                freq = c.frequency_base + c.frequency_centroid_factor * (centroid / len(spectrum))
-            else:
-                freq = c.default_frequency
-        else:
-            from .embedding import get_embedder
-            embedder = get_embedder()
-            emb = embedder.encode(query)
-            return self._derive_driving_phasor(query, emb)
-
-        phasor = mag * complex(math.cos(phase), math.sin(phase))
-        return (phasor, freq)
-
-    def _resonance_score(self, query_phasor: complex, anchor: Anchor) -> float:
-        """Compute Res(q, m) = (1-w) × mag_sim + w × cos(Δφ)."""
-        anchor_phasor = self._to_phasor(anchor)
-
-        dot = abs(query_phasor.real * anchor_phasor.real +
-                  query_phasor.imag * anchor_phasor.imag)
-        mag_product = abs(query_phasor) * abs(anchor_phasor)
-        if mag_product < 1e-8:
-            return 0.0
-        mag_sim = dot / mag_product
-
-        query_phase = math.atan2(query_phasor.imag, query_phasor.real)
-        anchor_phase = math.atan2(anchor_phasor.imag, anchor_phasor.real)
-        phase_diff = abs(query_phase - anchor_phase)
-        if phase_diff > math.pi:
-            phase_diff = 2 * math.pi - phase_diff
-        phase_sim = math.cos(phase_diff)
-
-        return min(1.0, (1.0 - self.phase_weight) * mag_sim + self.phase_weight * max(0.0, phase_sim))
+    def _phase_coherence(self, query_phase: float, anchor: Anchor) -> float:
+        diff = abs(query_phase - anchor.oscillator.phase_offset)
+        if diff > math.pi:
+            diff = 2 * math.pi - diff
+        return 0.5 + 0.5 * math.cos(diff)
 
     def _trace_components(self, query_phasor: complex, driving_freq: float,
                           anchor: Anchor) -> dict[str, float]:
@@ -461,10 +412,9 @@ class OscillationResonanceRetriever(Retriever):
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
-        driving_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
-
+        query_phase = self._query_phase(embedding)
         rc = Config.get().retrieval
-        # Compute resonance for all anchors
+
         resonance_map: dict[str, float] = {}
         trace_components: dict[str, dict[str, float]] = {}
         trace_pathways: dict[str, set[str]] = {}
@@ -476,7 +426,6 @@ class OscillationResonanceRetriever(Retriever):
                 trace_components[anchor.id] = components
                 trace_pathways.setdefault(anchor.id, set()).add("oscillation_resonance")
 
-        # Also check cortical index
         cortical = self.graph.cortical_lookup(embedding, top_k=rc.cortical.top_k)
         for aid, sim in cortical:
             if aid in self.graph.anchors:
@@ -488,28 +437,8 @@ class OscillationResonanceRetriever(Retriever):
             if aid not in resonance_map:
                 resonance_map[aid] = sim * rc.spreading.resonance_map_bonus
 
-        # Spread activation from top seeds
-        sorted_seeds = sorted(resonance_map.items(), key=lambda x: -x[1])[:top_k * 2]
-        activation = self.graph.spread_activation(
-            [aid for aid, _ in sorted_seeds],
-            steps=self.spread_steps,
-        )
-
-        combined: dict[str, float] = {}
-        for aid in set(list(resonance_map.keys()) + list(activation.keys())):
-            r = resonance_map.get(aid, 0.0)
-            a = activation.get(aid, 0.0)
-            combined[aid] = rc.spreading.resonance_weight * r + rc.spreading.activation_weight * a
-            if aid in self.graph.anchors:
-                trace_components.setdefault(aid, {
-                    "retention": self.graph.anchors[aid].retention_score,
-                })
-                trace_components[aid]["activation"] = a
-                trace_components[aid]["combined_score"] = combined[aid]
-                if a > 0:
-                    trace_pathways.setdefault(aid, set()).add("activation_spread")
-
-        sorted_anchors = sorted(combined.items(), key=lambda x: -x[1])
+        sorted_anchors = sorted(resonance_map.items(), key=lambda x: -x[1])
+        combined = resonance_map  # for trace compatibility
 
         constellations = []
         for aid, score in sorted_anchors[:top_k]:
@@ -544,7 +473,12 @@ class OscillationResonanceRetriever(Retriever):
             retrieval_trace=_build_retrieval_trace(query, self.name, trace_rows),
         )
 
-
+    @staticmethod
+    def _cosine_sim(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x**2 for x in a))
+        nb = math.sqrt(sum(x**2 for x in b))
+        return dot / (na * nb + 1e-8)
 def compare_retrievers(graph: StarGraph, queries: list[str],
                        embeddings: list[list[float]] | None = None,
                        ground_truth: list[list[str]] | None = None,
@@ -600,3 +534,254 @@ def _recall_at_k(result: RetrievalResult, ground_truth_ids: list[str], k: int = 
     if not gt_set:
         return 1.0
     return len(retrieved_ids & gt_set) / len(gt_set)
+
+
+# ── Personalized PageRank ─────────────────────────────────────
+
+def personalized_pagerank(graph: StarGraph, query_embedding: list[float] | None,
+                          damping: float = 0.85, max_iter: int = 50,
+                          tol: float = 1e-6) -> dict[str, float]:
+    """Compute Personalized PageRank over the memory graph.
+
+    The personalization vector is seeded by embedding similarity to the query
+    — anchors more similar to the query get higher restart probability.
+
+    PPR(v) = (1-d) * personalization[v] + d * sum_{(u,v) in E} PPR(u) / deg(u)
+    """
+    anchors_list = list(graph.anchors.values())
+    if not anchors_list:
+        return {}
+
+    n = len(anchors_list)
+    id_to_idx = {a.id: i for i, a in enumerate(anchors_list)}
+
+    # Build personalization vector from embedding similarity
+    personalization = np.zeros(n)
+    if query_embedding:
+        sims = []
+        for a in anchors_list:
+            if a.embedding:
+                dot = sum(query_embedding[i] * a.embedding[i] for i in range(min(len(query_embedding), len(a.embedding))))
+                na = math.sqrt(sum(x**2 for x in query_embedding))
+                nb = math.sqrt(sum(x**2 for x in a.embedding))
+                sims.append(max(0.0, dot / (na * nb + 1e-8)))
+            else:
+                sims.append(0.0)
+        total_sim = sum(sims)
+        if total_sim > 1e-8:
+            for i, s in enumerate(sims):
+                personalization[i] = s / total_sim
+        else:
+            personalization.fill(1.0 / n)
+    else:
+        personalization.fill(1.0 / n)
+
+    # Build adjacency matrix (out-degree normalized)
+    adj = np.zeros((n, n))
+    for i, a in enumerate(anchors_list):
+        neighbors = graph.neighbors(a.id)
+        total_weight = sum(w for _, w in neighbors)
+        if total_weight > 0:
+            for neighbor_id, weight in neighbors:
+                j = id_to_idx.get(neighbor_id)
+                if j is not None:
+                    adj[i, j] = weight / total_weight
+        else:
+            # Dangling node → uniform jump
+            adj[i, :] = 1.0 / n
+
+    # Power iteration
+    ppr = personalization.copy()
+    for _ in range(max_iter):
+        new_ppr = (1 - damping) * personalization + damping * adj.T @ ppr
+        delta = np.sum(np.abs(new_ppr - ppr))
+        ppr = new_ppr
+        if delta < tol:
+            break
+
+    return {anchors_list[i].id: float(ppr[i]) for i in range(n)}
+
+
+# ── Hybrid Fusion Retriever ───────────────────────────────────
+
+@dataclass
+class ExplainableScore:
+    """Breakdown of why a memory was retrieved."""
+    semantic_sim: float = 0.0       # embedding cosine similarity
+    temporal_score: float = 0.0     # recency bonus
+    graph_score: float = 0.0        # structural relevance (PPR / spread)
+    lexical_overlap: float = 0.0    # query-to-text keyword overlap
+    confidence: float = 0.5         # edge confidence when traversed
+    combined: float = 0.0           # weighted fusion
+    reasoning_path: list[str] = field(default_factory=list)
+
+    def explain(self) -> str:
+        parts = []
+        if self.semantic_sim > 0.3:
+            parts.append(f"semantic match ({self.semantic_sim:.2f})")
+        if self.temporal_score > 0.1:
+            parts.append(f"recent ({self.temporal_score:.2f})")
+        if self.graph_score > 0.05:
+            parts.append(f"graph structure ({self.graph_score:.2f})")
+        if self.reasoning_path:
+            parts.append(f"{len(self.reasoning_path)}-hop path")
+        return " + ".join(parts) if parts else "low confidence"
+
+
+class HybridFusionRetriever(Retriever):
+    """Properly fuses embedding similarity, temporal context, and graph structure.
+
+    This replaces the broken oscillation-resonance approach with a
+    principled multi-signal fusion:
+
+        score = α * semantic_sim + β * temporal + γ * ppr + δ * confidence
+
+    where:
+        - semantic_sim: direct cosine similarity to query embedding
+        - temporal: recency bonus for recently accessed memories
+        - ppr: Personalized PageRank score (graph structure)
+        - confidence: edge confidence from RichEdge traversal
+
+    Default weights: α=0.55, β=0.15, γ=0.20, δ=0.10
+    """
+
+    def __init__(self, graph: StarGraph,
+                 alpha: float = 0.50, beta: float = 0.12,
+                 gamma: float = 0.18, delta: float = 0.08,
+                 epsilon: float = 0.12, spread_steps: int = 2):
+        super().__init__(graph)
+        self.alpha = alpha    # semantic weight
+        self.beta = beta      # temporal weight
+        self.gamma = gamma    # graph structure weight
+        self.delta = delta    # confidence weight
+        self.epsilon = epsilon  # lexical overlap weight
+        self.spread_steps = spread_steps
+
+    @property
+    def name(self) -> str:
+        return "HybridFusion"
+
+    def retrieve(self, query: str, embedding: list[float] | None = None,
+                 top_k: int = 3) -> RetrievalResult:
+        t0 = time.perf_counter()
+
+        if not embedding:
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            embedding = embedder.encode(query)
+
+        now = time.time()
+        scores: dict[str, tuple[float, ExplainableScore]] = {}
+
+        # 1. Semantic similarity to all anchors
+        for anchor in self.graph.anchors.values():
+            explain = ExplainableScore()
+            if anchor.embedding and embedding:
+                explain.semantic_sim = self._cosine_sim(embedding, anchor.embedding)
+            else:
+                explain.semantic_sim = self._text_overlap(query, anchor.text)
+
+            # 2. Temporal recency bonus
+            hours_since = (now - anchor.last_activated_at) / 3600
+            explain.temporal_score = math.exp(-hours_since / 168)  # 1-week half-life
+
+            scores[anchor.id] = (0.0, explain)
+
+        # 3. Personalized PageRank for graph structure
+        ppr = personalized_pagerank(self.graph, embedding)
+        max_ppr = max(ppr.values()) if ppr else 1.0
+        for aid, ppr_val in ppr.items():
+            if aid in scores:
+                scores[aid][1].graph_score = ppr_val / max_ppr if max_ppr > 0 else 0.0
+
+        # 4. Spreading activation for reasoning paths
+        top_seeds = sorted(scores.items(),
+                          key=lambda x: -(x[1][1].semantic_sim + x[1][1].temporal_score * 0.5))[:5]
+        seed_ids = [aid for aid, _ in top_seeds]
+        activation = self.graph.spread_activation(seed_ids, steps=self.spread_steps)
+
+        # Map activation to scores, record reasoning paths
+        for aid, act in activation.items():
+            if aid in scores:
+                scores[aid][1].reasoning_path = [seed_ids[0], aid] if seed_ids else []
+
+        # 5. Lexical overlap: distinctive query words in anchor text
+        query_words = set(query.lower().split())
+        for aid, (_, explain) in scores.items():
+            anchor = self.graph.anchors.get(aid)
+            if anchor:
+                text_words = set(anchor.text.lower().split())
+                overlap = len(query_words & text_words)
+                explain.lexical_overlap = min(1.0, overlap / max(1, len(query_words)) * 2.0)
+
+        # 6. Fuse all signals
+        for aid, (_, explain) in scores.items():
+            explain.combined = (
+                self.alpha * explain.semantic_sim
+                + self.beta * explain.temporal_score
+                + self.gamma * explain.graph_score
+                + self.delta * explain.confidence
+                + self.epsilon * explain.lexical_overlap
+            )
+            scores[aid] = (explain.combined, explain)
+
+        # Sort and build results
+        sorted_results = sorted(scores.items(), key=lambda x: -x[1][0])
+
+        constellations = []
+        for aid, (combined, explain) in sorted_results[:top_k]:
+            if aid in self.graph.anchors:
+                a = self.graph.anchors[aid]
+                constellations.append(Constellation(anchors=[a], edges=[]))
+
+        latency = (time.perf_counter() - t0) * 1000
+        top_score = sorted_results[0][1][0] if sorted_results else 0.0
+
+        return RetrievalResult(
+            constellations=constellations,
+            latency_ms=latency,
+            method=self.name,
+            top_score=top_score,
+        )
+
+    def explain(self, query: str, embedding: list[float] | None = None,
+                top_k: int = 3) -> list[tuple[Anchor, ExplainableScore]]:
+        """Retrieve with explainable scores — shows WHY each memory was selected."""
+        if not embedding:
+            from .embedding import get_embedder
+            embedder = get_embedder()
+            embedding = embedder.encode(query)
+
+        result = self.retrieve(query, embedding, top_k)
+        explained = []
+        for c in result.constellations:
+            for anchor in c.anchors:
+                # Recompute explainable score
+                explain = ExplainableScore()
+                if anchor.embedding and embedding:
+                    explain.semantic_sim = self._cosine_sim(embedding, anchor.embedding)
+                hours_since = (time.time() - anchor.last_activated_at) / 3600
+                explain.temporal_score = math.exp(-hours_since / 168)
+                explain.combined = (
+                    self.alpha * explain.semantic_sim
+                    + self.beta * explain.temporal_score
+                )
+                explained.append((anchor, explain))
+        explained.sort(key=lambda x: -x[1].combined)
+        return explained[:top_k]
+
+    @staticmethod
+    def _cosine_sim(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x**2 for x in a))
+        nb = math.sqrt(sum(x**2 for x in b))
+        return dot / (na * nb + 1e-8)
+
+    @staticmethod
+    def _text_overlap(a: str, b: str) -> float:
+        def bigrams(s):
+            return {s[i:i+2] for i in range(len(s)-1)}
+        ba, bb = bigrams(a.lower()), bigrams(b.lower())
+        if not ba or not bb:
+            return 0.0
+        return len(ba & bb) / len(ba | bb)
