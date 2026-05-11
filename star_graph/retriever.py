@@ -14,10 +14,11 @@ No more hash-based random phases.
 from __future__ import annotations
 
 import math
+import re
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import numpy as np
 
@@ -26,11 +27,179 @@ from .graph import StarGraph, Constellation
 
 
 @dataclass
+class RetrievalTraceEntry:
+    """Why a memory appeared in a retrieval result."""
+
+    memory_id: str
+    score: float
+    reason: str
+    pathway: str = ""
+    matched_terms: list[str] = field(default_factory=list)
+    components: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "memory_id": self.memory_id,
+            "score": round(_clip01(self.score), 4),
+            "reason": self.reason,
+        }
+        if self.pathway:
+            item["pathway"] = self.pathway
+        if self.matched_terms:
+            item["matched_terms"] = self.matched_terms
+        if self.components:
+            item["components"] = {
+                key: round(_clip01(value), 4)
+                for key, value in self.components.items()
+            }
+        return item
+
+
+@dataclass
+class RetrievalTrace:
+    """JSON-serializable retrieval explainability payload."""
+
+    query: str
+    method: str
+    retrieved_memories: list[RetrievalTraceEntry] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "method": self.method,
+            "retrieved_memories": [
+                entry.to_dict()
+                for entry in self.retrieved_memories
+            ],
+        }
+
+
+@dataclass
 class RetrievalResult:
     constellations: list[Constellation]
     latency_ms: float
     method: str
     top_score: float
+    retrieval_trace: dict[str, Any] = field(default_factory=dict)
+
+
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does",
+    "for", "from", "has", "have", "how", "i", "in", "is", "it", "me", "my",
+    "of", "on", "or", "the", "to", "user", "was", "were", "what", "when",
+    "where", "which", "who", "why", "with", "you", "your",
+}
+_TEMPORAL_WORDS = {
+    "after", "april", "august", "before", "date", "day", "december",
+    "during", "february", "friday", "january", "july", "june", "march",
+    "may", "monday", "month", "november", "october", "saturday", "september",
+    "since", "sunday", "thursday", "time", "today", "tomorrow", "tuesday",
+    "until", "wednesday", "week", "when", "year", "yesterday",
+}
+_DATE_RE = re.compile(
+    r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4})\b",
+    re.IGNORECASE,
+)
+
+
+def _clip01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _tokenize_terms(text: str) -> set[str]:
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9_]+", text)
+    }
+    return {
+        token
+        for token in tokens
+        if len(token) > 1 and token not in _STOPWORDS
+    }
+
+
+def _has_temporal_signal(text: str) -> bool:
+    terms = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9_]+", text)
+    }
+    return bool(terms & _TEMPORAL_WORDS) or bool(_DATE_RE.search(text))
+
+
+def _matched_terms(query: str, anchor: Anchor) -> list[str]:
+    query_terms = _tokenize_terms(query)
+    memory_terms = _tokenize_terms(anchor.text)
+    tag_terms = _tokenize_terms(" ".join(anchor.tags))
+    return sorted(query_terms & (memory_terms | tag_terms))[:8]
+
+
+def _trace_reason(query: str, anchor: Anchor, components: dict[str, float],
+                  matched_terms: list[str]) -> str:
+    reasons: list[str] = []
+
+    if _has_temporal_signal(query) and _has_temporal_signal(anchor.text):
+        reasons.append("temporal_match")
+
+    if matched_terms:
+        reasons.append("entity_match")
+
+    tag_terms = _tokenize_terms(" ".join(anchor.tags))
+    if tag_terms and tag_terms & set(matched_terms):
+        reasons.append("tag_match")
+
+    if components.get("semantic_similarity", 0.0) >= 0.35:
+        reasons.append("semantic_match")
+    if components.get("text_overlap", 0.0) >= 0.10:
+        reasons.append("lexical_match")
+    if components.get("phase_similarity", 0.0) >= 0.75:
+        reasons.append("phase_match")
+    if components.get("frequency_similarity", 0.0) >= 0.75:
+        reasons.append("frequency_match")
+    if components.get("cortical_similarity", 0.0) >= 0.20:
+        reasons.append("cortical_lookup")
+    if components.get("activation", 0.0) >= 0.20:
+        reasons.append("activation_spread")
+    if components.get("graph_expansion", 0.0) > 0.0:
+        reasons.append("graph_expansion")
+    if anchor.retention_score >= 0.60:
+        reasons.append("retention_boost")
+
+    if not reasons:
+        reasons.append("score_ranked")
+
+    deduped: list[str] = []
+    for reason in reasons:
+        if reason not in deduped:
+            deduped.append(reason)
+    return " + ".join(deduped)
+
+
+def _build_retrieval_trace(query: str, method: str,
+                           rows: list[tuple[Anchor, float, str, dict[str, float]]]
+                           ) -> dict[str, Any]:
+    entries: list[RetrievalTraceEntry] = []
+    seen: set[str] = set()
+
+    for anchor, score, pathway, components in rows:
+        if anchor.id in seen:
+            continue
+        seen.add(anchor.id)
+        matches = _matched_terms(query, anchor)
+        entries.append(RetrievalTraceEntry(
+            memory_id=anchor.id,
+            score=score,
+            reason=_trace_reason(query, anchor, components, matches),
+            pathway=pathway,
+            matched_terms=matches,
+            components=components,
+        ))
+
+    entries.sort(key=lambda entry: entry.score, reverse=True)
+    return RetrievalTrace(
+        query=query,
+        method=method,
+        retrieved_memories=entries,
+    ).to_dict()
 
 
 class Retriever(ABC):
@@ -63,6 +232,16 @@ class VectorSimilarityRetriever(Retriever):
                  top_k: int = 3) -> RetrievalResult:
         t0 = time.perf_counter()
 
+        if not self.graph.anchors:
+            latency = (time.perf_counter() - t0) * 1000
+            return RetrievalResult(
+                constellations=[],
+                latency_ms=latency,
+                method=self.name,
+                top_score=0.0,
+                retrieval_trace=_build_retrieval_trace(query, self.name, []),
+            )
+
         if not embedding:
             from .embedding import get_embedder
             embedder = get_embedder()
@@ -82,7 +261,16 @@ class VectorSimilarityRetriever(Retriever):
             for aid, sim in results:
                 if aid in self.graph.anchors:
                     anchor = self.graph.anchors[aid]
-                    scored.append((sim * anchor.retention_score, anchor))
+                    score = sim * anchor.retention_score
+                    scored.append((
+                        score,
+                        anchor,
+                        "ann_vector",
+                        {
+                            "semantic_similarity": sim,
+                            "retention": anchor.retention_score,
+                        },
+                    ))
             scored.sort(key=lambda x: -x[0])
         else:
             # Fallback linear scan
@@ -90,26 +278,49 @@ class VectorSimilarityRetriever(Retriever):
             for anchor in self.graph.anchors.values():
                 if anchor.embedding:
                     sim = self._cosine_sim(embedding, anchor.embedding)
-                    scored.append((sim * anchor.retention_score, anchor))
+                    score = sim * anchor.retention_score
+                    scored.append((
+                        score,
+                        anchor,
+                        "linear_vector",
+                        {
+                            "semantic_similarity": sim,
+                            "retention": anchor.retention_score,
+                        },
+                    ))
                 else:
                     sim = self._text_overlap(query, anchor.text)
-                    scored.append((sim * anchor.retention_score, anchor))
+                    score = sim * anchor.retention_score
+                    scored.append((
+                        score,
+                        anchor,
+                        "text_overlap",
+                        {
+                            "text_overlap": sim,
+                            "retention": anchor.retention_score,
+                        },
+                    ))
             scored.sort(key=lambda x: -x[0])
 
         constellations = []
         for i in range(min(top_k, len(scored))):
-            score, anchor = scored[i]
+            _, anchor, _, _ = scored[i]
             c = Constellation(anchors=[anchor], edges=[])
             constellations.append(c)
 
         latency = (time.perf_counter() - t0) * 1000
         top_score = scored[0][0] if scored else 0.0
+        trace_rows = [
+            (anchor, score, pathway, components)
+            for score, anchor, pathway, components in scored[:top_k]
+        ]
 
         return RetrievalResult(
             constellations=constellations,
             latency_ms=latency,
             method=self.name,
             top_score=top_score,
+            retrieval_trace=_build_retrieval_trace(query, self.name, trace_rows),
         )
 
     @staticmethod
@@ -208,9 +419,39 @@ class OscillationResonanceRetriever(Retriever):
 
         return min(1.0, (1.0 - self.phase_weight) * mag_sim + self.phase_weight * max(0.0, phase_sim))
 
+    def _trace_components(self, query_phasor: complex, driving_freq: float,
+                          anchor: Anchor) -> dict[str, float]:
+        anchor_phasor = self._to_phasor(anchor)
+        query_phase = math.atan2(query_phasor.imag, query_phasor.real)
+        anchor_phase = math.atan2(anchor_phasor.imag, anchor_phasor.real)
+        phase_diff = abs(query_phase - anchor_phase)
+        if phase_diff > math.pi:
+            phase_diff = 2 * math.pi - phase_diff
+        phase_similarity = max(0.0, math.cos(phase_diff))
+
+        freq_diff = abs(driving_freq - anchor.oscillator.natural_frequency)
+        frequency_similarity = 1.0 - min(1.0, freq_diff)
+
+        return {
+            "resonance": self._resonance_score(query_phasor, anchor),
+            "phase_similarity": phase_similarity,
+            "frequency_similarity": frequency_similarity,
+            "retention": anchor.retention_score,
+        }
+
     def retrieve(self, query: str, embedding: list[float] | None = None,
                  top_k: int = 3) -> RetrievalResult:
         t0 = time.perf_counter()
+
+        if not self.graph.anchors:
+            latency = (time.perf_counter() - t0) * 1000
+            return RetrievalResult(
+                constellations=[],
+                latency_ms=latency,
+                method=self.name,
+                top_score=0.0,
+                retrieval_trace=_build_retrieval_trace(query, self.name, []),
+            )
 
         if not embedding:
             from .embedding import get_embedder
@@ -221,14 +462,25 @@ class OscillationResonanceRetriever(Retriever):
 
         # Compute resonance for all anchors
         resonance_map: dict[str, float] = {}
+        trace_components: dict[str, dict[str, float]] = {}
+        trace_pathways: dict[str, set[str]] = {}
         for anchor in self.graph.anchors.values():
-            score = self._resonance_score(driving_phasor, anchor)
+            components = self._trace_components(driving_phasor, driving_freq, anchor)
+            score = components["resonance"]
             if score > 0.05:
                 resonance_map[anchor.id] = score
+                trace_components[anchor.id] = components
+                trace_pathways.setdefault(anchor.id, set()).add("oscillation_resonance")
 
         # Also check cortical index
         cortical = self.graph.cortical_lookup(embedding, top_k=10)
         for aid, sim in cortical:
+            if aid in self.graph.anchors:
+                trace_components.setdefault(aid, {
+                    "retention": self.graph.anchors[aid].retention_score,
+                })
+                trace_components[aid]["cortical_similarity"] = sim
+                trace_pathways.setdefault(aid, set()).add("cortical_lookup")
             if aid not in resonance_map:
                 resonance_map[aid] = sim * 0.7
 
@@ -244,6 +496,14 @@ class OscillationResonanceRetriever(Retriever):
             r = resonance_map.get(aid, 0.0)
             a = activation.get(aid, 0.0)
             combined[aid] = 0.6 * r + 0.4 * a
+            if aid in self.graph.anchors:
+                trace_components.setdefault(aid, {
+                    "retention": self.graph.anchors[aid].retention_score,
+                })
+                trace_components[aid]["activation"] = a
+                trace_components[aid]["combined_score"] = combined[aid]
+                if a > 0:
+                    trace_pathways.setdefault(aid, set()).add("activation_spread")
 
         sorted_anchors = sorted(combined.items(), key=lambda x: -x[1])
 
@@ -267,18 +527,40 @@ class OscillationResonanceRetriever(Retriever):
 
         latency = (time.perf_counter() - t0) * 1000
         top_score = min(1.0, sorted_anchors[0][1] if sorted_anchors else 0.0)
+        trace_rows: list[tuple[Anchor, float, str, dict[str, float]]] = []
+        seen_trace: set[str] = set()
+        for c in unique[:top_k]:
+            graph_score = min(1.0, c.total_weight / max(1, len(c.edges)))
+            for anchor in c.anchors:
+                if anchor.id in seen_trace:
+                    continue
+                seen_trace.add(anchor.id)
+                components = dict(trace_components.get(anchor.id, {}))
+                score = combined.get(anchor.id, graph_score)
+                pathways = set(trace_pathways.get(anchor.id, set()))
+                if anchor.id not in combined and graph_score > 0.0:
+                    components["graph_expansion"] = graph_score
+                    pathways.add("graph_constellation")
+                trace_rows.append((
+                    anchor,
+                    score,
+                    "+".join(sorted(pathways)) or "graph_constellation",
+                    components,
+                ))
 
         return RetrievalResult(
             constellations=unique[:top_k],
             latency_ms=latency,
             method=self.name,
             top_score=top_score,
+            retrieval_trace=_build_retrieval_trace(query, self.name, trace_rows),
         )
 
 
 def compare_retrievers(graph: StarGraph, queries: list[str],
                        embeddings: list[list[float]] | None = None,
-                       ground_truth: list[list[str]] | None = None
+                       ground_truth: list[list[str]] | None = None,
+                       include_trace: bool = False,
                        ) -> list[dict]:
     vec_ret = VectorSimilarityRetriever(graph)
     osc_ret = OscillationResonanceRetriever(graph)
@@ -310,6 +592,10 @@ def compare_retrievers(graph: StarGraph, queries: list[str],
                 vec_result, gt, k=3)
             comparison["oscillation_resonance"]["recall@3"] = _recall_at_k(
                 osc_result, gt, k=3)
+
+        if include_trace:
+            comparison["vector_similarity"]["retrieval_trace"] = vec_result.retrieval_trace
+            comparison["oscillation_resonance"]["retrieval_trace"] = osc_result.retrieval_trace
 
         results.append(comparison)
 

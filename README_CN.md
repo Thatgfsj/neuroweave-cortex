@@ -104,6 +104,20 @@ for c in result.constellations:
     for a in c.anchors:
         print(f"[{a.retention_score:.2f}] {a.text}")
 
+# 检索 trace / 可解释性：查看 memory 为什么命中
+print(result.retrieval_trace)
+# {
+#   "query": "用户住在哪里？",
+#   "method": "OscillationResonance",
+#   "retrieved_memories": [
+#     {
+#       "memory_id": "...",
+#       "score": 0.91,
+#       "reason": "entity_match + tag_match + phase_match"
+#     }
+#   ]
+# }
+
 # 夜间深度睡眠
 cycle = SleepCycle(graph)
 result = cycle.run()
@@ -156,6 +170,7 @@ online.record_interaction(anchor)  # 自动触发
 ```bash
 sg-add "用户偏好 Python 做爬虫" --tags 技术栈 --emotional 0.5
 sg-query "用户喜欢什么编程语言？"
+sg-query --trace "用户住在哪里？"
 sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
 ```

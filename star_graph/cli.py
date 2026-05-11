@@ -1,6 +1,7 @@
 """CLI entry points — v0.2 with schema viewing, ghost listing, stats."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -42,6 +43,8 @@ def query() -> None:
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--min-activation", type=float, default=0.1)
     parser.add_argument("--graph", default=None)
+    parser.add_argument("--trace", action="store_true",
+                        help="Print JSON retrieval_trace explainability output")
     args = parser.parse_args()
 
     context = " ".join(args.context) if args.context else sys.stdin.read().strip()
@@ -53,6 +56,17 @@ def query() -> None:
 
     store = Storage(args.graph)
     graph = store.load()
+
+    if args.trace:
+        from .retriever import OscillationResonanceRetriever
+
+        result = OscillationResonanceRetriever(
+            graph,
+            spread_steps=args.steps,
+        ).retrieve(context)
+        print(json.dumps(result.retrieval_trace, ensure_ascii=False, indent=2))
+        return
+
     resonator = Resonator(graph)
     constellation, action = resonator.predictive_retrieve(context)
 

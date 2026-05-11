@@ -111,6 +111,23 @@ for c in constellations:
 constellation, action = resonator.predictive_retrieve("database connection pooling for APIs")
 print(f"Action: {action}")  # 'confirm', 'update', or 'novel'
 
+# Retrieval trace / explainability (LoCoMo-style debugging)
+from star_graph.retriever import OscillationResonanceRetriever
+
+result = OscillationResonanceRetriever(graph).retrieve("When did Alice visit Hawaii?")
+print(result.retrieval_trace)
+# {
+#   "query": "When did Alice visit Hawaii?",
+#   "method": "OscillationResonance",
+#   "retrieved_memories": [
+#     {
+#       "memory_id": "...",
+#       "score": 0.91,
+#       "reason": "temporal_match + entity_match + phase_match"
+#     }
+#   ]
+# }
+
 # Run 9-phase sleep cycle
 cycle = SleepCycle(graph)
 result = cycle.run()
@@ -127,6 +144,7 @@ store.save(graph)
 ```bash
 sg-add "Discussed microservices deployment patterns" --tags architecture --emotional 0.6
 sg-query "database connection pooling best practices"
+sg-query --trace "When did Alice visit Hawaii?"
 sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
 ```
