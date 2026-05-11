@@ -26,6 +26,7 @@ from typing import Optional
 import numpy as np
 
 from .anchor import Anchor
+from .config import Config
 
 
 @dataclass
@@ -48,7 +49,7 @@ class AbstractNode:
 
     @property
     def is_stable(self) -> bool:
-        return self.confidence > 0.7
+        return self.confidence > Config.get().abstraction.stable_confidence
 
 
 class AbstractionEngine:
@@ -58,9 +59,10 @@ class AbstractionEngine:
     a common semantic subspace, then generates abstract descriptions.
     """
 
-    def __init__(self, min_cluster_size: int = 3, similarity_threshold: float = 0.6):
-        self.min_cluster_size = min_cluster_size
-        self.similarity_threshold = similarity_threshold
+    def __init__(self, min_cluster_size: int | None = None, similarity_threshold: float | None = None):
+        c = Config.get().abstraction
+        self.min_cluster_size = min_cluster_size if min_cluster_size is not None else c.min_cluster_size
+        self.similarity_threshold = similarity_threshold if similarity_threshold is not None else c.similarity_threshold
         self.abstracts: dict[str, AbstractNode] = {}
         self._counter = 0
 

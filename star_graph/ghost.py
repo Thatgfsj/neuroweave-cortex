@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .anchor import Anchor, MemoryState
+from .config import Config
 
 
 @dataclass
@@ -36,7 +37,7 @@ class GhostNode:
     """
 
     id: str
-    compressed_embedding: list[float]    # low-dim projection (16-dim)
+    compressed_embedding: list[float]    # low-dim projection
     residual_edges: dict[str, float]     # neighbor_id → residual_weight
     emotion_trace: float                 # -1..+1, preserved emotional signature
     pruned_at: float
@@ -54,13 +55,15 @@ class GhostNode:
 
         Retains structural and emotional signatures at reduced resolution.
         """
-        # Compress embedding to 16-dim (from 384)
+        c = Config.get().ghost
+        # Compress embedding to lower dimension
+        dim = c.compressed_dim
         if anchor.embedding:
             emb = anchor.embedding
-            step = max(1, len(emb) // 16)
-            compressed = [emb[i] for i in range(0, min(len(emb), 16 * step), step)][:16]
+            step = max(1, len(emb) // dim)
+            compressed = [emb[i] for i in range(0, min(len(emb), dim * step), step)][:dim]
         else:
-            compressed = [0.0] * 16
+            compressed = [0.0] * dim
 
         # Semantic shadow: extract key terms
         words = anchor.text.lower().split()
@@ -71,12 +74,12 @@ class GhostNode:
             id=anchor.id,
             compressed_embedding=compressed,
             residual_edges=residual_edges or {},
-            emotion_trace=anchor.vector.emotional_valence * 0.6,  # attenuated
+            emotion_trace=anchor.vector.emotional_valence * c.emotion_attenuation,
             pruned_at=time.time(),
             original_tags=list(anchor.tags),
             original_importance=anchor.vector.importance,
             semantic_shadow=shadow,
-            reactivation_probability=0.5,
+            reactivation_probability=c.initial_reactivation_prob,
         )
 
     def resonance(self, embedding: list[float], emotion_context: float = 0.0) -> float:
@@ -85,11 +88,12 @@ class GhostNode:
         Combines:
         - Embedding similarity (via compressed vectors)
         - Emotional congruence (similar emotion → boosts)
-        - Tag overlap (topic match → boosts)
         - Reactivation probability (decays over time)
         """
         if not self.compressed_embedding or not embedding:
             return 0.0
+
+        c = Config.get().ghost
 
         # Compress query embedding the same way
         step = max(1, len(embedding) // len(self.compressed_embedding))
@@ -105,18 +109,20 @@ class GhostNode:
 
         # Emotional congruence bonus
         emotion_bonus = 0.0
-        if abs(self.emotion_trace) > 0.2 and abs(emotion_context) > 0.2:
+        threshold = c.emotion_resonance_threshold
+        if abs(self.emotion_trace) > threshold and abs(emotion_context) > threshold:
             if (self.emotion_trace > 0) == (emotion_context > 0):
-                emotion_bonus = 0.15 * min(abs(self.emotion_trace), abs(emotion_context))
+                emotion_bonus = c.emotion_bonus_factor * min(abs(self.emotion_trace), abs(emotion_context))
 
         # Reactivation probability decays exponentially
         hours_since_prune = (time.time() - self.pruned_at) / 3600
-        effective_prob = self.reactivation_probability * math.exp(-hours_since_prune / (30 * 24))
-        effective_prob = max(0.05, effective_prob)
+        half_life_hours = c.decay.half_life_days * 24
+        effective_prob = self.reactivation_probability * math.exp(-hours_since_prune / half_life_hours)
+        effective_prob = max(c.min_effective_prob, effective_prob)
 
         resonance_score = sim * effective_prob + emotion_bonus
 
-        if resonance_score > 0.01:
+        if resonance_score > c.resonance_persistence:
             self.last_resonated_at = time.time()
 
         return resonance_score
@@ -124,8 +130,9 @@ class GhostNode:
     def revive(self, new_text: str, new_embedding: list[float],
                new_tags: list[str] | None = None) -> Anchor:
         """Revive this ghost as a full anchor — faster than new learning."""
+        c = Config.get().ghost
         self.revival_count += 1
-        self.reactivation_probability = min(1.0, self.reactivation_probability + 0.2)
+        self.reactivation_probability = min(1.0, self.reactivation_probability + c.revival_stability_boost)
 
         # Merge tags
         merged_tags = list(set(self.original_tags + (new_tags or [])))
@@ -147,26 +154,27 @@ class GhostNode:
         Returns (vague_description, confidence).
         This is the "I seem to remember..." feeling.
         """
+        c = Config.get().ghost.partial_recall
         self.partial_recall_count += 1
-        confidence = self.reactivation_probability * 0.3  # partial = low confidence
-        confidence *= math.exp(-self.partial_recall_count * 0.1)  # repeated partial recall fades
-        confidence = max(0.05, confidence)
+        confidence = self.reactivation_probability * c.confidence_factor
+        confidence *= math.exp(-self.partial_recall_count * c.decay_per_call)
+        confidence = max(c.min_confidence, confidence)
 
         description = f"[fuzzy trace] {self.semantic_shadow} (confidence: {confidence:.2f})"
         return description, confidence
 
     def decay(self) -> bool:
         """Decay reactivation probability. Returns True if ghost should be fully purged."""
+        c = Config.get().ghost.decay
         hours_since_prune = (time.time() - self.pruned_at) / 3600
         days = hours_since_prune / 24
 
-        self.reactivation_probability *= 0.5 ** (days / 60)  # half-life ~60 days
+        self.reactivation_probability *= 0.5 ** (days / c.half_life_days)
         self.reactivation_probability = max(0.0, self.reactivation_probability)
 
-        # Fully purge if: no revivals after 90 days, or probability < 0.01
-        if (days > 90 and self.revival_count == 0 and self.partial_recall_count == 0):
+        if (days > c.purge_no_revival_days and self.revival_count == 0 and self.partial_recall_count == 0):
             return True
-        if self.reactivation_probability < 0.01:
+        if self.reactivation_probability < c.purge_prob_threshold:
             return True
         return False
 
@@ -186,8 +194,10 @@ class GhostSubsystem:
 
     def check_resonance(self, embedding: list[float],
                         emotion_context: float = 0.0,
-                        threshold: float = 0.5) -> list[tuple[GhostNode, float]]:
+                        threshold: float | None = None) -> list[tuple[GhostNode, float]]:
         """Find all ghosts that resonate with new content above threshold."""
+        if threshold is None:
+            threshold = Config.get().ghost.resonance.default_threshold
         matches = []
         for ghost in self.ghosts.values():
             score = ghost.resonance(embedding, emotion_context)
@@ -206,16 +216,19 @@ class GhostSubsystem:
         del self.ghosts[ghost_id]
         return anchor
 
-    def fuzzy_recall(self, embedding: list[float], threshold: float = 0.2) -> list[tuple[str, float]]:
+    def fuzzy_recall(self, embedding: list[float], threshold: float | None = None) -> list[tuple[str, float]]:
         """Fuzzy recall: return vague descriptions of ghosts that weakly resonate.
 
         This is the "I seem to remember something about..." feeling.
         Low-confidence retrieval from ghost traces.
         """
+        c = Config.get().ghost.resonance
+        if threshold is None:
+            threshold = c.fuzzy_threshold
         results = []
         for ghost in self.ghosts.values():
             score = ghost.resonance(embedding)
-            if threshold * 0.3 < score < threshold:  # sub-threshold but not zero
+            if threshold * c.fuzzy_sub_factor < score < threshold:
                 desc, conf = ghost.partial_recall()
                 results.append((desc, conf * score))
         results.sort(key=lambda x: -x[1])
@@ -233,7 +246,7 @@ class GhostSubsystem:
 
     @property
     def stats(self) -> dict:
-        active = sum(1 for g in self.ghosts.values() if g.reactivation_probability > 0.1)
+        active = sum(1 for g in self.ghosts.values() if g.reactivation_probability > Config.get().ghost.active_threshold)
         revived = sum(1 for g in self.ghosts.values() if g.revival_count > 0)
         return {
             "total_ghosts": len(self.ghosts),

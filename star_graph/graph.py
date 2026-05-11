@@ -1,7 +1,12 @@
-"""Star graph — nodes (anchors) connected by weighted, typed edges.
+"""Star graph — nodes (anchors) connected by weighted, typed edges. [Layer 1: Storage]
 
-v0.2 adds: ghost anchors for savings effect, cortical index for direct
-retrieval, contradiction detection, schema references.
+Provides the core data structure: anchors, edges, adjacency, ghosts, schemas.
+CRUD operations are Layer 1. Cognitive convenience methods (spread_activation,
+oscillatory_resonance, etc.) are marked with "Cognitive" comments — they belong
+to Layer 2 but operate on the graph's public API.
+
+Layer boundary: this module imports only from anchor, index, and config (all L1).
+Cognitive modules (L2) depend on this module, never the reverse.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .anchor import Anchor, AnchorVector, GhostAnchor
+from .config import Config
 
 
 @dataclass
@@ -164,7 +170,10 @@ class StarGraph:
         if self._ann_index is not None:
             self._ann_index.remove(anchor_id)
 
-    # ── Navigation / Resonance ────────────────────────────
+    # ── Navigation / Cognitive convenience methods ──────
+    # These operate on the graph's public API but belong to Layer 2 conceptually.
+    # They're kept here for convenience — the graph is the natural namespace
+    # for graph-traversal operations.
 
     def neighbors(self, anchor_id: str, min_weight: float = 0.0) -> list[tuple[str, float]]:
         result = []
@@ -174,15 +183,20 @@ class StarGraph:
                 result.append((other, edge.weight))
         return sorted(result, key=lambda x: -x[1])
 
-    def spread_activation(self, seed_ids: list[str], steps: int = 3,
-                          decay: float = 0.6) -> dict[str, float]:
+    def spread_activation(self, seed_ids: list[str], steps: int | None = None,
+                          decay: float | None = None) -> dict[str, float]:
+        c = Config.get().graph.spreading
+        if steps is None:
+            steps = c.default_steps
+        if decay is None:
+            decay = c.default_decay
         activation: dict[str, float] = {aid: 1.0 for aid in seed_ids if aid in self.anchors}
         current = dict(activation)
 
         for _ in range(steps):
             next_wave: dict[str, float] = defaultdict(float)
             for node_id, level in current.items():
-                for neighbor, weight in self.neighbors(node_id, min_weight=0.05):
+                for neighbor, weight in self.neighbors(node_id, min_weight=Config.get().graph.spreading.min_weight):
                     if neighbor not in activation:
                         next_wave[neighbor] += level * weight * decay
             for nid, val in next_wave.items():
@@ -207,7 +221,7 @@ class StarGraph:
             node = queue.pop(0)
             anchors.append(self.anchors[node])
 
-            for neighbor, weight in self.neighbors(node, min_weight=0.1):
+            for neighbor, weight in self.neighbors(node, min_weight=Config.get().retrieval.constellation.min_edge_weight):
                 key = self._key(node, neighbor)
                 edge = self.edges.get(key)
                 if edge and key not in {(e.source, e.target) for e in edges}:
@@ -284,7 +298,9 @@ class StarGraph:
 
     # ── Contradiction detection ──────────────────────────
 
-    def find_contradictions(self, threshold: float = 0.7) -> list[tuple[str, str, float]]:
+    def find_contradictions(self, threshold: float | None = None) -> list[tuple[str, str, float]]:
+        if threshold is None:
+            threshold = Config.get().graph.contradiction_threshold
         """Find anchor pairs that may contradict each other.
 
         Contradiction = high semantic similarity but opposite emotional valence
@@ -314,7 +330,9 @@ class StarGraph:
         self.ghosts[anchor.id] = GhostAnchor.from_anchor(anchor)
 
     def check_ghosts(self, embedding: list[float] | None,
-                     revival_threshold: float = 0.75) -> Optional[Anchor]:
+                     revival_threshold: float | None = None) -> Optional[Anchor]:
+        if revival_threshold is None:
+            revival_threshold = Config.get().graph.ghost_revival_threshold
         """Check if new content resonates with any ghosts (savings effect)."""
         if not embedding:
             return None

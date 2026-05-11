@@ -21,13 +21,15 @@ from typing import Optional
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator
 from .graph import StarGraph, Edge, Constellation, Schema
+from .config import Config
 
 
 class SleepCycle:
     """One complete sleep/consolidation cycle."""
 
-    def __init__(self, graph: StarGraph):
+    def __init__(self, graph: StarGraph, config: Config | None = None):
         self.graph = graph
+        self.cfg = config if config is not None else Config.get()
         self.log: list[str] = []
         self._cycle_count: int = 0
         self._embedder = None
@@ -39,9 +41,12 @@ class SleepCycle:
         return self._embedder
 
     def run(self, recent_anchors: list[Anchor] | None = None,
-            similarity_threshold: float = 0.85,
-            retention_threshold: float = 0.15,
-            edge_prune_threshold: float = 0.1) -> dict:
+            similarity_threshold: float | None = None,
+            retention_threshold: float | None = None,
+            edge_prune_threshold: float | None = None) -> dict:
+        similarity_threshold = similarity_threshold if similarity_threshold is not None else self.cfg.sleep.merge.default_threshold
+        retention_threshold = retention_threshold if retention_threshold is not None else self.cfg.sleep.prune.default_retention_threshold
+        edge_prune_threshold = edge_prune_threshold if edge_prune_threshold is not None else self.cfg.sleep.prune.default_edge_threshold
         started = time.time()
         self._cycle_count += 1
         stats_before = self.graph.stats()
@@ -92,22 +97,23 @@ class SleepCycle:
           graph centrality × 0.15      — hub position in the graph
           |1 - stability| × 0.15       — unresolved / still-labile memories
         """
+        c = self.cfg.sleep.swr
         for anchor in recent:
             centrality = len(self.graph._adjacency.get(anchor.id, set()))
             centrality_norm = min(1.0, centrality / max(1, len(self.graph.anchors)))
 
             anchor._replay_priority = (
-                abs(anchor.vector.emotional_valence) * 0.25
-                + anchor.vector.surprise * 0.25
-                + anchor.vector.frequency * 0.20
-                + centrality_norm * 0.15
-                + abs(1.0 - anchor.vector.stability) * 0.15
+                abs(anchor.vector.emotional_valence) * c.valence_weight
+                + anchor.vector.surprise * c.surprise_weight
+                + anchor.vector.frequency * c.frequency_weight
+                + centrality_norm * c.centrality_weight
+                + abs(1.0 - anchor.vector.stability) * c.instability_weight
             )
 
         prioritized = sorted(recent, key=lambda a: a._replay_priority, reverse=True)
 
-        # Stochastic sampling: top 50% always replayed, rest sampled by priority
-        top_half = max(1, len(prioritized) // 2)
+        # Stochastic sampling: top fraction always replayed, rest sampled by priority
+        top_half = max(1, int(len(prioritized) * c.top_fraction))
         guaranteed = prioritized[:top_half]
         remaining = prioritized[top_half:]
         if remaining:
@@ -116,7 +122,7 @@ class SleepCycle:
             total_w = sum(weights)
             if total_w > 0:
                 probs = [w / total_w for w in weights]
-                sample_count = max(1, len(remaining) // 3)
+                sample_count = max(1, int(len(remaining) * c.sample_fraction))
                 sampled = random.choices(remaining, weights=probs, k=sample_count)
                 prioritized = guaranteed + sampled
             else:
@@ -129,8 +135,10 @@ class SleepCycle:
             if existing:
                 existing.transition('replay')  # ACTIVE/DORMANT → REHEARSING
                 existing.activate()
+                blend = self.cfg.sleep.merge.importance_blend
                 existing.vector.importance = (
-                    0.7 * existing.vector.importance + 0.3 * anchor.vector.importance
+                    blend * existing.vector.importance
+                    + (1 - blend) * anchor.vector.importance
                 )
                 existing.vector.surprise = max(existing.vector.surprise, anchor.vector.surprise)
                 existing.tags = list(set(existing.tags + anchor.tags))
@@ -152,7 +160,7 @@ class SleepCycle:
                 sim = self._embedding_similarity(anchor_emb, other.embedding)
                 if sim > threshold:
                     edge_type = self._infer_edge_type(anchor, other)
-                    weight = sim * (1.0 + 0.3 * abs(anchor.vector.emotional_valence))
+                    weight = sim * (1.0 + self.cfg.sleep.edge_formation.emotion_weight_boost * abs(anchor.vector.emotional_valence))
                     self.graph.add_edge(anchor.id, other_id,
                                         weight=min(1.0, weight),
                                         edge_type=edge_type)
@@ -163,18 +171,18 @@ class SleepCycle:
     # ── Phase 2: Systems Consolidation ──────────────────
 
     def _systems_consolidation(self) -> None:
-        TAU = 20.0
+        c = self.cfg.sleep.systems
 
         for anchor in self.graph.anchors.values():
             replay_factor = anchor.replay_count / max(1, self._cycle_count)
             anchor.vector.hippocampal_dependency = math.exp(
-                -replay_factor * self._cycle_count / TAU
+                -replay_factor * self._cycle_count / c.tau
             )
-            anchor.vector.hippocampal_dependency = max(0.05,
+            anchor.vector.hippocampal_dependency = max(c.min_hippocampal_dep,
                 anchor.vector.hippocampal_dependency)
 
             if anchor.is_cortical:
-                if anchor.vector.stability > 0.8 and len(anchor.text) > 100:
+                if anchor.vector.stability > c.schema_stability_threshold and len(anchor.text) > c.schema_text_threshold:
                     sentences = anchor.text.replace('！', '。').replace('？', '。').split('。')
                     anchor.text = sentences[0].strip()[:200]
 
@@ -183,12 +191,12 @@ class SleepCycle:
                     edge = self.graph.edges.get(key)
                     if edge:
                         if edge.edge_type == "temporal":
-                            edge.weaken(0.015)
+                            edge.weaken(c.temporal_edge_weaken)
                         elif edge.edge_type in ("topical", "causal"):
-                            edge.strengthen(0.01)
+                            edge.strengthen(c.topical_edge_strengthen)
 
             anchor.vector.stability = min(1.0,
-                1.0 - 0.9 * anchor.vector.hippocampal_dependency)
+                1.0 - c.cortical_stability_factor * anchor.vector.hippocampal_dependency)
 
         cortical_count = sum(1 for a in self.graph.anchors.values() if a.is_cortical)
         self.log.append(f"Systems Consolidation: {cortical_count}/{len(self.graph.anchors)} "
@@ -197,15 +205,15 @@ class SleepCycle:
     # ── Phase 3: Emotional Stripping ────────────────────
 
     def _emotional_stripping(self) -> None:
-        DECAY = 0.75
+        c = self.cfg.sleep.emotional
 
         for anchor in self.graph.anchors.values():
-            if anchor.vector.stability > 0.5:
+            if anchor.vector.stability > c.strip_stability_threshold:
                 old_valence = anchor.vector.emotional_valence
-                anchor.vector.emotional_valence *= DECAY
+                anchor.vector.emotional_valence *= c.decay
                 anchor.vector.importance = max(
-                    anchor.vector.importance * 0.97,
-                    abs(old_valence) * 0.25 + 0.15
+                    anchor.vector.importance * c.importance_min_factor,
+                    abs(old_valence) * c.importance_emotional_residual + c.importance_baseline
                 )
 
         self.log.append("Emotional Stripping: decoupled emotion from consolidated memories")
@@ -219,8 +227,7 @@ class SleepCycle:
         1. Tag-based schema extraction (legacy, for tagged anchors)
         2. Embedding-cluster-based abstraction (new — emergent categories)
         """
-        MIN_INSTANCES = 3
-        MIN_SIMILARITY = 0.6
+        c = self.cfg.sleep.schema
         formed = 0
 
         tag_groups: dict[str, list[Anchor]] = defaultdict(list)
@@ -229,7 +236,7 @@ class SleepCycle:
                 tag_groups[tag].append(anchor)
 
         for tag, group in tag_groups.items():
-            if len(group) < MIN_INSTANCES:
+            if len(group) < c.min_instances:
                 continue
 
             existing_schema = any(
@@ -243,8 +250,8 @@ class SleepCycle:
 
             # Use embedding similarity for schema validation
             similarities = []
-            for i in range(min(MIN_INSTANCES, len(sorted_group))):
-                for j in range(i + 1, min(MIN_INSTANCES, len(sorted_group))):
+            for i in range(min(c.min_instances, len(sorted_group))):
+                for j in range(i + 1, min(c.min_instances, len(sorted_group))):
                     if sorted_group[i].embedding and sorted_group[j].embedding:
                         sim = self._embedding_similarity(
                             sorted_group[i].embedding, sorted_group[j].embedding)
@@ -253,7 +260,7 @@ class SleepCycle:
                     similarities.append(sim)
 
             avg_sim = sum(similarities) / max(1, len(similarities))
-            if avg_sim < MIN_SIMILARITY:
+            if avg_sim < c.min_similarity:
                 continue
 
             template_anchor = sorted_group[0]
@@ -262,14 +269,14 @@ class SleepCycle:
                 id=schema_id,
                 template=template_anchor.text,
                 slots={"topic": "specific topic instance", "context": "conversation context"},
-                instance_ids=[a.id for a in sorted_group[:MIN_INSTANCES]],
+                instance_ids=[a.id for a in sorted_group[:c.min_instances]],
                 confidence=avg_sim,
                 tags=[tag],
             )
             self.graph.schemas[schema_id] = schema
             formed += 1
 
-            for a in sorted_group[:MIN_INSTANCES]:
+            for a in sorted_group[:c.min_instances]:
                 a.schema_ref = schema_id
 
         if formed:
@@ -296,8 +303,8 @@ class SleepCycle:
 
         if not hasattr(self, '_abstraction_engine'):
             self._abstraction_engine = AbstractionEngine(
-                min_cluster_size=3,
-                similarity_threshold=0.55,
+                min_cluster_size=self.cfg.abstraction.min_cluster_size,
+                similarity_threshold=self.cfg.abstraction.similarity_threshold,
             )
 
         # Collect anchor embeddings
@@ -349,11 +356,15 @@ class SleepCycle:
                 else:
                     overlap = self._text_overlap(a.text, b.text)
 
-                if overlap > threshold:
+                # Gate: require tag overlap to prevent cross-topic cascade merging
+                tag_overlap = len(set(a.tags) & set(b.tags))
+                min_tag_overlap = getattr(self.cfg.sleep.merge, 'min_tag_overlap', 1)
+
+                if overlap > threshold and tag_overlap >= min_tag_overlap:
                     core, variant = (a, b) if a.created_at < b.created_at else (b, a)
                     core.vector.importance = max(core.vector.importance, variant.vector.importance)
                     core.vector.frequency = (core.vector.frequency + variant.vector.frequency) / 2
-                    core.vector.stability = min(1.0, core.vector.stability + 0.15)
+                    core.vector.stability = min(1.0, core.vector.stability + self.cfg.sleep.merge.stability_boost)
                     core.tags = list(set(core.tags + variant.tags))
                     for neighbor in list(self.graph._adjacency.get(variant.id, set())):
                         k = self.graph._key(variant.id, neighbor)
@@ -388,9 +399,9 @@ class SleepCycle:
             b = self.graph.anchors.get(aid_b)
             if a and b:
                 if a.retention_score < b.retention_score:
-                    penalties[aid_a] += 0.2
+                    penalties[aid_a] += self.cfg.sleep.prune.contradiction_penalty
                 else:
-                    penalties[aid_b] += 0.2
+                    penalties[aid_b] += self.cfg.sleep.prune.contradiction_penalty
 
         candidates = []
         for aid in self.graph.get_prune_candidates(threshold):
@@ -408,7 +419,7 @@ class SleepCycle:
                     key = self.graph._key(aid, neighbor)
                     edge = self.graph.edges.get(key)
                     if edge:
-                        residual_edges[neighbor] = edge.weight * 0.3  # attenuated
+                        residual_edges[neighbor] = edge.weight * self.cfg.sleep.prune.residual_edge_factor
 
                 # Create rich ghost via ghost subsystem
                 if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
@@ -427,7 +438,7 @@ class SleepCycle:
             now = time.time()
             stale_ghosts = []
             for gid, ghost in self.graph.ghosts.items():
-                if isinstance(ghost, GhostAnchor) and (now - ghost.pruned_at) > 30 * 86400 and ghost.revival_count == 0:
+                if isinstance(ghost, GhostAnchor) and (now - ghost.pruned_at) > self.cfg.sleep.prune.ghost_stale_days * 86400 and ghost.revival_count == 0:
                     stale_ghosts.append(gid)
             for gid in stale_ghosts:
                 del self.graph.ghosts[gid]
@@ -470,12 +481,12 @@ class SleepCycle:
         for i, c_a in enumerate(constellations):
             for c_b in constellations[i + 1:]:
                 score = resonator.bridge_score(c_a, c_b)
-                if score > 0.6:
+                if score > self.cfg.sleep.bridge.min_score:
                     rep_a = c_a.anchors[0]
                     rep_b = c_b.anchors[0]
                     existing = self.graph.edges.get(self.graph._key(rep_a.id, rep_b.id))
-                    if not existing or existing.weight < 0.3:
-                        self.graph.add_edge(rep_a.id, rep_b.id, weight=0.3,
+                    if not existing or existing.weight < self.cfg.sleep.bridge.default_weight:
+                        self.graph.add_edge(rep_a.id, rep_b.id, weight=self.cfg.sleep.bridge.default_weight,
                                             edge_type="bridge")
                         bridges += 1
 
@@ -486,14 +497,15 @@ class SleepCycle:
     # ── Phase 8: Hebbian Update ─────────────────────────
 
     def _hebbian_update(self) -> None:
+        c = self.cfg.sleep.hebbian
         now = time.time()
         for edge in self.graph.edges.values():
             hours = (now - edge.last_activated_at) / 3600
-            if edge.co_activation_count > 0 and hours < 24:
-                edge.strengthen(0.03)
+            if edge.co_activation_count > 0 and hours < c.active_window_hours:
+                edge.strengthen(c.strengthen_delta)
             else:
-                decay = 0.02 * math.log(1 + hours / 24)
-                edge.weaken(min(0.1, decay))
+                decay = c.decay_log_factor * math.log(1 + hours / c.active_window_hours)
+                edge.weaken(min(c.max_decay, decay))
 
     # ── Phase 9: Synaptic Homeostasis ───────────────────
 
@@ -501,14 +513,15 @@ class SleepCycle:
         if not self.graph.edges:
             return
 
+        c = self.cfg.sleep.homeostasis
         weights = [e.weight for e in self.graph.edges.values()]
         mean_w = sum(weights) / len(weights)
 
-        target_mean = 0.3
-        if mean_w > target_mean:
-            scale = target_mean / mean_w
+        if mean_w > c.target_mean:
+            scale = c.target_mean / mean_w
+            blend = c.scale_blend
             for edge in self.graph.edges.values():
-                edge.weight *= (0.5 + 0.5 * scale)
+                edge.weight *= (blend + (1 - blend) * scale)
 
         for anchor in self.graph.anchors.values():
             hours = (time.time() - anchor.last_activated_at) / 3600

@@ -24,6 +24,7 @@ import numpy as np
 
 from .anchor import Anchor
 from .graph import StarGraph, Constellation
+from .config import Config
 
 
 @dataclass
@@ -356,11 +357,12 @@ class OscillationResonanceRetriever(Retriever):
       - Temporal/emotional context position (phase alignment via meaningful φ)
     """
 
-    def __init__(self, graph: StarGraph, spread_steps: int = 3,
-                 phase_weight: float = 0.3):
+    def __init__(self, graph: StarGraph, spread_steps: int | None = None,
+                 phase_weight: float | None = None):
         super().__init__(graph)
-        self.spread_steps = spread_steps
-        self.phase_weight = phase_weight
+        c = Config.get().retrieval
+        self.spread_steps = spread_steps if spread_steps is not None else c.spreading.steps
+        self.phase_weight = phase_weight if phase_weight is not None else c.oscillation.phase_weight
 
     @property
     def name(self) -> str:
@@ -379,17 +381,18 @@ class OscillationResonanceRetriever(Retriever):
         spectral centroid for frequency.
         """
         if embedding and len(embedding) >= 4:
+            c = Config.get().retrieval.oscillation
             arr = np.array(embedding)
             var = float(np.var(arr))
-            mag = 0.4 + 0.6 * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
+            mag = c.magnitude_base + c.magnitude_variance_factor * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
             angles = np.arctan2(arr[1::2], arr[::2])
             phase = float(np.mean(angles)) % (2 * math.pi)
             spectrum = np.abs(arr)
             if np.sum(spectrum) > 1e-8:
                 centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
-                freq = 0.3 + 0.7 * (centroid / len(spectrum))
+                freq = c.frequency_base + c.frequency_centroid_factor * (centroid / len(spectrum))
             else:
-                freq = 0.5
+                freq = c.default_frequency
         else:
             from .embedding import get_embedder
             embedder = get_embedder()
@@ -460,6 +463,7 @@ class OscillationResonanceRetriever(Retriever):
 
         driving_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
 
+        rc = Config.get().retrieval
         # Compute resonance for all anchors
         resonance_map: dict[str, float] = {}
         trace_components: dict[str, dict[str, float]] = {}
@@ -473,7 +477,7 @@ class OscillationResonanceRetriever(Retriever):
                 trace_pathways.setdefault(anchor.id, set()).add("oscillation_resonance")
 
         # Also check cortical index
-        cortical = self.graph.cortical_lookup(embedding, top_k=10)
+        cortical = self.graph.cortical_lookup(embedding, top_k=rc.cortical.top_k)
         for aid, sim in cortical:
             if aid in self.graph.anchors:
                 trace_components.setdefault(aid, {
@@ -482,7 +486,7 @@ class OscillationResonanceRetriever(Retriever):
                 trace_components[aid]["cortical_similarity"] = sim
                 trace_pathways.setdefault(aid, set()).add("cortical_lookup")
             if aid not in resonance_map:
-                resonance_map[aid] = sim * 0.7
+                resonance_map[aid] = sim * rc.spreading.resonance_map_bonus
 
         # Spread activation from top seeds
         sorted_seeds = sorted(resonance_map.items(), key=lambda x: -x[1])[:top_k * 2]
@@ -495,7 +499,7 @@ class OscillationResonanceRetriever(Retriever):
         for aid in set(list(resonance_map.keys()) + list(activation.keys())):
             r = resonance_map.get(aid, 0.0)
             a = activation.get(aid, 0.0)
-            combined[aid] = 0.6 * r + 0.4 * a
+            combined[aid] = rc.spreading.resonance_weight * r + rc.spreading.activation_weight * a
             if aid in self.graph.anchors:
                 trace_components.setdefault(aid, {
                     "retention": self.graph.anchors[aid].retention_score,
@@ -508,48 +512,32 @@ class OscillationResonanceRetriever(Retriever):
         sorted_anchors = sorted(combined.items(), key=lambda x: -x[1])
 
         constellations = []
-        seen: set[str] = set()
-        for aid, score in sorted_anchors[:top_k * 5]:
-            if aid not in seen and aid in self.graph.anchors:
-                c = self.graph.find_constellation(aid, max_size=15)
-                if c.anchors:
-                    constellations.append(c)
-                    for a in c.anchors:
-                        seen.add(a.id)
-
-        unique = []
-        seen_c: set[str] = set()
-        for c in constellations:
-            key = tuple(sorted(a.id for a in c.anchors[:5]))
-            if key not in seen_c:
-                seen_c.add(key)
-                unique.append(c)
+        for aid, score in sorted_anchors[:top_k]:
+            if aid in self.graph.anchors:
+                a = self.graph.anchors[aid]
+                constellations.append(Constellation(anchors=[a], edges=[]))
 
         latency = (time.perf_counter() - t0) * 1000
         top_score = min(1.0, sorted_anchors[0][1] if sorted_anchors else 0.0)
         trace_rows: list[tuple[Anchor, float, str, dict[str, float]]] = []
         seen_trace: set[str] = set()
-        for c in unique[:top_k]:
-            graph_score = min(1.0, c.total_weight / max(1, len(c.edges)))
+        for c in constellations:
             for anchor in c.anchors:
                 if anchor.id in seen_trace:
                     continue
                 seen_trace.add(anchor.id)
                 components = dict(trace_components.get(anchor.id, {}))
-                score = combined.get(anchor.id, graph_score)
+                score = combined.get(anchor.id, 0.0)
                 pathways = set(trace_pathways.get(anchor.id, set()))
-                if anchor.id not in combined and graph_score > 0.0:
-                    components["graph_expansion"] = graph_score
-                    pathways.add("graph_constellation")
                 trace_rows.append((
                     anchor,
                     score,
-                    "+".join(sorted(pathways)) or "graph_constellation",
+                    "+".join(sorted(pathways)) or "oscillation_resonance",
                     components,
                 ))
 
         return RetrievalResult(
-            constellations=unique[:top_k],
+            constellations=constellations,
             latency_ms=latency,
             method=self.name,
             top_score=top_score,

@@ -1,10 +1,13 @@
-"""Anchor point — the fundamental unit of star-graph memory.
+"""Anchor point — the fundamental unit of star-graph memory. [Layer 1: Storage]
 
 Each anchor is a summary of a conversation turn or session, augmented with
 a dynamic importance vector and a 6-state memory lifecycle.
 
 v0.4 adds: MemoryState machine (ACTIVE→REHEARSING→CONSOLIDATING→DORMANT→GHOST→REACTIVATED),
 meaningful oscillator derivation from embeddings, and interference-aware retention.
+
+Layer boundary: this module uses an embedder registry to avoid importing from
+Layer 3 (embedding.py). Call embedder_registry.set_embedder() at startup.
 """
 
 from __future__ import annotations
@@ -15,6 +18,33 @@ import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+class EmbedderRegistry:
+    """Registry to avoid L1→L3 import. Layer 3 injects the embedder at startup."""
+
+    _embedder = None
+
+    @classmethod
+    def set_embedder(cls, embedder) -> None:
+        cls._embedder = embedder
+
+    @classmethod
+    def get_embedder(cls):
+        if cls._embedder is None:
+            from .embedding import get_embedder
+            cls._embedder = get_embedder()
+        return cls._embedder
+
+    @classmethod
+    def is_available(cls) -> bool:
+        if cls._embedder is not None:
+            return True
+        try:
+            from .embedding import get_embedder
+            return True
+        except Exception:
+            return False
 
 
 class MemoryState(enum.Enum):
@@ -166,10 +196,9 @@ class Anchor:
         vector_kw = {k: v for k, v in vec_kw.items() if k in vec_fields}
         anchor_kw = {k: v for k, v in vec_kw.items() if k not in vec_fields}
 
-        # Derive meaningful oscillator params from real signal
+        # Derive meaningful oscillator params via embedder registry (no L1→L3 import)
         try:
-            from .embedding import get_embedder
-            embedder = get_embedder()
+            embedder = EmbedderRegistry.get_embedder()
             freq = embedder.derive_frequency(
                 importance=vector_kw.get("importance", importance),
                 emotional_valence=vector_kw.get("emotional_valence", emotional_valence),
@@ -221,19 +250,21 @@ class Anchor:
 
     def _on_enter_state(self, state: MemoryState) -> None:
         """State-entry side effects."""
+        from .config import Config
+        c = Config.get().anchor.state_entry
         now = time.time()
         if state == MemoryState.REHEARSING:
             self.replay_count += 1
             self.last_activated_at = now
         elif state == MemoryState.CONSOLIDATING:
-            self.vector.stability = min(1.0, self.vector.stability + 0.1)
+            self.vector.stability = min(1.0, self.vector.stability + c.consolidating_stability_boost)
         elif state == MemoryState.DORMANT:
-            self.vector.stability = max(self.vector.stability, 0.7)
+            self.vector.stability = max(self.vector.stability, c.dormant_min_stability)
         elif state == MemoryState.GHOST:
             pass  # GhostAnchor handles this
         elif state == MemoryState.REACTIVATED:
-            self.vector.stability = 0.2
-            self.vector.surprise = 0.8
+            self.vector.stability = c.reactivated_stability
+            self.vector.surprise = c.reactivated_surprise
             self.vector.recency = 1.0
             self.last_activated_at = now
 
@@ -249,37 +280,42 @@ class Anchor:
 
     # ── Dynamics ──────────────────────────────────────
 
-    def decay(self, elapsed_hours: float, half_life: float = 168.0) -> None:
-        # State-dependent decay: ghost decays faster, dormant slower
+    def decay(self, elapsed_hours: float, half_life: float | None = None) -> None:
+        from .config import Config
+        c = Config.get().anchor.decay
+        if half_life is None:
+            half_life = c.base_half_life_hours
         if self.state == MemoryState.GHOST:
-            half_life *= 0.3
+            half_life *= c.ghost_half_life_factor
         elif self.state == MemoryState.DORMANT:
-            half_life *= 1.5
+            half_life *= c.dormant_half_life_factor
         elif self.state == MemoryState.REACTIVATED:
-            half_life *= 0.7
+            half_life *= c.reactivated_half_life_factor
         self.vector.recency *= 0.5 ** (elapsed_hours / half_life)
         self.vector.recency = max(0.01, self.vector.recency)
 
     def activate(self) -> None:
         """Called when this anchor is retrieved/used — triggers reconsolidation."""
-        self.vector.frequency = min(1.0, self.vector.frequency + 0.05)
+        from .config import Config
+        c = Config.get().anchor
+        self.vector.frequency = min(1.0, self.vector.frequency + c.state_entry.activation_frequency_boost)
         self.vector.recency = 1.0
-        self.vector.stability *= 0.7  # labile during reconsolidation window
+        self.vector.stability *= c.consolidation.reconsolidation_stability_factor
         self.last_activated_at = time.time()
         # Retrieve from dormant → active
         if self.state == MemoryState.DORMANT:
             self.transition('retrieve')
 
     def consolidate(self, prediction_error: float) -> str:
-        STRENGTHEN = 0.15
-        UPDATE = 0.50
+        from .config import Config
+        c = Config.get().anchor.consolidation
 
-        if prediction_error < STRENGTHEN:
-            self.vector.importance = min(1.0, self.vector.importance + 0.10)
-            self.vector.stability = min(1.0, self.vector.stability + 0.30)
+        if prediction_error < c.strengthen_threshold:
+            self.vector.importance = min(1.0, self.vector.importance + c.strengthen_importance_delta)
+            self.vector.stability = min(1.0, self.vector.stability + c.strengthen_stability_delta)
             return "strengthen"
-        elif prediction_error < UPDATE:
-            self.vector.stability = max(0.0, self.vector.stability - 0.15)
+        elif prediction_error < c.update_threshold:
+            self.vector.stability = max(0.0, self.vector.stability + c.update_stability_delta)
             self.vector.surprise = (self.vector.surprise + prediction_error) / 2
             return "update"
         else:
@@ -289,22 +325,23 @@ class Anchor:
 
     @property
     def retention_score(self) -> float:
+        from .config import Config
+        c = Config.get().anchor.retention
         v = self.vector
         base = (
-            0.25 * v.importance
-            + 0.20 * v.frequency
-            + 0.20 * v.recency
-            + 0.15 * v.stability
-            + 0.10 * v.surprise
-            + 0.10 * (1.0 - v.hippocampal_dependency)
+            c.importance_weight * v.importance
+            + c.frequency_weight * v.frequency
+            + c.recency_weight * v.recency
+            + c.stability_weight * v.stability
+            + c.surprise_weight * v.surprise
+            + c.cortical_weight * (1.0 - v.hippocampal_dependency)
         )
-        # State-dependent modifier
         if self.state == MemoryState.REHEARSING:
-            base *= 1.3  # boosted during replay
+            base *= c.rehearsing_boost
         elif self.state == MemoryState.GHOST:
-            base *= 0.3  # ghost = weak
+            base *= c.ghost_penalty
         elif self.state == MemoryState.REACTIVATED:
-            base *= 0.7
+            base *= c.reactivated_penalty
         return max(0.0, min(1.0, base))
 
     @property

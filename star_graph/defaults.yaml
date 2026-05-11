@@ -1,0 +1,205 @@
+# Star Graph Memory — default hyperparameters
+# v0.4 config system — every neuroscience mechanism is tunable
+
+version: "0.4.0"
+
+anchor:
+  default_importance: 0.5
+  default_frequency: 0.0
+  default_recency: 1.0
+  default_emotional_valence: 0.0
+  default_stability: 0.0
+  default_surprise: 0.5
+  default_hippocampal_dependency: 1.0
+  max_text_length: 280
+
+  retention:
+    importance_weight: 0.25
+    frequency_weight: 0.20
+    recency_weight: 0.20
+    stability_weight: 0.15
+    surprise_weight: 0.10
+    cortical_weight: 0.10
+    rehearsing_boost: 1.3
+    ghost_penalty: 0.3
+    reactivated_penalty: 0.7
+
+  decay:
+    base_half_life_hours: 168.0
+    ghost_half_life_factor: 0.3
+    dormant_half_life_factor: 1.5
+    reactivated_half_life_factor: 0.7
+
+  consolidation:
+    strengthen_threshold: 0.15
+    update_threshold: 0.50
+    strengthen_importance_delta: 0.10
+    strengthen_stability_delta: 0.30
+    update_stability_delta: -0.15
+    reconsolidation_stability_factor: 0.7
+
+  state_entry:
+    consolidating_stability_boost: 0.1
+    dormant_min_stability: 0.7
+    reactivated_stability: 0.2
+    reactivated_surprise: 0.8
+    activation_frequency_boost: 0.05
+
+  oscillator:
+    default_frequency: 0.5
+    default_phase: 0.0
+    default_coupling: 0.3
+    default_damping: 0.1
+    coupling_base: 0.25
+    coupling_emotion_factor: 0.15
+    critical_width_factor: 0.15
+
+sleep:
+  swr:
+    valence_weight: 0.25
+    surprise_weight: 0.25
+    frequency_weight: 0.20
+    centrality_weight: 0.15
+    instability_weight: 0.15
+    top_fraction: 0.5
+    sample_fraction: 0.33
+
+  systems:
+    tau: 20.0
+    min_hippocampal_dep: 0.05
+    schema_stability_threshold: 0.8
+    schema_text_threshold: 100
+    temporal_edge_weaken: 0.015
+    topical_edge_strengthen: 0.01
+    cortical_stability_factor: 0.9
+
+  emotional:
+    decay: 0.75
+    strip_stability_threshold: 0.5
+    importance_min_factor: 0.97
+    importance_emotional_residual: 0.25
+    importance_baseline: 0.15
+
+  schema:
+    min_instances: 3
+    min_similarity: 0.6
+
+  merge:
+    default_threshold: 0.85
+    importance_blend: 0.7
+    stability_boost: 0.15
+    min_tag_overlap: 1
+
+  prune:
+    default_retention_threshold: 0.15
+    default_edge_threshold: 0.1
+    contradiction_penalty: 0.2
+    residual_edge_factor: 0.3
+    ghost_stale_days: 30
+
+  bridge:
+    min_score: 0.6
+    default_weight: 0.3
+
+  hebbian:
+    strengthen_delta: 0.03
+    decay_log_factor: 0.02
+    active_window_hours: 24
+    max_decay: 0.1
+
+  homeostasis:
+    target_mean: 0.3
+    scale_blend: 0.5
+
+  edge_formation:
+    emotion_weight_boost: 0.3
+
+retrieval:
+  oscillation:
+    phase_weight: 0.3
+    default_frequency: 0.5
+    magnitude_base: 0.4
+    magnitude_variance_factor: 0.6
+    frequency_base: 0.3
+    frequency_centroid_factor: 0.7
+
+  spreading:
+    steps: 3
+    decay: 0.6
+    min_edge_weight: 0.05
+    resonance_weight: 0.6
+    activation_weight: 0.4
+    resonance_map_bonus: 0.7
+    min_score_threshold: 0.05
+
+  cortical:
+    top_k: 10
+
+  constellation:
+    max_size: 20
+    min_edge_weight: 0.1
+
+ghost:
+  compressed_dim: 16
+  initial_reactivation_prob: 0.5
+  emotion_attenuation: 0.6
+  emotion_resonance_threshold: 0.2
+  emotion_bonus_factor: 0.15
+  min_effective_prob: 0.05
+  revival_stability_boost: 0.2
+  resonance_persistence: 0.01
+
+  partial_recall:
+    confidence_factor: 0.3
+    decay_per_call: 0.1
+    min_confidence: 0.05
+
+  decay:
+    half_life_days: 60
+    purge_prob_threshold: 0.01
+    purge_no_revival_days: 90
+
+  resonance:
+    default_threshold: 0.5
+    fuzzy_threshold: 0.2
+    fuzzy_sub_factor: 0.3
+
+  active_threshold: 0.1
+
+abstraction:
+  min_cluster_size: 3
+  similarity_threshold: 0.55
+  stable_confidence: 0.7
+
+competition:
+  suppression_radius: 2.0
+  base_suppression: 0.1
+  emotional_boost_threshold: 0.5
+  emotional_suppression_boost: 1.3
+  winner_stability_factor: 0.5
+  winner_recency_factor: 0.3
+  edge_weaken_factor: 0.5
+  competitor_threshold: 0.2
+  tag_weight: 0.3
+  embedding_weight: 0.5
+  graph_weight: 0.2
+  interference_threshold: 0.7
+  interference_importance_factor: 0.7
+  interference_stability_factor: 0.8
+  rif_similarity_threshold: 0.5
+  rif_factor: 0.05
+  rif_stability_factor: 0.3
+
+graph:
+  contradiction_threshold: 0.7
+  spreading:
+    default_steps: 3
+    default_decay: 0.6
+    min_weight: 0.05
+  ghost_revival_threshold: 0.75
+
+index:
+  algorithm: "brute"
+  metric: "cosine"
+  n_trees: 10
+  rebuild_on_adds: 50

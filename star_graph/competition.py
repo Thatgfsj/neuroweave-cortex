@@ -19,6 +19,7 @@ from typing import Optional
 
 from .anchor import Anchor, MemoryState
 from .graph import StarGraph
+from .config import Config
 
 
 class MemoryCompetition:
@@ -28,12 +29,13 @@ class MemoryCompetition:
     emotional outcompetes neutral, similar memories interfere."
     """
 
-    def __init__(self, graph: StarGraph):
+    def __init__(self, graph: StarGraph, config: Config | None = None):
         self.graph = graph
+        self.cfg = config if config is not None else Config.get()
 
     def apply_competition(self, activated_anchor_id: str,
-                          suppression_radius: float = 2.0,
-                          base_suppression: float = 0.1) -> dict:
+                          suppression_radius: float | None = None,
+                          base_suppression: float | None = None) -> dict:
         """When anchor A is strongly activated, suppress competitors.
 
         Competitors are anchors that are:
@@ -43,13 +45,18 @@ class MemoryCompetition:
 
         Returns dict of {suppressed_id: suppression_amount}.
         """
+        c = self.cfg.competition
+        if suppression_radius is None:
+            suppression_radius = c.suppression_radius
+        if base_suppression is None:
+            base_suppression = c.base_suppression
+
         if activated_anchor_id not in self.graph.anchors:
             return {}
 
         activated = self.graph.anchors[activated_anchor_id]
         suppressed = {}
 
-        # Find competing anchors via graph adjacency + embedding similarity
         competitors = self._find_competitors(activated, suppression_radius)
 
         for comp_id, similarity in competitors:
@@ -59,33 +66,25 @@ class MemoryCompetition:
             if not comp:
                 continue
 
-            # Suppression amount depends on:
-            # - Activation strength of the winner
-            # - Similarity between competitors (more similar = more suppression)
-            # - Relative importance (weaker gets more suppressed)
             activation_strength = activated.retention_score
             suppression = base_suppression * similarity * activation_strength
 
-            # Weaker competitor gets more suppressed
             if comp.retention_score < activation_strength:
                 suppression *= 1.5  # winner-take-more
 
-            # Emotional boost: emotional winner suppresses more
-            if abs(activated.vector.emotional_valence) > 0.5:
-                suppression *= 1.3
+            if abs(activated.vector.emotional_valence) > c.emotional_boost_threshold:
+                suppression *= c.emotional_suppression_boost
 
-            # Apply suppression
             comp.vector.importance *= (1.0 - suppression)
-            comp.vector.stability *= (1.0 - suppression * 0.5)
-            comp.vector.recency *= (1.0 - suppression * 0.3)
+            comp.vector.stability *= (1.0 - suppression * c.winner_stability_factor)
+            comp.vector.recency *= (1.0 - suppression * c.winner_recency_factor)
 
             suppressed[comp_id] = suppression
 
-            # Edge between competitors weakens (lateral inhibition)
             key = self.graph._key(activated_anchor_id, comp_id)
             edge = self.graph.edges.get(key)
             if edge:
-                edge.weaken(suppression * 0.5)
+                edge.weaken(suppression * c.edge_weaken_factor)
 
         return suppressed
 
@@ -116,9 +115,10 @@ class MemoryCompetition:
                 graph_sim = 1.0 / max(1, graph_dist)
 
             # Combined competition score
-            comp_score = 0.3 * tag_sim + 0.5 * emb_sim + 0.2 * graph_sim
+            c = self.cfg.competition
+            comp_score = c.tag_weight * tag_sim + c.embedding_weight * emb_sim + c.graph_weight * graph_sim
 
-            if comp_score > 0.2:  # only meaningful competitors
+            if comp_score > c.competitor_threshold:
                 competitors.append((other_id, comp_score))
 
         return sorted(competitors, key=lambda x: -x[1])
@@ -148,7 +148,7 @@ class MemoryCompetition:
         return None
 
     def interference_forget(self, new_anchor: Anchor,
-                           interference_threshold: float = 0.7) -> list[str]:
+                           interference_threshold: float | None = None) -> list[str]:
         """New knowledge inhibits old contradictory/similar knowledge.
 
         When a new anchor is created, check if it interferes with existing
@@ -157,32 +157,29 @@ class MemoryCompetition:
 
         Returns list of suppressed anchor IDs.
         """
+        c = self.cfg.competition
+        if interference_threshold is None:
+            interference_threshold = c.interference_threshold
+
         suppressed = []
 
         for other_id, other in self.graph.anchors.items():
             if other_id == new_anchor.id:
                 continue
 
-            # High similarity + different content = interference
             if new_anchor.embedding and other.embedding:
                 sim = self._cosine_sim(new_anchor.embedding, other.embedding)
             else:
                 continue
 
             if sim > interference_threshold:
-                # Same topic, potentially contradictory → interfere
-
-                # Newer anchor has advantage (recency bias)
                 if new_anchor.created_at > other.created_at:
-                    # New inhibits old
-                    other.vector.importance *= 0.7
-                    other.vector.stability *= 0.8
-                    # Mark as potentially contradictory
+                    other.vector.importance *= c.interference_importance_factor
+                    other.vector.stability *= c.interference_stability_factor
                     if "contradicted" not in other.tags:
                         other.tags.append("contradicted")
                     suppressed.append(other_id)
 
-                    # Weaken edge
                     key = self.graph._key(new_anchor.id, other_id)
                     if key in self.graph.edges:
                         self.graph.edges[key].edge_type = "revision"
@@ -212,11 +209,10 @@ class MemoryCompetition:
             else:
                 continue
 
-            if sim > 0.5:
-                # RIF effect: proportional to similarity
-                rif = 0.05 * sim
+            if sim > self.cfg.competition.rif_similarity_threshold:
+                rif = self.cfg.competition.rif_factor * sim
                 comp.vector.importance *= (1.0 - rif)
-                comp.vector.stability *= (1.0 - rif * 0.3)
+                comp.vector.stability *= (1.0 - rif * self.cfg.competition.rif_stability_factor)
 
     @staticmethod
     def _cosine_sim(a: list[float], b: list[float]) -> float:

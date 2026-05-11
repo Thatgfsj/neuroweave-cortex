@@ -41,3 +41,6 @@ from .ghost import GhostNode, GhostSubsystem
 from .abstraction import AbstractNode, AbstractionEngine
 from .metrics import CognitiveMetrics
 from .competition import MemoryCompetition
+from .config import Config, config, override, reload_defaults, load_config
+from .layers import enforce_layer_boundaries, layer_summary, get_layer, check_import
+from .anchor import EmbedderRegistry

@@ -1,0 +1,62 @@
+[
+  {
+    "scenario": "baseline",
+    "anchors_before": 10,
+    "anchors_after": 10,
+    "merged": 0,
+    "pruned": 0,
+    "ghosts": 0,
+    "schemas": 3,
+    "recall_before": 0.667,
+    "recall_after": 1.0,
+    "compression_ratio": 0.3,
+    "ghost_reactivated": 0,
+    "stability": 0.39
+  },
+  {
+    "scenario": "no_oscillation",
+    "anchors_before": 10,
+    "anchors_after": 9,
+    "merged": 1,
+    "pruned": 0,
+    "recall": 1.0,
+    "stability": 0.391
+  },
+  {
+    "scenario": "no_emotion",
+    "anchors_before": 10,
+    "anchors_after": 9,
+    "merged": 1,
+    "pruned": 0,
+    "priority_variance": 0,
+    "stability": 0.391
+  },
+  {
+    "scenario": "no_sleep",
+    "anchors": 10,
+    "schemas": 0,
+    "abstracts": 0,
+    "ghosts": 0,
+    "recall": 1.0,
+    "abstractions_formed": 0,
+    "compression_improvement": 0.0,
+    "stability": 0.375
+  },
+  {
+    "scenario": "no_ghosts",
+    "anchors_before": 10,
+    "anchors_after": 9,
+    "merged": 1,
+    "pruned": 0,
+    "ghosts": 0,
+    "stability": 0.391
+  },
+  {
+    "scenario": "no_competition",
+    "anchors_before": 10,
+    "anchors_after": 9,
+    "merged": 1,
+    "contradicted_anchors": 0,
+    "stability": 0.391
+  }
+]

@@ -44,18 +44,19 @@ class EmbeddingProvider:
         return self._backend
 
     def _ensure_model(self) -> None:
-        if self._model is not None or self._backend == "tfidf":
+        if self._model is not None or self._backend != "none":
             return
         try:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name)
+            self._model = SentenceTransformer(self._model_name, local_files_only=True)
             try:
                 self._dim = self._model.get_embedding_dimension()
             except AttributeError:
                 self._dim = self._model.get_sentence_embedding_dimension()
             self._backend = "sentence-transformers"
         except Exception:
-            self._init_tfidf()
+            # Fall back to hash-based embedding — stable per text
+            self._backend = "hash"
 
     def _init_tfidf(self) -> None:
         from sklearn.feature_extraction.text import TfidfVectorizer
@@ -70,9 +71,10 @@ class EmbeddingProvider:
             vec = self._model.encode(text, show_progress_bar=False)
             return vec.tolist()
         elif self._backend == "tfidf":
-            texts = list(self._tfidf_texts) + [text]
+            # TF-IDF requires a corpus — accumulate texts for meaningful vectors
             try:
-                self._tfidf.fit(texts)
+                self._tfidf_texts.append(text)
+                self._tfidf.fit(self._tfidf_texts)
                 mat = self._tfidf.transform([text])
                 dense = mat.toarray()[0]
                 norm = math.sqrt(sum(x * x for x in dense))
@@ -199,6 +201,10 @@ def get_embedder(model_name: str = "all-MiniLM-L6-v2") -> EmbeddingProvider:
     global _provider
     if _provider is None:
         _provider = EmbeddingProvider(model_name)
+    # Auto-register with anchor's embedder registry to avoid L1→L3 import
+    from .anchor import EmbedderRegistry
+    if EmbedderRegistry._embedder is None:
+        EmbedderRegistry.set_embedder(_provider)
     return _provider
 
 
