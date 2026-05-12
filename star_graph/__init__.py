@@ -84,6 +84,11 @@ from .multimodal import (
     CrossModalRetriever,
     CrossModalResult,
 )
+from .streaming import (
+    StreamItem,
+    StreamStats,
+    StreamingMemoryBuffer,
+)
 from .benchmark import (
     BenchmarkSuite,
     BenchmarkScenario,

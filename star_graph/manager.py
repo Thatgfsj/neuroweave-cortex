@@ -159,6 +159,9 @@ class MemoryManager:
         self._multimodal_provider: MultimodalEmbeddingProvider | None = None
         self._cross_modal_retriever: CrossModalRetriever | None = None
 
+        # Streaming — continuous memory ingestion buffer
+        self._streaming_buffer = None
+
         # Stats
         self.sleep_cycles: int = 0
         self.total_evolutions: int = 0
@@ -243,6 +246,27 @@ class MemoryManager:
         if self._survival_fn is None:
             self._survival_fn = SurvivalRegistry.from_config(self.cfg)
         return self._survival_fn
+
+    @property
+    def streaming_buffer(self):
+        """Lazy-init streaming memory buffer for continuous ingestion."""
+        if self._streaming_buffer is None:
+            from .streaming import StreamingMemoryBuffer
+            stream_cfg = getattr(self.cfg, 'streaming', None)
+            max_buf = getattr(stream_cfg, 'max_buffer', 500) if stream_cfg else 500
+            flush_sec = getattr(stream_cfg, 'flush_interval_s', 30.0) if stream_cfg else 30.0
+            batch_sz = getattr(stream_cfg, 'batch_size', 20) if stream_cfg else 20
+            dedup_th = getattr(stream_cfg, 'dedup_threshold', 0.85) if stream_cfg else 0.85
+            max_ses = getattr(stream_cfg, 'max_sessions', 10) if stream_cfg else 10
+            self._streaming_buffer = StreamingMemoryBuffer(
+                self,
+                max_buffer=max_buf,
+                flush_interval_s=flush_sec,
+                batch_size=batch_sz,
+                dedup_threshold=dedup_th,
+                max_sessions=max_ses,
+            )
+        return self._streaming_buffer
 
     @property
     def multimodal(self) -> MultimodalEmbeddingProvider:
