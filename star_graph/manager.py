@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -57,6 +58,9 @@ from .cost_estimator import SleepCostEstimator, CostEstimate
 from .snapshot import SnapshotManager, SnapshotMeta
 from .tracing import MemoryTracer, get_tracer, trace_recall
 from .survival import SurvivalFunction, SurvivalRegistry
+from .multimodal import (
+    MultimodalEmbeddingProvider, MultimodalAnchor, CrossModalRetriever, CrossModalResult,
+)
 
 
 @dataclass
@@ -151,6 +155,10 @@ class MemoryManager:
         from .ghost import GhostNode
         GhostNode.set_survival_function(self.survival_function)
 
+        # Multimodal — optional image/text cross-modal embedding
+        self._multimodal_provider: MultimodalEmbeddingProvider | None = None
+        self._cross_modal_retriever: CrossModalRetriever | None = None
+
         # Stats
         self.sleep_cycles: int = 0
         self.total_evolutions: int = 0
@@ -235,6 +243,20 @@ class MemoryManager:
         if self._survival_fn is None:
             self._survival_fn = SurvivalRegistry.from_config(self.cfg)
         return self._survival_fn
+
+    @property
+    def multimodal(self) -> MultimodalEmbeddingProvider:
+        """Lazy-init multimodal embedding provider."""
+        if self._multimodal_provider is None:
+            self._multimodal_provider = MultimodalEmbeddingProvider()
+        return self._multimodal_provider
+
+    @property
+    def cross_modal_retriever(self) -> CrossModalRetriever:
+        """Lazy-init cross-modal retriever."""
+        if self._cross_modal_retriever is None:
+            self._cross_modal_retriever = CrossModalRetriever(self.multimodal)
+        return self._cross_modal_retriever
 
     @property
     def metrics(self) -> CognitiveMetrics:
@@ -584,6 +606,126 @@ class MemoryManager:
 
         anchor.activate()
         return anchor
+
+    # ── Multimodal operations ─────────────────────────────────
+
+    def remember_image(self, image_path: str, caption: str = "",
+                      tags: list[str] | None = None,
+                      importance: float = 0.5,
+                      source_session: str = "",
+                      emotional_valence: float = 0.0) -> MultimodalAnchor:
+        """Store a memory with an image attachment.
+
+        Creates a MultimodalAnchor with both text (caption) and image embeddings.
+        With CLIP, enables cross-modal retrieval (text→image, image→text).
+        Without CLIP, falls back to caption/tag-based search.
+        """
+        anchor = MultimodalAnchor.from_image(
+            image_path=image_path,
+            provider=self.multimodal,
+            caption=caption,
+            tags=tags,
+            importance=importance,
+            source_session=source_session,
+            emotional_valence=emotional_valence,
+        )
+        self.graph.add_anchor(anchor)
+
+        # Also index raw buffer for L0 recall
+        self.raw_buffer.add(
+            text=caption or f"[image] {os.path.basename(image_path)}",
+            session_id=source_session,
+            embedding=anchor.embedding,
+            tags=tags,
+            importance=importance,
+            anchor_id=anchor.id,
+        )
+        return anchor
+
+    def remember_text_and_image(self, text: str, image_path: str,
+                               tags: list[str] | None = None,
+                               importance: float = 0.5,
+                               source_session: str = "",
+                               emotional_valence: float = 0.0) -> MultimodalAnchor:
+        """Store a memory with both text content and an associated image."""
+        anchor = MultimodalAnchor.from_text_and_image(
+            text=text,
+            image_path=image_path,
+            provider=self.multimodal,
+            tags=tags,
+            importance=importance,
+            source_session=source_session,
+            emotional_valence=emotional_valence,
+        )
+        self.graph.add_anchor(anchor)
+        self.raw_buffer.add(
+            text=text,
+            session_id=source_session,
+            embedding=anchor.embedding,
+            tags=tags,
+            importance=importance,
+            anchor_id=anchor.id,
+        )
+        return anchor
+
+    def cross_modal_recall(self, query: str = "",
+                          query_image_path: str = "",
+                          max_items: int = 10,
+                          text_weight: float = 0.6,
+                          image_weight: float = 0.4) -> list[CrossModalResult]:
+        """Retrieve memories across text and image modalities.
+
+        Combines anchors from main graph and all cortices.
+        Text→text, text→image, image→text, image→image all supported.
+        True cross-modal alignment requires CLIP.
+
+        Args:
+            query: Text query (optional if query_image_path given)
+            query_image_path: Image query (optional if query_text given)
+            max_items: Max results to return
+            text_weight: Weight for text similarity in combined score
+            image_weight: Weight for image similarity in combined score
+        """
+        # Collect all anchors from graph + cortices
+        all_anchors = dict(self.graph.anchors)
+        for cortex in self.router.cortices:
+            all_anchors.update(cortex.graph.anchors)
+
+        return self.cross_modal_retriever.retrieve(
+            anchors=all_anchors,
+            query_text=query,
+            query_image_path=query_image_path,
+            top_k=max_items,
+            text_weight=text_weight,
+            image_weight=image_weight,
+        )
+
+    def image_search(self, image_path: str,
+                    max_items: int = 10) -> list[CrossModalResult]:
+        """Find images visually similar to a query image.
+
+        Uses perceptual hash matching (always available) or CLIP (if installed).
+        """
+        all_anchors = dict(self.graph.anchors)
+        for cortex in self.router.cortices:
+            all_anchors.update(cortex.graph.anchors)
+        return self.cross_modal_retriever.image_search(
+            anchors=all_anchors,
+            query_image_path=image_path,
+            top_k=max_items,
+        )
+
+    def text_to_image(self, query: str,
+                     max_items: int = 10) -> list[CrossModalResult]:
+        """Find images matching a text description (CLIP required for best results)."""
+        all_anchors = dict(self.graph.anchors)
+        for cortex in self.router.cortices:
+            all_anchors.update(cortex.graph.anchors)
+        return self.cross_modal_retriever.text_to_image(
+            anchors=all_anchors,
+            query_text=query,
+            top_k=max_items,
+        )
 
     # ── Cortex management ────────────────────────────────────
 

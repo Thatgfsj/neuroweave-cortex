@@ -78,6 +78,12 @@ from .survival import (
     SurvivalState,
     derive_strength,
 )
+from .multimodal import (
+    MultimodalEmbeddingProvider,
+    MultimodalAnchor,
+    CrossModalRetriever,
+    CrossModalResult,
+)
 from .benchmark import (
     BenchmarkSuite,
     BenchmarkScenario,

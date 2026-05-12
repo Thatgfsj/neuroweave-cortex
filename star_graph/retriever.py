@@ -262,7 +262,7 @@ class VectorSimilarityRetriever(Retriever):
             for aid, sim in results:
                 if aid in self.graph.anchors:
                     anchor = self.graph.anchors[aid]
-                    score = sim * anchor.retention_score
+                    score = max(0.0, sim) * anchor.retention_score
                     scored.append((
                         score,
                         anchor,
@@ -278,7 +278,7 @@ class VectorSimilarityRetriever(Retriever):
             scored = []
             for anchor in self.graph.anchors.values():
                 if anchor.embedding:
-                    sim = self._cosine_sim(embedding, anchor.embedding)
+                    sim = max(0.0, self._cosine_sim(embedding, anchor.embedding))
                     score = sim * anchor.retention_score
                     scored.append((
                         score,
@@ -466,12 +466,12 @@ class OscillationResonanceRetriever(Retriever):
         scored: list[tuple[float, Anchor, dict[str, float]]] = []
         for anchor in self.graph.anchors.values():
             if anchor.embedding:
-                semantic_sim = self._cosine_sim(embedding, anchor.embedding)
+                semantic_sim = max(0.0, self._cosine_sim(embedding, anchor.embedding))
             else:
                 semantic_sim = self._text_overlap(query, anchor.text)
             phase_coh = self._phase_coherence(query_phase, anchor)
             score_base = (1.0 - self.phase_weight) * semantic_sim + self.phase_weight * phase_coh
-            score = score_base * anchor.retention_score
+            score = max(0.0, score_base * anchor.retention_score)
             trace_comps = self._trace_components(query_phasor, driving_freq, anchor)
             trace_comps["semantic_similarity"] = semantic_sim
             trace_comps["activation"] = score_base * 0.3
@@ -758,7 +758,7 @@ class HybridFusionRetriever(Retriever):
 
         # 6. Fuse all signals
         for aid, (_, explain) in scores.items():
-            explain.combined = (
+            explain.combined = max(0.0,
                 self.alpha * explain.semantic_sim
                 + self.beta * explain.temporal_score
                 + self.gamma * explain.graph_score
