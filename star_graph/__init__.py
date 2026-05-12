@@ -10,7 +10,7 @@ Architecture:
   Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "0.6.0-dev"
+__version__ = "1.0.6"
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -84,6 +84,8 @@ from .multimodal import (
     CrossModalRetriever,
     CrossModalResult,
 )
+from .resonance import Resonator
+from .symbolic_filter import SymbolicFilter, FilterResult
 from .streaming import (
     StreamItem,
     StreamStats,
