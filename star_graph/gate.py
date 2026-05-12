@@ -61,19 +61,21 @@ class MemoryGate:
 
     def __init__(self, k: int = 20,
                  lateral_inhibition_radius: float = 0.7,
-                 inhibition_strength: float = 0.3):
+                 inhibition_strength: float = 0.3,
+                 config=None):
         self.k = k
         self.lateral_inhibition_radius = lateral_inhibition_radius
         self.inhibition_strength = inhibition_strength
 
-        # Dimension weights (sum to 1.0)
-        self.w_importance = 0.20
-        self.w_recency = 0.15
-        self.w_emotional = 0.10
-        self.w_semantic = 0.25
-        self.w_causal = 0.10
-        self.w_focus = 0.15
-        self.w_novelty = 0.05
+        # Read dimension weights from config, falling back to defaults
+        gc = getattr(config, 'gate', None) if config else None
+        self.w_importance = getattr(gc, 'w_importance', 0.20) if gc else 0.20
+        self.w_recency = getattr(gc, 'w_recency', 0.15) if gc else 0.15
+        self.w_emotional = getattr(gc, 'w_emotional', 0.10) if gc else 0.10
+        self.w_semantic = getattr(gc, 'w_semantic', 0.25) if gc else 0.25
+        self.w_causal = getattr(gc, 'w_causal', 0.10) if gc else 0.10
+        self.w_focus = getattr(gc, 'w_focus', 0.15) if gc else 0.15
+        self.w_novelty = getattr(gc, 'w_novelty', 0.05) if gc else 0.05
 
     def gate(self, items: list[MemoryItem],
              context: AgentContext,

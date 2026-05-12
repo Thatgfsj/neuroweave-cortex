@@ -61,10 +61,11 @@ class WorkingMemory:
     On overflow, lowest-priority items are evicted.
     """
 
-    def __init__(self, max_capacity: int = 9, ttl_seconds: float = 1800.0):
+    def __init__(self, max_capacity: int = 15, ttl_seconds: float = 3600.0):
         self.max_capacity = max_capacity
         self.ttl_seconds = ttl_seconds
         self._entries: list[WorkingMemoryEntry] = []
+        self._exact_index: dict[str, list[WorkingMemoryEntry]] = {}  # O(1) exact key lookup
 
     # ── Core operations ───────────────────────────────────
 
@@ -89,9 +90,11 @@ class WorkingMemory:
         if len(self._entries) >= self.max_capacity:
             # Evict lowest-priority entry
             self._entries.sort(key=lambda e: e.priority)
-            self._entries.pop(0)
+            evicted = self._entries.pop(0)
+            self._unindex_entry(evicted)
 
         self._entries.append(entry)
+        self._index_entry(entry)
         return entry
 
     def get_all(self, max_items: int | None = None) -> list[WorkingMemoryEntry]:
@@ -153,9 +156,23 @@ class WorkingMemory:
         self._entries = [e for e in self._entries if e is not entry]
         return anchor.id
 
+    def get_exact(self, key: str) -> list[WorkingMemoryEntry]:
+        """O(1) exact match lookup by entity key (e.g. 'alice-birthday').
+
+        Returns entries matching the exact key, sorted by priority.
+        Returns empty list if no match.
+        """
+        entries = self._exact_index.get(key, [])
+        if entries:
+            for e in entries:
+                e.touch()
+            entries.sort(key=lambda e: e.priority, reverse=True)
+        return entries
+
     def clear(self):
         """Clear all working memory entries."""
         self._entries.clear()
+        self._exact_index.clear()
 
     def clear_session(self, session_id: str):
         """Clear entries from a specific session."""
@@ -164,9 +181,31 @@ class WorkingMemory:
 
     # ── Internal ──────────────────────────────────────────
 
+    def _index_entry(self, entry: WorkingMemoryEntry):
+        """Extract exact-match keys from entry and add to O(1) lookup index."""
+        keys = _extract_keys(entry.text, entry.tags)
+        for key in keys:
+            if key not in self._exact_index:
+                self._exact_index[key] = []
+            self._exact_index[key].append(entry)
+
+    def _unindex_entry(self, entry: WorkingMemoryEntry):
+        """Remove entry from exact-match index."""
+        keys = _extract_keys(entry.text, entry.tags)
+        for key in keys:
+            bucket = self._exact_index.get(key, [])
+            if entry in bucket:
+                bucket.remove(entry)
+            if not bucket:
+                self._exact_index.pop(key, None)
+
     def _clear_expired(self):
         """Remove entries past their TTL."""
         now = time.time()
+        expired = [e for e in self._entries
+                   if now - e.created_at >= self.ttl_seconds]
+        for e in expired:
+            self._unindex_entry(e)
         self._entries = [e for e in self._entries
                          if now - e.created_at < self.ttl_seconds]
 
@@ -189,6 +228,36 @@ class WorkingMemory:
             return "Working memory: empty"
         items = [e.text[:60] for e in self._entries[-5:]]
         return f"Working memory ({len(self._entries)}/{self.max_capacity}): " + " | ".join(items)
+
+
+def _extract_keys(text: str, tags: list[str]) -> list[str]:
+    """Extract exact-match keys from text for working memory indexing."""
+    import re
+    keys: list[str] = []
+
+    # Entity-attribute: "Alice's birthday"
+    for m in re.finditer(r"(\w+(?:\s+\w+){0,2})'s\s+(\w+)", text, re.IGNORECASE):
+        e = m.group(1).strip().lower().replace(' ', '_')
+        a = m.group(2).strip().lower().replace(' ', '_')
+        if len(e) > 1 and len(a) > 1:
+            keys.append(f"{e}-{a}")
+
+    # KV: "X is Y", "X = Y"
+    for m in re.finditer(r'(\w+)\s(?:is|set to|equals|:|=>|->|=)\s(\w+)', text, re.IGNORECASE):
+        keys.append(f"{m.group(1).lower()}-{m.group(2).lower()}")
+
+    # Tags as keys
+    for tag in tags:
+        tag_norm = tag.lower().replace(' ', '_')
+        if len(tag_norm) > 2:
+            keys.append(f"tag:{tag_norm}")
+
+    # First two significant words as fallback
+    words = [w.lower() for w in re.findall(r'[a-zA-Z]\w{2,}', text)]
+    if not keys and len(words) >= 2:
+        keys.append(f"{words[0]}-{words[1]}")
+
+    return list(dict.fromkeys(keys))[:5]
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:

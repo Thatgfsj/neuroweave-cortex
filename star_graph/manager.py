@@ -35,7 +35,7 @@ from typing import Optional
 from .anchor import Anchor, MemoryState
 from .graph import StarGraph, Edge
 from .config import Config
-from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryContext
+from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryContext, MemoryItem, MemoryType
 from .working_memory import WorkingMemory, WorkingMemoryEntry
 from .cortex import MemoryCortex, CortexConfig
 from .router import CortexRouter, RouteResult
@@ -44,10 +44,18 @@ from .timespine import TimeSpine
 from .cascade import CascadeRecall
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
+from .symbolic_filter import SymbolicFilter
 from .evolution import MemoryEvolutionEngine
 from .ghost import GhostSubsystem
 from .abstraction import AbstractionEngine
+from .community import Community, CommunityHealth, CommunityDetection
 from .metrics import CognitiveMetrics
+from .raw_buffer import RawBuffer, RawChunk
+from .dual_channel import DualChannelRetriever, DualChannelOutput
+from .exact_cache import ExactMatchCache
+from .cost_estimator import SleepCostEstimator, CostEstimate
+from .snapshot import SnapshotManager, SnapshotMeta
+from .tracing import MemoryTracer, get_tracer, trace_recall
 
 
 @dataclass
@@ -82,6 +90,11 @@ class MemoryManager:
         self.storage_path = storage_path
         self._started_at = time.time()
 
+        # Edge budget — prevent graph density explosion
+        graph_cfg = getattr(self.cfg, 'graph', None)
+        edge_budget_enabled = getattr(graph_cfg, 'edge_budget_enabled', True) if graph_cfg else True
+        self.graph._max_edges_per_node = getattr(graph_cfg, 'max_edges_per_node', 8) if (graph_cfg and edge_budget_enabled) else 0
+
         # Working memory — short-term buffer (not persisted)
         wm_cfg = getattr(self.cfg, 'working_memory', None)
         wm_capacity = getattr(wm_cfg, 'max_capacity', 9) if wm_cfg else 9
@@ -94,12 +107,16 @@ class MemoryManager:
         # Brain sphere — innermost L1 cache (non-lazy, always available)
         self.brain = BrainSphere(max_common_nodes=5000)
 
+        # Symbolic filter — pre-filters by topic/keyword before embedding search
+        self.sym_filter = SymbolicFilter()
+
         # Subsystems — lazily initialized
         self._embedder = None
         self._scheduler: CognitiveMemoryScheduler | None = None
         self._evolution: MemoryEvolutionEngine | None = None
         self._ghosts: GhostSubsystem | None = None
         self._abstraction: AbstractionEngine | None = None
+        self._community_detection: CommunityDetection | None = None
         self._metrics: CognitiveMetrics | None = None
         self._online_consolidator = None
         self._router: CortexRouter | None = None
@@ -107,6 +124,24 @@ class MemoryManager:
         self._timespine: TimeSpine | None = None
         self._cascade: CascadeRecall | None = None
         self._hublayer: HubLayer | None = None
+
+        # Raw chunk buffer — uncompressed short-term memory tier (L0)
+        self._raw_buffer: RawBuffer | None = None
+
+        # Dual-channel retriever (System-1 + System-2)
+        self._dual_channel: DualChannelRetriever | None = None
+
+        # Exact match cache — deterministic O(1) entity-pair lookup bypass
+        self._exact_cache: ExactMatchCache | None = None
+
+        # Micro-sleep scheduler — incremental non-blocking consolidation
+        self._micro_sleep = None
+
+        # Snapshot manager — versioned state snapshots with WAL
+        self._snapshot_mgr: SnapshotManager | None = None
+
+        # Tracer — lightweight observability spans
+        self.tracer: MemoryTracer = get_tracer(enabled=True)
 
         # Stats
         self.sleep_cycles: int = 0
@@ -118,7 +153,9 @@ class MemoryManager:
     def scheduler(self) -> CognitiveMemoryScheduler:
         if self._scheduler is None:
             self._scheduler = CognitiveMemoryScheduler(
-                self.graph, self.cfg, working_memory=self.working_memory)
+                self.graph, self.cfg,
+                working_memory=self.working_memory,
+                sym_filter=self.sym_filter)
         return self._scheduler
 
     @property
@@ -140,6 +177,51 @@ class MemoryManager:
         return self._abstraction
 
     @property
+    def community_detection(self) -> CommunityDetection:
+        if self._community_detection is None:
+            self._community_detection = CommunityDetection()
+        return self._community_detection
+
+    @property
+    def raw_buffer(self) -> RawBuffer:
+        if self._raw_buffer is None:
+            rb_cfg = getattr(self.cfg, 'raw_buffer', None)
+            max_sessions = getattr(rb_cfg, 'max_sessions', 2) if rb_cfg else 2
+            max_chunks = getattr(rb_cfg, 'max_chunks_per_session', 500) if rb_cfg else 500
+            self._raw_buffer = RawBuffer(
+                max_sessions=max_sessions,
+                max_chunks_per_session=max_chunks,
+            )
+        return self._raw_buffer
+
+    @property
+    def dual_channel(self) -> DualChannelRetriever:
+        if self._dual_channel is None:
+            dc_cfg = getattr(self.cfg, 'dual_channel', None)
+            s1_threshold = getattr(dc_cfg, 's1_confidence_threshold', 0.35) if dc_cfg else 0.35
+            self._dual_channel = DualChannelRetriever(
+                self.graph,
+                s1_confidence_threshold=s1_threshold,
+            )
+        return self._dual_channel
+
+    @property
+    def compressor(self):
+        """Lazy-init multi-level compression engine."""
+        if getattr(self, '_compress_engine', None) is None:
+            from .compression import MultiLevelCompressor
+            self._compress_engine = MultiLevelCompressor()
+        return self._compress_engine
+
+    @property
+    def exact_cache(self) -> ExactMatchCache:
+        if self._exact_cache is None:
+            ec_cfg = getattr(self.cfg, 'exact_cache', None)
+            max_per_key = getattr(ec_cfg, 'max_entries_per_key', 5) if ec_cfg else 5
+            self._exact_cache = ExactMatchCache(max_entries_per_key=max_per_key)
+        return self._exact_cache
+
+    @property
     def metrics(self) -> CognitiveMetrics:
         if self._metrics is None:
             self._metrics = CognitiveMetrics(self.graph)
@@ -148,13 +230,13 @@ class MemoryManager:
     @property
     def router(self) -> CortexRouter:
         if self._router is None:
-            self._router = CortexRouter(self.cfg)
+            self._router = CortexRouter(self.cfg, brain=self.brain)
         return self._router
 
     @property
     def gate(self) -> MemoryGate:
         if self._gate is None:
-            self._gate = MemoryGate(k=self.cfg.gate.k if hasattr(self.cfg, 'gate') else 20)
+            self._gate = MemoryGate(k=self.cfg.gate.k if hasattr(self.cfg, 'gate') else 20, config=self.cfg)
         return self._gate
 
     @property
@@ -174,7 +256,9 @@ class MemoryManager:
     @property
     def hublayer(self) -> HubLayer:
         if self._hublayer is None:
-            self._hublayer = HubLayer()
+            hub_cfg = getattr(self.cfg, 'hub', None)
+            max_deg = getattr(hub_cfg, 'max_degree_per_shard', 50) if hub_cfg else 50
+            self._hublayer = HubLayer(max_degree_per_shard=max_deg)
         return self._hublayer
 
     def _get_embedder(self):
@@ -228,6 +312,21 @@ class MemoryManager:
 
         self.graph.add_anchor(anchor)
 
+        # Dual-write: also store raw uncompressed chunk in L0 buffer
+        self.raw_buffer.add(
+            text=text, session_id=source_session,
+            embedding=embedding, tags=tags,
+            importance=importance, anchor_id=anchor.id,
+        )
+
+        # Harvest exact match keys into deterministic KV cache
+        auto_harvest = True
+        ec_cfg = getattr(self.cfg, 'exact_cache', None)
+        if ec_cfg:
+            auto_harvest = getattr(ec_cfg, 'auto_harvest', True)
+        if auto_harvest:
+            self.exact_cache.harvest_from_anchor(anchor)
+
         # Auto-connect to specified anchors
         if connect_to:
             for target_id in connect_to:
@@ -246,16 +345,149 @@ class MemoryManager:
     def recall(self, query: str = "",
                context: AgentContext | None = None,
                max_items: int = 10) -> MemoryContext:
-        """Retrieve memories relevant to the query and agent context.
+        """Multi-path retrieval with tracing instrumentation.
 
-        Args:
-            query: What the agent is looking for
-            context: Agent's current task, goals, emotional state
-            max_items: Maximum memories to return
+        Path 0 (Exact Cache): Deterministic O(1) entity-pair lookup.
+        Path A (L0 Raw Buffer): BM25 + vector search on uncompressed chunks.
+        Path B (L1-L5 Graph): Dimensional descent through structured anchors.
         """
         if context is None:
             context = AgentContext(task_type="conversation")
-        return self.scheduler.retrieve(context, query, max_items)
+
+        embedder = self._get_embedder()
+        query_emb = embedder.encode(query) if query else None
+        t_start = time.time()
+
+        # Path 0: Exact cache lookup (deterministic O(1) bypass)
+        t0 = time.time()
+        exact_results: list[MemoryItem] = []
+        if query:
+            query_keys = self.exact_cache.query_keys(query)
+            for key in query_keys:
+                entries = self.exact_cache.get(key)
+                for entry in entries:
+                    anchor = self.graph.anchors.get(entry.anchor_id)
+                    if anchor and anchor.is_retrievable:
+                        exact_results.append(MemoryItem(
+                            anchor=anchor,
+                            relevance_score=0.95 + entry.confidence * 0.05,
+                            memory_type=MemoryType.SEMANTIC,
+                            compression_level=0,
+                            compressed_text=entry.text,
+                        ))
+            for key in query_keys:
+                wm_entries = self.working_memory.get_exact(key)
+                for wme in wm_entries:
+                    exact_results.append(MemoryItem(
+                        anchor=None,
+                        relevance_score=0.92,
+                        memory_type=MemoryType.WORKING,
+                        compression_level=0,
+                        compressed_text=wme.text[:200],
+                    ))
+        exact_ms = (time.time() - t0) * 1000
+
+        # Path A: Raw buffer search (L0 — highest priority after exact cache)
+        t0 = time.time()
+        raw_results = self.raw_buffer.search(
+            query=query, query_embedding=query_emb,
+            top_k=max_items,
+            session_id=context.session_id if context else "",
+        )
+        raw_ms = (time.time() - t0) * 1000
+
+        # Path B: Graph dimensional descent (L1-L5)
+        t0 = time.time()
+        graph_result = self.retrieve_with_descent(
+            query=query, context=context, max_items=max_items)
+        graph_ms = (time.time() - t0) * 1000
+
+        # Merge: exact cache hits first, then graph items, then raw chunks
+        merged_items = list(exact_results)
+        seen_texts = {self._normalize_text(item.compressed_text) for item in merged_items
+                      if hasattr(item, 'compressed_text') and item.compressed_text}
+
+        for item in graph_result.get("items", []):
+            text = getattr(item, 'compressed_text', '') or ''
+            norm_text = self._normalize_text(text)
+            if norm_text and norm_text in seen_texts:
+                continue
+            seen_texts.add(norm_text)
+            merged_items.append(item)
+
+        for chunk, score in raw_results:
+            norm_text = self._normalize_text(chunk.text[:120])
+            if norm_text and norm_text in seen_texts:
+                continue
+            seen_texts.add(norm_text)
+            merged_items.append(MemoryItem(
+                anchor=None,
+                relevance_score=score,
+                memory_type=MemoryType.WORKING,
+                compression_level=0,
+                compressed_text=chunk.text[:200],
+            ))
+
+        merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
+        merged_items = merged_items[:max_items]
+
+        layers_visited = (["exact_cache"] if exact_results else []) + ["raw_buffer"] + graph_result.get("layers_visited", [])
+        total_ms = (time.time() - t_start) * 1000
+
+        # Trace: record full recall as a completed span
+        self.tracer.record("recall", attributes={
+            "query": query[:200],
+            "max_items": max_items,
+            "exact_hits": len(exact_results),
+            "raw_chunks": len(raw_results),
+            "graph_items": len(graph_result.get("items", [])),
+            "final_count": len(merged_items),
+            "layers_visited": str(layers_visited)[:300],
+            "exact_ms": round(exact_ms, 3),
+            "raw_ms": round(raw_ms, 3),
+            "graph_ms": round(graph_ms, 3),
+            "total_ms": round(total_ms, 3),
+        }, duration_ms=total_ms)
+
+        return MemoryContext(
+            items=merged_items,
+            memory_summary=f"Exact+Raw+Graph merge | Layer: {graph_result.get('layer_used', 'graph')}, visited: {layers_visited}",
+            active_patterns=[],
+            relevant_facts=[],
+            reasoning_traces=[
+                f"exact_hits={len(exact_results)}",
+                f"raw_chunks={len(raw_results)}",
+                f"graph_items={len(graph_result.get('items', []))}",
+                f"merged={len(merged_items)}",
+            ],
+        )
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Normalize text for dedup comparison."""
+        import re
+        return re.sub(r'\s+', ' ', text.lower().strip())[:100]
+
+    def dual_recall(self, query: str = "",
+                    context: AgentContext | None = None,
+                    max_items: int = 10) -> DualChannelOutput:
+        """Dual-channel recall: System-1 (fast association) + System-2 (goal-directed).
+
+        System-2 auto-triggers when:
+        - Query contains structural intent words (all, which, before, list, ...)
+        - System-1 confidence drops below threshold (< 0.35)
+
+        Returns DualChannelOutput with items, channel info, and trigger metadata.
+        """
+        if context is None:
+            context = AgentContext(task_type="conversation")
+        embedder = self._get_embedder()
+        query_emb = embedder.encode(query) if query else None
+
+        return self.dual_channel.retrieve(
+            query=query, context=context,
+            query_embedding=query_emb, max_items=max_items,
+        )
 
     def forget(self, anchor_id: str, create_ghost: bool = True) -> Anchor | None:
         """Remove a memory. If create_ghost=True, preserves a latent trace."""
@@ -342,12 +574,22 @@ class MemoryManager:
 
     def add_cortex(self, name: str, domain_keywords: list[str],
                    description: str = "", **kwargs) -> MemoryCortex:
-        """Create and register a new domain-specific memory cortex."""
+        """Create and register a new domain-specific memory cortex.
+
+        Also registers the cortex entry point in BrainSphere for O(1) routing.
+        """
         cortex = self.router.find_or_create_cortex(
             name=name,
             domain_keywords=domain_keywords,
             description=description,
             **kwargs,
+        )
+        # Register in BrainSphere for O(1) routing (centroid may be None initially)
+        self.brain.register_cortex(
+            cortex_name=name,
+            entry_embedding=cortex.centroid or [],
+            summary=description,
+            node_count=0,
         )
         return cortex
 
@@ -470,6 +712,44 @@ class MemoryManager:
                 return result
             all_candidates = gated
 
+        # ── Layer 1.5: Community-aware retrieval ──────────
+        if self._community_detection and self._community_detection.communities:
+            result["layers_visited"].append("community")
+            # Match query to best community by centroid similarity
+            best_community = None
+            best_csim = -1.0
+            route_weight = getattr(
+                getattr(self.cfg, 'community', None),
+                'route_centroid_weight', 0.7)
+            for c in self._community_detection.communities:
+                if c.centroid_embedding and query_emb:
+                    sim = _cosine_sim(query_emb, c.centroid_embedding)
+                    if sim * route_weight > best_csim:
+                        best_csim = sim * route_weight
+                        best_community = c.id
+
+            if best_community and best_csim > 0.2:
+                community_filter = {best_community}
+                comm_items = self.scheduler._community_aware_retrieve(
+                    context, query, query_emb,
+                    self.scheduler._select_memory_types(context),
+                    max_items,
+                    community_filter=community_filter,
+                    community_detection=self._community_detection,
+                )
+                existing_ids = {item.anchor.id for item in all_candidates}
+                for item in comm_items:
+                    if item.anchor.id not in existing_ids:
+                        all_candidates.append(item)
+                        existing_ids.add(item.anchor.id)
+
+                if len(all_candidates) >= max_items:
+                    from .scheduler import MemoryItem
+                    gated = self.gate.gate(all_candidates, context, query_emb, query)
+                    result["items"] = gated[:max_items]
+                    result["layer_used"] = "community"
+                    return result
+
         # ── Layer 2: HubSphere traversal ─────────────────
         result["layers_visited"].append("hub")
         existing_ids = {item.anchor.id for item in all_candidates}
@@ -528,19 +808,38 @@ class MemoryManager:
                 existing_ids.add(anchor.id)
 
         if len(all_candidates) >= max_items:
-            result["items"] = [item for item in all_candidates if hasattr(item, 'anchor')][:max_items]
+            result["items"] = [item for item in all_candidates if item.anchor is not None][:max_items]
             result["layer_used"] = "2d_plane"
             return result
 
         # ── Layer 4: Timeline scan (guaranteed results) ───
         result["layers_visited"].append("timeline")
         timeline_results = self.scan_timeline(max_days=90, max_clusters=max_items)
+        from .scheduler import MemoryItem
         for tc in timeline_results:
-            # Find anchors in these clusters
-            pass  # TimeSpine clusters reference anchor IDs
+            for anchor_id in tc.get("anchor_ids", []):
+                if anchor_id in existing_ids:
+                    continue
+                # Look up anchor in main graph or any cortex
+                anchor = self.graph.anchors.get(anchor_id)
+                if anchor is None:
+                    for cortex in active_cortices:
+                        anchor = cortex.graph.anchors.get(anchor_id)
+                        if anchor:
+                            break
+                if anchor and anchor.is_retrievable:
+                    all_candidates.append(MemoryItem(
+                        anchor=anchor,
+                        relevance_score=0.3 + 0.2 * tc.get("importance", 0.5),
+                        memory_type=MemoryType.EPISODIC,
+                        compression_level=3,
+                        compressed_text=anchor.text[:60],
+                    ))
+                    existing_ids.add(anchor_id)
 
-        # Final fallback: just return whatever we have
-        result["items"] = [item for item in all_candidates[:max_items] if hasattr(item, 'anchor')]
+        # Final fallback: return whatever we have
+        if all_candidates:
+            result["items"] = [item for item in all_candidates[:max_items] if item.anchor is not None]
         result["layer_used"] = "timeline"
         return result
 
@@ -579,7 +878,8 @@ class MemoryManager:
         clusters = self.timespine.scan_priority(max_days, max_clusters)
         return [
             {"id": c.id, "topic": c.topic, "importance": c.importance,
-             "size": c.size, "summary": c.summary}
+             "size": c.size, "summary": c.summary,
+             "anchor_ids": c.anchor_ids}
             for c in clusters
         ]
 
@@ -628,21 +928,19 @@ class MemoryManager:
         return result
 
     def sleep(self, current_time: float | None = None) -> dict:
-        """Run a full 5-phase sleep cycle.
+        """Run a full 8-phase sleep consolidation cycle.
 
-        Combines: SWR replay, Hebbian plasticity, schema extraction,
-        ghost management, and memory evolution.
-
-        Returns a dict with keys: sleep_report, evolution_summary, ghost_stats.
+        Phases: Replay -> Conflict Detection -> Clustering -> Summary ->
+        Tier Promotion -> Hub Connection -> Forgetting -> Index Rebuild.
         """
         from .sleep import SleepCycle
 
         # 1. Full sleep consolidation
         sc = SleepCycle(self.graph)
-        cortices_list = self._router.cortices if self._router else []
+        cortices_list = self.router.cortices
         sleep_report = sc.run_phased(
             brain=self.brain,
-            hublayer=self._hublayer,
+            hublayer=self.hublayer,
             cortices=cortices_list,
         )
 
@@ -661,6 +959,50 @@ class MemoryManager:
             "ghosts_purged": ghost_purged,
         }
 
+    def micro_sleep(self, steps: int = 2) -> dict:
+        """Incremental non-blocking sleep — run 1-2 phases at a time.
+
+        Call this during agent idle time. Each call runs 'steps' phases
+        and returns immediately. The next call resumes from the checkpoint.
+
+        Returns dict with phases_run, is_complete, progress_pct, errors.
+        """
+        from .micro_sleep import MicroSleepScheduler
+
+        if self._micro_sleep is None:
+            self._micro_sleep = MicroSleepScheduler(
+                graph=self.graph, config=self.cfg,
+                brain=self.brain, hublayer=self.hublayer,
+                cortices=self.router.cortices,
+            )
+
+        result = self._micro_sleep.run_next(steps=steps)
+
+        if result.is_complete:
+            self._micro_sleep = None  # reset for next cycle
+            self.sleep_cycles += 1
+
+        return {
+            "phases_run": result.phases_run,
+            "phases_processed": result.phases_processed,
+            "is_complete": result.is_complete,
+            "progress_pct": result.progress.progress_pct if result.progress else 1.0,
+            "errors": result.errors,
+            "items_processed": result.items_processed,
+            "duration_ms": result.duration_ms,
+            "summary": self._micro_sleep.get_summary() if self._micro_sleep else "Complete",
+        }
+
+    def estimate_sleep_cost(self, dry_run: bool = False) -> CostEstimate:
+        """Estimate resource consumption before running sleep.
+
+        Returns a CostEstimate with predicted LLM calls, token counts,
+        dollar cost, and wall-clock time. Use dry_run=True to mark
+        the estimate as non-execution.
+        """
+        estimator = SleepCostEstimator()
+        return estimator.estimate(self, dry_run=dry_run)
+
     def evolve(self, current_time: float | None = None) -> dict:
         """Run an evolution cycle without sleep (decay, boost, conflict, interference)."""
         result = self.evolution.evolve(current_time)
@@ -678,6 +1020,32 @@ class MemoryManager:
         return self.ghosts.fuzzy_recall(embedding, threshold)
 
     # ── Persistence ───────────────────────────────────────────
+
+    @property
+    def snapshots(self) -> SnapshotManager:
+        """Lazy-init snapshot manager for versioned state persistence."""
+        if self._snapshot_mgr is None:
+            self._snapshot_mgr = SnapshotManager()
+        return self._snapshot_mgr
+
+    def snapshot(self, description: str = "", force: bool = False) -> SnapshotMeta:
+        """Create a versioned state snapshot (crash-safe checkpoint).
+
+        Keeps last N snapshots by default, auto-cleans old versions.
+        Use recover() to restore from latest snapshot after a crash.
+        """
+        meta = self.snapshots.snapshot(self.graph, description=description, force=force)
+        return meta
+
+    def recover(self) -> tuple:
+        """Crash recovery: load latest snapshot + replay WAL.
+
+        Returns (graph, recovery_log). Use this after unexpected shutdown.
+        """
+        graph, log = self.snapshots.recover()
+        # Replace in-memory graph with recovered state
+        self.graph = graph
+        return graph, log
 
     def save(self, path: str | None = None) -> str:
         """Persist the entire memory system to disk."""
@@ -745,6 +1113,7 @@ class MemoryManager:
         self._scheduler = None
         self._evolution = None
         self._metrics = None
+        self._community_detection = None
         return self.graph
 
     # ── Reflection (meta-cognitive insights) ───────────────
@@ -893,6 +1262,144 @@ class MemoryManager:
         }
         embeddings = {aid: a.embedding for aid, a in anchors_with_emb.items()}
         return self.abstraction.discover(anchors_with_emb, embeddings)
+
+    def detect_communities(self) -> list[Community]:
+        """Detect communities in the main graph via label propagation.
+
+        Updates anchor community fields in-place and returns the list of
+        detected communities. Call this after significant graph growth
+        to enable community-aware retrieval.
+        """
+        return self.community_detection.detect(self.graph)
+
+    # ── Compression API ──────────────────────────────────────────
+
+    def compress_session(self, session_id: str) -> list:
+        """Run Level 0→1 compression on a single session's anchors.
+
+        Groups anchors by embedding similarity, generates EPISODIC summaries,
+        inserts proxy anchors into the graph, and down-weights source anchors.
+
+        Args:
+            session_id: Session to compress
+
+        Returns:
+            List of SummaryAnchor objects created
+        """
+        from .compression import SessionCompressor
+        anchors_list = list(self.graph.anchors.values())
+        compressor = SessionCompressor()
+        summaries = compressor.compress(anchors_list, session_id)
+
+        if summaries:
+            # Insert summaries into graph
+            _mcomp = self.compressor
+            _mcomp.add_to_graph(self.graph, summaries, edge_type="compresses")
+
+        return summaries
+
+    def compress_all(self) -> dict:
+        """Run the full multi-level compression pipeline on all sessions.
+
+        Groups all anchors by session, then runs EPISODIC → STRATEGIC → META
+        compression, inserting all resulting summary anchors into the graph.
+
+        Returns:
+            Dict with counts per compression level and total stats
+        """
+        from collections import defaultdict
+        from .compression import CompressionLevel
+
+        # Group anchors by session
+        anchors_by_session: dict[str, list] = defaultdict(list)
+        for anchor in self.graph.anchors.values():
+            if anchor.embedding and anchor.source_session:
+                anchors_by_session[anchor.source_session].append(anchor)
+
+        if not anchors_by_session:
+            return {
+                "levels": {"episodic": 0, "strategic": 0, "meta": 0},
+                "total_summaries": 0,
+                "total_edges": 0,
+            }
+
+        compressor = self.compressor
+        results = compressor.compress_pipeline(anchors_by_session)
+
+        # Insert all summaries into graph
+        total_edges = 0
+        level_counts: dict[str, int] = {}
+        for level, summaries in results.items():
+            level_name = level.name.lower()
+            level_counts[level_name] = len(summaries)
+            if summaries:
+                total_edges += compressor.add_to_graph(self.graph, summaries, edge_type="compresses")
+
+        return {
+            "levels": level_counts,
+            "total_summaries": sum(level_counts.values()),
+            "total_edges": total_edges,
+        }
+
+    def get_compressed_view(self,
+                            min_level: int = 1,
+                            max_summaries: int = 50) -> list[dict]:
+        """Get a view of compressed memories at or above a given compression level.
+
+        Scans the graph for summary anchors (identified by their tags containing
+        "level:episodic", "level:strategic", or "level:meta") and returns them
+        as dict records sorted by confidence descending.
+
+        Args:
+            min_level: Minimum compression level (1=episodic, 2=strategic, 3=meta)
+            max_summaries: Maximum number of summaries to return
+
+        Returns:
+            List of dicts with id, text, level, confidence, source_count, tags
+        """
+        from .compression import CompressionLevel
+        level_tags = {
+            CompressionLevel.EPISODIC: "level:episodic",
+            CompressionLevel.STRATEGIC: "level:strategic",
+            CompressionLevel.META: "level:meta",
+        }
+
+        summaries: list[dict] = []
+        for aid, anchor in self.graph.anchors.items():
+            # Identify summary anchors by their "level:*" tags
+            level_tag = None
+            level_val = 0
+            for lvl, tag in level_tags.items():
+                if tag in anchor.tags:
+                    level_tag = tag
+                    level_val = lvl.value
+                    break
+
+            if level_val < min_level:
+                continue
+
+            # Count source anchors by inspecting "compresses" edges
+            source_count = 0
+            for neighbor in self.graph._adjacency.get(aid, set()):
+                edge_key = self.graph._key(aid, neighbor)
+                edge = self.graph.edges.get(edge_key)
+                if edge and edge.edge_type == "compresses":
+                    source_count += 1
+
+            summaries.append({
+                "id": aid,
+                "text": anchor.text,
+                "level": level_val,
+                "level_name": CompressionLevel(level_val).name.lower() if level_val > 0 else "raw",
+                "confidence": anchor.vector.confidence,
+                "stability": anchor.vector.stability,
+                "source_count": source_count,
+                "tags": [t for t in anchor.tags if not t.startswith("level:")],
+            })
+
+        # Sort by confidence descending
+        summaries.sort(key=lambda x: -x["confidence"])
+        return summaries[:max_summaries]
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:

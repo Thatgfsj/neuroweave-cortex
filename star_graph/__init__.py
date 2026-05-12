@@ -33,6 +33,10 @@ from .index import ANNIndex
 from .seed import seed_everything, is_deterministic
 from .ghost import GhostNode, GhostSubsystem
 from .abstraction import AbstractNode, AbstractionEngine
+from .community import Community, CommunityHealth, CommunityDetection
+from .raw_buffer import RawBuffer, RawChunk
+from .dual_channel import DualChannelRetriever, DualChannelOutput, ChannelResult
+from .atom_facts import FactExtractor, AtomFact, ExtractionResult, check_llm_availability
 from .metrics import CognitiveMetrics
 from .competition import MemoryCompetition
 from .config import Config, config, override, reload_defaults, load_config
@@ -49,9 +53,30 @@ from .router import CortexRouter, RouteResult
 from .gate import MemoryGate, GateScore
 from .timespine import TimeSpine, TimeBucket, MemoryCluster
 from .cascade import CascadeRecall, CausalChain
-from .hub import HubLayer, HubNode, HubEdge
+from .hub import HubLayer, HubNode, HubEdge, HubShard
 from .brain_sphere import BrainSphere, HubCenter
 from .manager import MemoryManager, ManagerStats
+from .compression import (
+    CompressionLevel,
+    SummaryAnchor,
+    SessionCompressor,
+    MultiLevelCompressor,
+)
+from .exact_cache import ExactMatchCache, ExactMatchEntry, extract_entity_keys
+from .micro_sleep import MicroSleepScheduler, MicroSleepProgress, MicroSleepResult
+from .cost_estimator import SleepCostEstimator, CostEstimate
+from .snapshot import SnapshotManager, SnapshotMeta
+from .async_manager import AsyncMemoryManager, AsyncManagerStats
+from .tracing import MemoryTracer, TraceSpan, Trace, get_tracer, trace_recall
+from .benchmark import (
+    BenchmarkSuite,
+    BenchmarkScenario,
+    BenchmarkResult,
+    ScenarioResult,
+    Category,
+    run_benchmark,
+    compare_systems,
+)
 
 # MCP server is optional — requires `pip install mcp`
 try:

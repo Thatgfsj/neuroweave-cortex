@@ -196,6 +196,9 @@ competition:
 
 graph:
   contradiction_threshold: 0.7
+  max_edges_per_node: 8
+  max_degree_total: 24
+  edge_budget_enabled: true
   spreading:
     default_steps: 3
     default_decay: 0.6
@@ -203,8 +206,13 @@ graph:
   ghost_revival_threshold: 0.75
 
 working_memory:
-  max_capacity: 9
-  ttl_seconds: 1800.0
+  max_capacity: 15
+  ttl_seconds: 3600.0
+
+exact_cache:
+  max_entries_per_key: 5
+  auto_harvest: true
+  harvest_on_remember: true
 
 cortex:
   default_token_budget: 2000
@@ -247,9 +255,59 @@ hub:
   leaf_stability: 0.9
   domain_stability: 0.95
   global_stability: 0.99
+  max_degree_per_shard: 50
+  shard_split_min_size: 8
+  shard_split_clusters: 3
+  shard_routing_top_k: 2
+
+raw_buffer:
+  max_sessions: 2               # keep last N sessions uncompressed
+  max_chunks_per_session: 500   # cap per session to bound memory
+  bm25_weight: 0.5              # weight of BM25 vs vector in raw search (0=vector only)
+  merge_weight: 0.5             # weight of raw results in final merged ranking (0=graph only)
+
+atom_facts:
+  provider: template              # "openai", "anthropic", or "template" (offline)
+  model: gpt-4o-mini              # model name (only used for openai/anthropic)
+  min_cluster_size: 3             # minimum anchors in cluster to trigger extraction
+  max_anchors_per_batch: 15       # max anchors sent to LLM per extraction
+  min_fact_confidence: 0.4        # filter out facts below this confidence
+
+dual_channel:
+  s1_confidence_threshold: 0.35   # below this, System-2 auto-triggers
+  s2_max_depth: 4                 # max traversal depth for hierarchical search
+  merge_weight_s1: 0.4            # weight of System-1 in merged results
+  merge_weight_s2: 0.6            # weight of System-2 in merged results
+
+community:
+  max_community_size: 200
+  min_community_size: 3
+  max_iterations: 50
+  intra_community_min_results: 5
+  route_centroid_weight: 0.7
 
 index:
   algorithm: "brute"
   metric: "cosine"
   n_trees: 10
   rebuild_on_adds: 50
+
+snapshot:
+  keep: 5                       # keep last N snapshots
+  compress: true                # gzip-compress snapshot files
+  auto_interval_hours: 6.0      # min hours between auto-snapshots
+
+tracing:
+  enabled: true                 # enable/disable all tracing
+  max_traces: 100               # max traces to keep in memory
+
+compression:
+  episodic_token_limit: 150
+  strategic_token_limit: 100
+  meta_token_limit: 70
+  min_cluster_size: 3
+  similarity_threshold: 0.55
+  max_source_anchors: 30
+  source_retention_factor: 0.3
+  summary_initial_stability: 0.85
+  summary_hippocampal_dependency: 0.1

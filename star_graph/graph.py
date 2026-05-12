@@ -499,6 +499,29 @@ class StarGraph:
     def _key(self, a: str, b: str) -> tuple[str, str]:
         return (a, b) if a < b else (b, a)
 
+    def node_degree(self, node_id: str) -> int:
+        """Count of edges incident to this node."""
+        return len(self._adjacency.get(node_id, set()))
+
+    def _evict_weakest_edge(self, node_id: str):
+        """Remove the weakest edge incident to node_id to stay within edge budget."""
+        neighbors = self._adjacency.get(node_id, set())
+        if not neighbors:
+            return
+        weakest_key = None
+        weakest_weight = float('inf')
+        for neighbor in neighbors:
+            key = self._key(node_id, neighbor)
+            edge = self.edges.get(key)
+            if edge and edge.weight < weakest_weight:
+                weakest_weight = edge.weight
+                weakest_key = key
+        if weakest_key:
+            a, b = weakest_key
+            self._adjacency[a].discard(b)
+            self._adjacency[b].discard(a)
+            self.edges.pop(weakest_key, None)
+
     # ── CRUD ──────────────────────────────────────────────
 
     def _get_ann_index(self):
@@ -525,12 +548,25 @@ class StarGraph:
             return None
         key = self._key(src, tgt)
 
+        # Already connected — reinforce instead of duplicate
+        if key in self.edges:
+            existing = self.edges[key]
+            existing.strengthen(0.05)
+            return existing
+
         # State-transition edges: mark the old edge as stale
         if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS):
             if key in self.edges:
                 existing = self.edges[key]
                 if isinstance(existing, RichEdge):
                     existing.mark_stale(replaced_by_edge_key=str(key))
+
+        # Edge budget enforcement — prevent node degree explosion
+        max_edges = getattr(self, '_max_edges_per_node', 0)
+        if max_edges > 0:
+            for node_id in (src, tgt):
+                if self.node_degree(node_id) >= max_edges:
+                    self._evict_weakest_edge(node_id)
 
         # Use RichEdge when confidence, explicit source_type, temporal, or causal fields are set
         is_rich = (
@@ -732,9 +768,10 @@ class StarGraph:
         return [(aid, s) for s, aid in scores[:top_k]]
 
     def _ids_in_ann_sync(self) -> bool:
-        """Check if ANN index matches current anchors (cheap heuristic)."""
+        """Check if ANN index matches current anchors with embeddings."""
         ann = self._get_ann_index()
-        return ann.size == len(self.anchors) and ann.size > 0
+        embed_count = sum(1 for a in self.anchors.values() if a.embedding)
+        return ann.size == embed_count and ann.size > 0
 
     # ── Contradiction detection ──────────────────────────
 
@@ -825,3 +862,44 @@ class StarGraph:
                         if neighbor not in visited:
                             stack.append(neighbor)
         return count
+
+    # ── Community helpers ───────────────────────────────────
+
+    def get_community_anchors(self, community_id: str) -> list[Anchor]:
+        """Return all anchors belonging to a specific community."""
+        return [a for a in self.anchors.values()
+                if a.community_id == community_id]
+
+    def anchors_by_community(self) -> dict[str, list[str]]:
+        """Return mapping of community_id -> list of anchor_ids."""
+        result: dict[str, list[str]] = defaultdict(list)
+        for aid, anchor in self.anchors.items():
+            if anchor.community_id:
+                result[anchor.community_id].append(aid)
+        return dict(result)
+
+    def get_bridge_neighbors(self, anchor_id: str) -> list[tuple[str, float]]:
+        """Return neighbors of an anchor that belong to a different community.
+
+        Bridge neighbors connect across community boundaries and are
+        essential for community-aware retrieval expansion.
+
+        Returns list of (neighbor_id, edge_weight) sorted by weight descending.
+        """
+        anchor = self.anchors.get(anchor_id)
+        if not anchor or not anchor.community_id:
+            return []
+
+        result = []
+        for neighbor_id in self._adjacency.get(anchor_id, set()):
+            neighbor = self.anchors.get(neighbor_id)
+            if not neighbor:
+                continue
+            if (neighbor.community_id
+                    and neighbor.community_id != anchor.community_id):
+                edge_key = self._key(anchor_id, neighbor_id)
+                edge = self.edges.get(edge_key)
+                weight = edge.weight if edge else 0.5
+                result.append((neighbor_id, weight))
+
+        return sorted(result, key=lambda x: -x[1])

@@ -225,6 +225,11 @@ class Anchor:
     # v0.6: cortex integration
     cortex_path: str = ""          # hierarchical path e.g. "dev.python.gui"
     segment_id: str = ""           # which Segment this node belongs to
+    community_id: str = ""                       # primary community
+    secondary_community_ids: list[str] = field(default_factory=list)  # bridge
+    # v0.8: exact match cache fields
+    exact_match_keys: list[str] = field(default_factory=list)  # deterministic lookup keys
+    salience: float = 0.0          # 0..1 how salient/easily-recallable this memory is
 
     @classmethod
     def create(cls, text: str, source_session: str = "",
@@ -233,6 +238,8 @@ class Anchor:
                surprise: float = 0.5,
                tags: list[str] | None = None,
                importance: float = 0.5,
+               salience: float | None = None,
+               exact_match_keys: list[str] | None = None,
                **vec_kw) -> Anchor:
         anchor_id = hashlib.blake2b(
             (text + source_session).encode(), digest_size=8
@@ -269,6 +276,18 @@ class Anchor:
             phase = _math.fmod(abs(hash(text)) * 0.001, 2 * _math.pi)
             coupling = 0.3
 
+        # Derive salience: weighted combination of importance, emotional salience, and specificity
+        if salience is None:
+            _imp = vector_kw.get("importance", importance)
+            _emo = abs(vector_kw.get("emotional_valence", emotional_valence))
+            _len = min(1.0, len(text) / 200)
+            salience = 0.4 * _imp + 0.35 * _len + 0.25 * _emo
+
+        # Auto-extract exact match keys from text if not provided
+        if exact_match_keys is None:
+            from .exact_cache import extract_entity_keys
+            exact_match_keys = extract_entity_keys(text, tags)
+
         return cls(
             id=anchor_id,
             text=text[:280],
@@ -283,6 +302,8 @@ class Anchor:
             tags=tags or [],
             state=MemoryState.ACTIVE,
             state_history=[(MemoryState.ACTIVE, time.time())],
+            salience=salience,
+            exact_match_keys=exact_match_keys,
             **anchor_kw,
         )
 

@@ -50,11 +50,13 @@ class CortexRouter:
         results = router.recall("Redis pool", context=ctx)
     """
 
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: Config | None = None,
+                 brain: object | None = None):
         self.cfg = config or Config.get()
         self.cortices: list[MemoryCortex] = []
         self._default_cortex: MemoryCortex | None = None
         self._embedder = None
+        self.brain = brain  # BrainSphere for O(1) hub center lookup
 
         # Routing stats
         self.total_routes: int = 0
@@ -113,13 +115,25 @@ class CortexRouter:
             )
             return [result]
 
-        # Score each cortex
         embedder = self._get_embedder()
         if query_embedding is None and query:
             query_embedding = embedder.encode(query)
 
+        # O(1) pre-filter via BrainSphere hub centers (when available)
+        candidate_cortices = self.cortices
+        if self.brain and query_embedding:
+            centers = self.brain.get_relevant_centers(
+                query_embedding, top_k=max_cortices * 2, min_similarity=0.05)
+            center_names = {c.cortex_name for c in centers}
+            if center_names:
+                # Narrow to cortices with matching hub centers
+                narrowed = [c for c in self.cortices if c.config.name in center_names]
+                if narrowed:
+                    candidate_cortices = narrowed
+
+        # Score candidate cortices
         scored: list[RouteResult] = []
-        for cortex in self.cortices:
+        for cortex in candidate_cortices:
             score = cortex.route(
                 query_embedding=query_embedding,
                 query_text=query,

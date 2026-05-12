@@ -19,9 +19,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
 
-from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator
+from .anchor import Anchor, AnchorVector, GhostAnchor, MemoryState
 from .graph import StarGraph, Edge, Constellation, Schema
 from .config import Config
+from .compression import CompressionLevel
+from .atom_facts import FactExtractor, ExtractionResult
 
 
 # ── Sleep Report ────────────────────────────────────────
@@ -124,12 +126,207 @@ class SleepCycle:
         self._cycle_count: int = 0
         self._ghost_count: int = 0
         self._embedder = None
+        self._compressor = None
 
     def _get_embedder(self):
         if self._embedder is None:
             from .embedding import get_embedder
             self._embedder = get_embedder()
         return self._embedder
+
+    def _get_compressor(self):
+        """Lazy-init the multi-level compressor."""
+        if self._compressor is None:
+            from .compression import MultiLevelCompressor, SessionCompressor
+            self._compressor = MultiLevelCompressor()
+        return self._compressor
+
+    def _compress_clusters(self) -> dict:
+        """Collect DORMANT/CONSOLIDATING anchors, group by session, and compress.
+
+        This runs the full compression pipeline (RAW → EPISODIC → STRATEGIC → META)
+        on anchors that are candidates for consolidation. Only anchors in
+        DORMANT or CONSOLIDATING state are eligible — ACTIVE/REHEARSING anchors
+        are still being processed and should not be compressed yet.
+
+        Returns compression statistics.
+        """
+        # Collect eligible anchors: DORMANT or CONSOLIDATING with embeddings
+        anchors_by_session: dict[str, list[Anchor]] = defaultdict(list)
+        for anchor in self.graph.anchors.values():
+            if anchor.state in (MemoryState.DORMANT, MemoryState.CONSOLIDATING):
+                if anchor.embedding and anchor.source_session:
+                    anchors_by_session[anchor.source_session].append(anchor)
+
+        # Skip if nothing to compress
+        total_eligible = sum(len(v) for v in anchors_by_session.values())
+        if total_eligible == 0:
+            return {"episodic": 0, "strategic": 0, "meta": 0,
+                    "eligible_anchors": 0, "compressed_anchors": 0}
+
+        compressor = self._get_compressor()
+
+        # Run full pipeline
+        results = compressor.compress_pipeline(anchors_by_session)
+
+        # Insert all summaries into the graph
+        total_inserted = 0
+        for level, summaries in results.items():
+            if summaries:
+                inserted = compressor.add_to_graph(self.graph, summaries, edge_type="compresses")
+                total_inserted += inserted
+
+        # Count compressed source anchors
+        compressed_anchor_ids: set[str] = set()
+        for summaries in results.values():
+            for s in summaries:
+                compressed_anchor_ids.update(s.source_anchor_ids)
+
+        stats = {
+            "episodic": len(results.get(CompressionLevel.EPISODIC, [])),
+            "strategic": len(results.get(CompressionLevel.STRATEGIC, [])),
+            "meta": len(results.get(CompressionLevel.META, [])),
+            "eligible_anchors": total_eligible,
+            "compressed_anchors": len(compressed_anchor_ids),
+            "edges_created": total_inserted,
+        }
+
+        if stats["episodic"] > 0:
+            self.log.append(
+                f"Compression: {stats['episodic']} episodic + {stats['strategic']} strategic "
+                f"+ {stats['meta']} meta summaries from {stats['compressed_anchors']} anchors "
+                f"({total_inserted} 'compresses' edges)"
+            )
+
+        return stats
+
+    def _get_fact_extractor(self) -> FactExtractor:
+        """Lazy-init fact extractor. Config-driven with environment fallback."""
+        if getattr(self, '_fact_extractor', None) is None:
+            import os
+            af_cfg = getattr(self.cfg, 'atom_facts', None)
+            provider = getattr(af_cfg, 'provider', 'template') if af_cfg else 'template'
+            model = getattr(af_cfg, 'model', '') if af_cfg else ''
+            min_cluster = getattr(af_cfg, 'min_cluster_size', 3) if af_cfg else 3
+            min_conf = getattr(af_cfg, 'min_fact_confidence', 0.4) if af_cfg else 0.4
+            max_batch = getattr(af_cfg, 'max_anchors_per_batch', 15) if af_cfg else 15
+
+            if provider == "openai":
+                api_key = os.environ.get("OPENAI_API_KEY", "")
+                base_url = os.environ.get("OPENAI_BASE_URL", "")
+                if not api_key:
+                    provider = "template"
+                else:
+                    self._fact_extractor = FactExtractor(
+                        provider="openai", api_key=api_key,
+                        base_url=base_url, model=model,
+                        min_cluster_size=min_cluster,
+                        min_fact_confidence=min_conf,
+                        max_anchors_per_batch=max_batch,
+                    )
+            elif provider == "anthropic":
+                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                # Also supports Minimax gateway (MINIMAX_API_KEY + MINIMAX_API_BASE_URL)
+                if not api_key:
+                    minimax_key = os.environ.get("MINIMAX_API_KEY", "")
+                    minimax_url = os.environ.get("MINIMAX_API_BASE_URL", "")
+                    if minimax_key and minimax_url:
+                        self._fact_extractor = FactExtractor(
+                            provider="openai", api_key=minimax_key,
+                            base_url=minimax_url, model=model or "anthropic/claude-haiku-4-5",
+                            min_cluster_size=min_cluster,
+                            min_fact_confidence=min_conf,
+                            max_anchors_per_batch=max_batch,
+                        )
+                        return self._fact_extractor
+                    provider = "template"
+                else:
+                    self._fact_extractor = FactExtractor(
+                        provider="anthropic", api_key=api_key,
+                        model=model or "claude-haiku-4-5",
+                        min_cluster_size=min_cluster,
+                        min_fact_confidence=min_conf,
+                        max_anchors_per_batch=max_batch,
+                    )
+            if provider == "template":
+                self._fact_extractor = FactExtractor(
+                    provider="template",
+                    min_cluster_size=min_cluster,
+                    min_fact_confidence=min_conf,
+                    max_anchors_per_batch=max_batch,
+                )
+        return self._fact_extractor
+
+    def _extract_atom_facts(self) -> dict:
+        """Extract atomic entity-centric facts from compressed anchor clusters.
+
+        LLM post-processing during sleep consolidation:
+        1. Collect DORMANT/CONSOLIDATING anchors grouped by session
+        2. For each session cluster, extract AtomFacts via LLM/Template
+        3. Add facts to graph with bidirectional edges to source anchors
+
+        Returns extraction statistics.
+        """
+        # Collect anchors by session for clustering
+        anchors_by_session: dict[str, list[Anchor]] = defaultdict(list)
+        for anchor in self.graph.anchors.values():
+            if anchor.state in (MemoryState.DORMANT, MemoryState.CONSOLIDATING):
+                if anchor.source_session:
+                    anchors_by_session[anchor.source_session].append(anchor)
+
+        if not anchors_by_session:
+            return {"clusters": 0, "facts_extracted": 0, "provider": "none"}
+
+        extractor = self._get_fact_extractor()
+
+        # Build clusters: (topic, anchors) for each session
+        clusters: list[tuple[str, list[Anchor]]] = []
+        for session_id, anchors in anchors_by_session.items():
+            topic = self._infer_session_topic(anchors)
+            clusters.append((topic, anchors))
+
+        # Also include non-session clusters based on tag similarity
+        by_tag: dict[str, list[Anchor]] = defaultdict(list)
+        for anchor in self.graph.anchors.values():
+            if anchor.state in (MemoryState.DORMANT, MemoryState.CONSOLIDATING):
+                if anchor.tags:
+                    for tag in anchor.tags:
+                        if tag not in ('dormant', 'consolidating', 'ghost'):
+                            by_tag[tag].append(anchor)
+        for tag, anchors in by_tag.items():
+            if len(anchors) >= 3:
+                clusters.append((f"topic:{tag}", anchors))
+
+        # Extract facts
+        all_facts = extractor.extract_from_clusters(clusters)
+
+        # Add to graph
+        inserted = extractor.add_facts_to_graph(self.graph, all_facts)
+
+        if inserted > 0:
+            self.log.append(
+                f"Atom Facts: {inserted} facts extracted from {len(clusters)} clusters "
+                f"(provider: {extractor.provider_name})"
+            )
+
+        return {
+            "clusters": len(clusters),
+            "facts_extracted": inserted,
+            "provider": extractor.provider_name,
+            "extraction_count": extractor._extraction_count,
+        }
+
+    def _infer_session_topic(self, anchors: list[Anchor]) -> str:
+        """Infer the topic of a session from its anchors' tags and text."""
+        tag_counts: dict[str, int] = defaultdict(int)
+        for anchor in anchors:
+            for tag in anchor.tags:
+                if tag not in ('dormant', 'consolidating', 'active', 'ghost'):
+                    tag_counts[tag] += 1
+        if tag_counts:
+            top_tags = sorted(tag_counts, key=tag_counts.get, reverse=True)[:3]
+            return " + ".join(top_tags)
+        return "general"
 
     def run(self, recent_anchors: list[Anchor] | None = None,
             similarity_threshold: float | None = None,
@@ -190,6 +387,8 @@ class SleepCycle:
         Phase 3: Clustering — group by semantic density threshold
         Phase 4: Summary Generation — compress clusters into abstracts
         Phase 5: Tier Promotion — STM→MTM→LTM based on semantic density
+          Phase 5b: Compression — cluster & compress DORMANT anchors
+          Phase 5c: Atom Facts — LLM-assisted entity-centric fact extraction
         Phase 6: Hub Connection — cross-cortex pattern detection
         Phase 7: Forgetting/Degradation — thermal lifecycle downgrade
         Phase 8: Index Rebuild — ANN refresh + BrainSphere cache rebuild
@@ -288,6 +487,26 @@ class SleepCycle:
         report.memories_pruned = len(pruned_anchors)
         report.ghosts_created = ghosts_created
         report.edges_pruned = len(pruned_edges)
+
+        # ── Phase 5b: Compression ── (after Tier Promotion, before Hub Connection)
+        t0 = time.time()
+        compression_stats = self._compress_clusters()
+        report.phases.append(PhaseMetrics(
+            phase="Phase 5b Compression",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=compression_stats.get("compressed_anchors", 0),
+            details=compression_stats,
+        ))
+
+        # ── Phase 5c: Atom Fact Extraction ── (LLM-assisted, after compression)
+        t0 = time.time()
+        fact_stats = self._extract_atom_facts()
+        report.phases.append(PhaseMetrics(
+            phase="Phase 5c Atom Facts",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=fact_stats.get("facts_extracted", 0),
+            details=fact_stats,
+        ))
 
         # ── Phase 6: Hub Connection ──
         t0 = time.time()
@@ -413,6 +632,40 @@ class SleepCycle:
 
     # ── Phase 1: Prioritized SWR Replay ──────────────────
 
+    def _constrained_candidates(self, anchor: Anchor, existing: Anchor,
+                                 window_hours: float = 168.0) -> dict[str, Anchor]:
+        """Build a constrained candidate set for edge creation.
+
+        Instead of full-graph O(n²) similarity search, only consider anchors
+        that share: same session, same topic (tag overlap), same time window,
+        or same entities. This keeps edge creation O(k) where k << n.
+        """
+        candidates: dict[str, Anchor] = {}
+        now = time.time()
+        anchor_time = existing.created_at if existing else now
+
+        for other_id, other in self.graph.anchors.items():
+            if other_id == (existing.id if existing else anchor.id):
+                continue
+
+            # Constraint 1: same session
+            if existing.source_session and other.source_session == existing.source_session:
+                candidates[other_id] = other
+                continue
+
+            # Constraint 2: same topic (tag overlap)
+            if set(existing.tags) & set(other.tags):
+                candidates[other_id] = other
+                continue
+
+            # Constraint 3: same time window
+            time_diff = abs(anchor_time - other.created_at) / 3600
+            if time_diff < window_hours:
+                candidates[other_id] = other
+                continue
+
+        return candidates
+
     def _swr_replay(self, recent: list[Anchor], threshold: float) -> None:
         """Prioritized experience replay — like RL's PER but biologically motivated.
 
@@ -473,13 +726,15 @@ class SleepCycle:
                     anchor.embedding = embedder.encode(anchor.text)
                 self.graph.add_anchor(anchor)
 
-            # Connect using real embedding similarity (not bigrams)
+            # Connect using topology-constrained similarity (NOT full-graph O(n²))
             anchor_emb = existing.embedding if existing else anchor.embedding
             if not anchor_emb:
                 anchor_emb = embedder.encode(anchor.text)
 
-            for other_id, other in self.graph.anchors.items():
-                if other_id == anchor.id:
+            anchor_id = existing.id if existing else anchor.id
+            candidates = self._constrained_candidates(anchor, existing or anchor, window_hours=168)
+            for other_id, other in candidates.items():
+                if other_id == anchor_id:
                     continue
                 if not other.embedding:
                     continue
@@ -487,12 +742,12 @@ class SleepCycle:
                 if sim > threshold:
                     edge_type = self._infer_edge_type(anchor, other)
                     weight = sim * (1.0 + self.cfg.sleep.edge_formation.emotion_weight_boost * abs(anchor.vector.emotional_valence))
-                    self.graph.add_edge(anchor.id, other_id,
+                    self.graph.add_edge(anchor_id, other_id,
                                         weight=min(1.0, weight),
                                         edge_type=edge_type)
 
         self.log.append(f"SWR Replay: replayed {len(prioritized)} anchors "
-                        f"(priority-based sampling, compression ~{max(1, len(recent)//3)}:1)")
+                        f"(topology-constrained linking, compression ~{max(1, len(recent)//3)}:1)")
 
     # ── Phase 2: Systems Consolidation ──────────────────
 
@@ -854,13 +1109,31 @@ class SleepCycle:
     # ── Phase 6: Hub Connection ────────────────────────────
 
     def _connect_cross_cortex_hubs(self, hublayer, cortices: list) -> int:
-        """Detect cross-cortex co-occurrence patterns and create hub links.
+        """Detect cross-cortex patterns and create hub links.
 
-        When the same topic/pattern appears in multiple cortices, create a
-        hub-to-hub edge in the HubSphere to enable cross-domain reasoning.
+        Compares compressed segments across cortices. When two segments have
+        similar centroids (cosine > 0.6), auto-creates leaf hubs from segments
+        if none exist, then creates a hub-to-hub edge for cross-domain reasoning.
         """
         connections = 0
-        # Look for shared tags or similar segments across cortices
+
+        def _ensure_segment_hub(seg, cortex_name: str):
+            """Get or create a leaf hub for a segment."""
+            if seg.hub_links:
+                return seg.hub_links[0]
+            if not seg.centroid or not seg.node_ids:
+                return None
+            topic = seg.summary or f"{cortex_name}_cluster"
+            hub = hublayer.create_leaf(
+                text=f"[{cortex_name}] {topic}",
+                source_anchor_ids=list(seg.node_ids),
+                cortex_name=cortex_name,
+                importance=seg.importance,
+                embedding=seg.centroid,
+            )
+            seg.link_hub(hub.id)
+            return hub.id
+
         for i, ctx_a in enumerate(cortices):
             seg_a = ctx_a.get_segment_for_hub("compressed")
             if not seg_a or not seg_a.centroid:
@@ -869,12 +1142,10 @@ class SleepCycle:
                 seg_b = ctx_b.get_segment_for_hub("compressed")
                 if not seg_b or not seg_b.centroid:
                     continue
-                # Check centroid similarity
                 sim = _cosine_sim_sleep(seg_a.centroid, seg_b.centroid)
                 if sim > 0.6:
-                    # Check if there's already a hub for each
-                    hub_a_id = seg_a.hub_links[0] if seg_a.hub_links else None
-                    hub_b_id = seg_b.hub_links[0] if seg_b.hub_links else None
+                    hub_a_id = _ensure_segment_hub(seg_a, ctx_a.config.name)
+                    hub_b_id = _ensure_segment_hub(seg_b, ctx_b.config.name)
                     if hub_a_id and hub_b_id:
                         hublayer.add_hub_edge(hub_a_id, hub_b_id, weight=sim, edge_type="cross_domain")
                         connections += 1

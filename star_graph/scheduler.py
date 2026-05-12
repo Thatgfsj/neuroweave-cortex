@@ -99,11 +99,13 @@ class CognitiveMemoryScheduler:
     """
 
     def __init__(self, graph: StarGraph, config: Config | None = None,
-                 working_memory: WorkingMemory | None = None):
+                 working_memory: WorkingMemory | None = None,
+                 sym_filter=None):
         self.graph = graph
         self.cfg = config or Config.get()
         self.working_memory = working_memory
         self._embedder = None
+        self.sym_filter = sym_filter
 
     def _get_embedder(self):
         if self._embedder is None:
@@ -342,18 +344,43 @@ class CognitiveMemoryScheduler:
 
     def _discover_seeds(self, context: AgentContext, query: str,
                         query_embedding: list[float] | None,
-                        memory_types: list[MemoryType]) -> list[Anchor]:
+                        memory_types: list[MemoryType],
+                        sym_filter=None,
+                        community_filter: set[str] | None = None) -> list[Anchor]:
         """Find initial seed anchors via hybrid retrieval.
 
-        Uses both embedding similarity AND context relevance:
-        - Semantic similarity to query
-        - Recency bonus for recent session anchors
-        - Emotional congruence with current state
-        - Memory type filter
+        If sym_filter is provided, anchors are pre-filtered by topic/keyword
+        BEFORE embedding comparison - preventing embedding collision across
+        different domains.
+
+        If community_filter is provided, only anchors belonging to those
+        community IDs are considered.
         """
+        # Symbolic pre-filter: narrow candidate set by topic/keyword
+        query_tags = list(context.active_goals) if context.active_goals else []
+        if sym_filter and query:
+            filtered_anchors = {
+                aid: a for aid, a in self.graph.anchors.items()
+                if a.is_retrievable
+            }
+            fr = sym_filter.filter_anchors(query, query_tags, filtered_anchors)
+            anchor_iter = (
+                self.graph.anchors[aid] for aid in fr.passed_ids
+                if aid in self.graph.anchors
+            )
+        else:
+            anchor_iter = self.graph.anchors.values()
+
+        # Community pre-filter: restrict to specific communities
+        if community_filter is not None:
+            anchor_iter = (
+                a for a in anchor_iter
+                if a.community_id in community_filter
+            )
+
         candidates: list[tuple[Anchor, float]] = []
 
-        for anchor in self.graph.anchors.values():
+        for anchor in anchor_iter:
             if not anchor.is_retrievable:
                 continue
 
@@ -396,8 +423,6 @@ class CognitiveMemoryScheduler:
 
         candidates.sort(key=lambda x: -x[1])
         return [a for a, _ in candidates[:10]]
-
-    # ── Step 3: Multi-hop traversal ─────────────────────
 
     def _multi_hop_traverse(self, seeds: list[Anchor], context: AgentContext,
                             query_embedding: list[float] | None,
@@ -639,6 +664,95 @@ class CognitiveMemoryScheduler:
             total_tokens=total_tokens,
             retrieval_latency_ms=latency_ms,
         )
+
+    # ── Community-aware retrieval ─────────────────────────
+
+    def _community_aware_retrieve(self, context: AgentContext, query: str,
+                                  query_embedding: list[float] | None,
+                                  memory_types: list[MemoryType],
+                                  max_items: int,
+                                  community_filter: set[str],
+                                  community_detection=None
+                                  ) -> list[MemoryItem]:
+        """Progressive-scope community-aware retrieval.
+
+        Phase 1: Intra-community retrieval (restricted to community_filter).
+        Phase 2: Inter-community expansion (add neighboring communities).
+        Phase 3: Full graph fallback (standard retrieval).
+
+        This mirrors the dimensional-reduction pattern but scoped
+        to community boundaries for efficient, relevant retrieval.
+        """
+        from .config import Config
+        cfg = Config.get()
+        intra_min = getattr(getattr(cfg, 'community', None),
+                            'intra_community_min_results', 5)
+
+        all_items: list[MemoryItem] = []
+
+        # ── Phase 1: Intra-community retrieval ───────────
+        seeds = self._discover_seeds(
+            context, query, query_embedding, memory_types,
+            community_filter=community_filter,
+        )
+        if seeds:
+            scored = self._multi_hop_traverse(
+                seeds, context, query_embedding, max_hops=2)
+            ranked = self._composite_rank(scored, context, query_embedding)
+            compressed = self._adaptive_compress(ranked, context)
+            all_items = compressed
+
+        if len(all_items) >= max_items:
+            return all_items[:max_items]
+
+        if len(all_items) >= intra_min:
+            # Enough within community, skip expansion
+            return all_items
+
+        # ── Phase 2: Inter-community expansion ────────────
+        if community_detection is not None:
+            expanded_filter = set(community_filter)
+            for cid in community_filter:
+                neighbors = community_detection.get_neighboring_communities(
+                    cid, max_neighbors=3)
+                for neighbor_id, _ in neighbors:
+                    expanded_filter.add(neighbor_id)
+
+            inter_seeds = self._discover_seeds(
+                context, query, query_embedding, memory_types,
+                community_filter=expanded_filter,
+            )
+            inter_scored = self._multi_hop_traverse(
+                inter_seeds, context, query_embedding, max_hops=2)
+            inter_ranked = self._composite_rank(
+                inter_scored, context, query_embedding)
+            inter_compressed = self._adaptive_compress(inter_ranked, context)
+
+            # Merge, deduplicating by anchor id
+            existing_ids = {item.anchor.id for item in all_items}
+            for item in inter_compressed:
+                if item.anchor.id not in existing_ids:
+                    all_items.append(item)
+                    existing_ids.add(item.anchor.id)
+
+        if len(all_items) >= max_items:
+            return all_items[:max_items]
+
+        # ── Phase 3: Full graph fallback ─────────────────
+        full_seeds = self._discover_seeds(
+            context, query, query_embedding, memory_types)
+        full_scored = self._multi_hop_traverse(
+            full_seeds, context, query_embedding, max_hops=3)
+        full_ranked = self._composite_rank(
+            full_scored, context, query_embedding)
+        full_compressed = self._adaptive_compress(full_ranked, context)
+
+        existing_ids = {item.anchor.id for item in all_items}
+        for item in full_compressed:
+            if item.anchor.id not in existing_ids:
+                all_items.append(item)
+
+        return all_items[:max_items]
 
     # ── Memory classification ───────────────────────────
 

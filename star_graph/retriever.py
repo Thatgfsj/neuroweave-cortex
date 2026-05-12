@@ -460,7 +460,7 @@ class OscillationResonanceRetriever(Retriever):
             embedding = embedder.encode(query)
 
         query_phase = self._query_phase(embedding)
-        rc = Config.get().retrieval
+        query_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
 
         # Score every anchor: (1-w)*semantic_sim + w*phase_coherence, weighted by retention
         scored: list[tuple[float, Anchor, dict[str, float]]] = []
@@ -470,13 +470,12 @@ class OscillationResonanceRetriever(Retriever):
             else:
                 semantic_sim = self._text_overlap(query, anchor.text)
             phase_coh = self._phase_coherence(query_phase, anchor)
-            score = (1.0 - self.phase_weight) * semantic_sim + self.phase_weight * phase_coh
-            score *= anchor.retention_score
-            scored.append((score, anchor, {
-                "semantic_similarity": semantic_sim,
-                "phase_coherence": phase_coh,
-                "retention": anchor.retention_score,
-            }))
+            score_base = (1.0 - self.phase_weight) * semantic_sim + self.phase_weight * phase_coh
+            score = score_base * anchor.retention_score
+            trace_comps = self._trace_components(query_phasor, driving_freq, anchor)
+            trace_comps["semantic_similarity"] = semantic_sim
+            trace_comps["activation"] = score_base * 0.3
+            scored.append((score, anchor, trace_comps))
         scored.sort(key=lambda x: -x[0])
 
         sorted_anchors = scored
@@ -511,6 +510,17 @@ class OscillationResonanceRetriever(Retriever):
         na = math.sqrt(sum(x**2 for x in a))
         nb = math.sqrt(sum(x**2 for x in b))
         return dot / (na * nb + 1e-8)
+
+    @staticmethod
+    def _text_overlap(a: str, b: str) -> float:
+        def bigrams(s):
+            return {s[i:i+2] for i in range(len(s)-1)}
+        ba, bb = bigrams(a.lower()), bigrams(b.lower())
+        if not ba or not bb:
+            return 0.0
+        return len(ba & bb) / len(ba | bb)
+
+
 def compare_retrievers(graph: StarGraph, queries: list[str],
                        embeddings: list[list[float]] | None = None,
                        ground_truth: list[list[str]] | None = None,
