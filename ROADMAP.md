@@ -1,68 +1,83 @@
 # Star Graph Memory — Roadmap
 
-## v0.4 (current — 2026-05)
+## Current (v1.0.6 — 2026-05)
 
-Completed infrastructure for a cognitive memory runtime:
-
-- [x] 6-state memory lifecycle (ACTIVE → REHEARSING → CONSOLIDATING → DORMANT → GHOST → REACTIVATED)
-- [x] Ghost subsystem with fuzzy recall and revival
-- [x] Abstraction engine (emergent categories from anchor clusters)
-- [x] 5-phase systematized sleep architecture with SleepReport
+- [x] 6-state memory lifecycle (ACTIVE → GHOST → REACTIVATED)
+- [x] Ghost subsystem with intensity ranking + NegativeGhost contradiction tracking
+- [x] Abstraction engine (emergent categories + multi-level compression)
+- [x] 8-phase sleep consolidation with SleepReport
 - [x] Memory evolution engine (decay, boost, conflict, interference)
-- [x] Cognitive Memory Scheduler (context-aware type selection + adaptive compression)
-- [x] HybridFusion retriever (semantic + temporal + graph structure + Personalized PageRank)
-- [x] Edge versioning with confidence, source_type, and lifecycle management
+- [x] 5-layer dimensional descent retrieval (Brain → Cortex → Hub → 2D Plane → Timeline)
+- [x] HybridFusion retriever + OscillationResonance + VectorSimilarity
+- [x] System-1 + System-2 dual-channel retrieval
+- [x] Raw chunk buffer (L0 uncompressed short-term tier)
+- [x] Exact match cache (KV deterministic O(1) entity-pair lookup)
+- [x] Micro-sleep scheduler (incremental non-blocking consolidation)
+- [x] Snapshot + WAL (crash-safe versioned state persistence)
+- [x] Cortex partitioning with router + memory gating
+- [x] TimeSpine temporal index with "upper-right to lower-left" priority scan
+- [x] HubLayer cross-cortex abstraction bridges
+- [x] CascadeRecall causal chain traversal
+- [x] Configurable survival functions (Ebbinghaus / Power-law / Exponential / Custom)
+- [x] Multimodal memory (CLIP joint embedding: text + image)
+- [x] Streaming memory buffer with backpressure + auto-batch + dedup
+- [x] Async manager + OpenTelemetry tracing
+- [x] 5-category benchmark suite
 - [x] MemoryManager high-level facade (remember/recall/sleep/save/load)
-- [x] SQLite storage backend with WAL mode
-- [x] Explainable confidence scores
-- [x] 5-category benchmark suite with content-based metrics
-- [x] Async sleep with progress callbacks
-- [x] 13-test suite passing
+- [x] SQLite storage backend + JSON persistence
+- [x] MCP server (Model Context Protocol)
+- [x] CLI entry points (sg-sleep, sg-add, sg-query, sg-stats)
+- [x] 232-test suite passing
+- [x] Dependency manifest (requirements.txt)
+- [x] Version unification (1.0.6 across all files)
 
-## v0.5 (planned — 2026-06)
+## v1.0.7 (next — correctness & architecture)
 
-Integration and ecosystem:
+P0 fixes from code audit:
 
-- [ ] MCP server — expose as a Model Context Protocol server for Claude, GPT, and other MCP clients
-- [ ] REST API — HTTP endpoints (`POST /remember`, `POST /recall`, `POST /sleep`)
-- [ ] LangChain memory adapter — drop-in replacement for ConversationBufferMemory
-- [ ] Streaming sleep — incremental consolidation for graphs >10K anchors
-- [ ] Fix oscillation resonance — derive phase from actual temporal context, not embedding statistics
-- [ ] Multi-agent memory — shared graph with agent-specific views and access control
-- [ ] Memory reflection tool — self-audit: "what do I know? what's stale? what's contradicted?"
-- [ ] Production SQLite backend with migration support and backup
+- [ ] Ghost subsystem unification (GhostAnchor → GhostNode, single data model)
+- [ ] Raw Buffer priority elevation in recall() merge order
+- [ ] ANN index incremental maintenance (add/remove sync, no full rebuild on query)
+- [ ] MemoryManager split (MemoryRuntime + RetrievalPipeline + MemoryManager)
+- [ ] Cortex independent sleep (per-cortex consolidation cycles)
+- [ ] Dual-Channel auto-trigger in recall() (structural query detection + low-confidence fallback)
 
-## v0.6 (planned — 2026-07)
+## v1.0.8 (cognitive fidelity)
 
-Scale and robustness:
+- [ ] Autobiographical memory layer (SelfNarrative — "what I know about myself")
+- [ ] State / ThermalState unified transition matrix
+- [ ] Oscillation phase derivation from temporal/emotional context (not embedding stats)
+- [ ] Cosine similarity deduplication (single `math_utils.py` implementation)
+- [ ] Sleep phase naming standardization (N1_Replay → N6_IndexRebuild)
 
-- [ ] Incremental indexing — add anchors without full index rebuild
-- [ ] Configurable memory type profiles per domain (coding agent vs. chatbot vs. research agent)
-- [ ] Long-term personality formation from accumulated episodic memory
-- [ ] Predictive retrieval — anticipate what the agent will need next
-- [ ] Memory safety — forgetting by request, access control, audit trails
-- [ ] Visual graph explorer — functional, minimal, for debugging not prettiness
+## v1.1.0 (production readiness)
 
-## v1.0 (future)
+- [ ] Config access API (`cfg.get('exact_cache.auto_harvest', True)`)
+- [ ] `find_contradictions()` O(n²) → O(n*k) via ANN pre-filter
+- [ ] Layer 3 (2D Plane) TimeSpine-indexed scan (not full anchor linear scan)
+- [ ] `retention_score` caching with dirty flag
+- [ ] Test coverage ≥ 80% (currently ~48%)
+- [ ] mypy/pyright static type checking
+- [ ] Config schema validation
+- [ ] Structured logging (replace `print()` + `self.log: list[str]`)
+- [ ] README doctest in CI
 
-- [ ] Distributed memory — federated graphs across agents
-- [ ] Cross-agent memory transfer — bootstrap new agents from consolidated memory
-- [ ] Cross-modal anchors — text + code + structured data in same graph
-- [ ] Production deployment guide and operator handbook
+## Future (v1.2+)
 
-## Research questions
+- [ ] Multi-agent memory federation
+- [ ] Cross-agent memory transfer
+- [ ] WASM embedded version (micro-star)
+- [ ] Visual graph explorer (debugging tool)
+- [ ] Predictive retrieval (anticipate agent's next need)
+- [ ] Memory safety (forgetting by request, access control, audit trails)
 
-- **Personality emergence**: can long-running memory produce stable behavioral traits?
-- **Fidelity under compression**: at what compression ratio does recall quality break?
-- **Cross-agent transfer**: can one agent's consolidated memory bootstrap another?
-- **Adversarial memory**: can memories be poisoned? how to detect and recover?
-- **Forgetting curves**: what parameters produce the most human-like forgetting patterns?
-
-## Version history
+## Version History
 
 | Version | Date | Highlights |
-|---|---|---|
+|---------|------|------------|
 | 0.1.0 | 2026-05 | Core graph, anchors, edges, constellations, basic sleep |
 | 0.2.0 | 2026-05 | Oscillators, ghost anchors, schemas, reconsolidation, resonance engine |
 | 0.3.0 | 2026-05 | Pluggable retrievers, online consolidator, 13-test suite, Chinese docs |
 | 0.4.0 | 2026-05 | Evolution engine, scheduler, hybrid fusion, edge versioning, benchmarks, manager facade |
+| 1.0.5 | 2026-05 | Survival functions (4 curves), ghost intensity, NegativeGhost contradiction tracking |
+| 1.0.6 | 2026-05 | Multimodal CLIP, streaming buffer with backpressure, dependency manifest, 232 tests |

@@ -1,533 +1,268 @@
-# Star Graph Memory — Architecture Plan v0.6
+# Star Graph Memory — Refactoring & Improvement Plan
 
-## Current State (v0.5)
+> Based on comprehensive codebase audit (2026-05-13). 232 tests passing, v1.0.6.
 
-已完成：
-- 6-state memory lifecycle (ACTIVE → GHOST → REACTIVATED)
-- Multiplicative retention (geometric mean of 5 factors)
-- OscillationResonance + HybridFusion retrieval (C-R@3 = 0.967)
-- 5-phase sleep consolidation (N1→Wake-prep)
-- Memory evolution (decay, boost, conflict, interference)
-- Ghost subsystem (latent traces, fuzzy recall)
-- Abstraction engine (emergent categories)
-- Working memory (9-item buffer, 30min TTL, auto-promotion)
-- Reflection nodes (failure_analysis, success_pattern, etc.)
-- RichEdge with temporal/causal/state-transition fields
-- Personalized PageRank + multi-hop traversal
+## Priority Summary
 
-结构性问题（待解决）：
-- **平铺图**：所有 anchor 在单一 StarGraph 中，O(n²) 连接
-- **全图暴力搜索**：retrieval 扫描全部 anchor，无分区
-- **无时间脊柱**：时间只是 anchor 字段，不是独立索引结构
-- **无因果链回忆**：有 causal edge 但未用于链式遍历
-- **无 Cortex 分区**：所有记忆在一个空间，无法按领域隔离
-
-## Architecture Vision (v0.6)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    MemoryManager (facade)                    │
-├─────────────────────────────────────────────────────────────┤
-│  CortexRouter    │  routes query → 1-3 cortices              │
-├─────────────────────────────────────────────────────────────┤
-│  MemoryCortex    │  independent graph + index per domain     │
-│  ├─ DevCortex    │  code, architecture, debugging            │
-│  ├─ FinanceCortex│  money, costs, budgets                    │
-│  └─ PersonalCtx  │  preferences, identity, relationships     │
-├─────────────────────────────────────────────────────────────┤
-│  MemoryGate      │  winner-take-all from candidates          │
-├─────────────────────────────────────────────────────────────┤
-│  TimeSpine       │  temporal index: day → cluster[]          │
-├─────────────────────────────────────────────────────────────┤
-│  CascadeRecall   │  causal chain traversal                   │
-├─────────────────────────────────────────────────────────────┤
-│  HubLayer        │  cross-cortex abstraction bridges         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Design Principle: Dimensional Reduction Retrieval (降维寻找)
-
-当高维匹配失败时，逐级降维兜底，而不是直接返回空：
-
-```
-Level 1: 3D Semantic Space (embedding full-vector cosine)
-    ↓ 匹配不足 k 条？
-Level 2: 2D Plane (time × importance projection)
-    ↓ 仍然不足？
-Level 3: Pseudo-2D Timeline (TimeSpine 时间脊柱扫描)
-    → 保证总能返回结果
-```
-
-### Level 1: 3D Semantic Space
-- 在当前 Cortex 的 ANN 索引中搜索
-- 使用 OscillationResonance 或 HybridFusion
-- 分数阈值: min_similarity = 0.5
-- 目标: 找到 top-k 语义相关记忆
-
-### Level 2: 2D Plane (Time × Importance)
-- 将记忆投影到 (时间, 重要度) 二维平面
-- 不再依赖语义匹配，只看 "最近的 + 重要的"
-- 查询逻辑: "最近一周内，重要度 > 0.5 的记忆"
-- 按 (recency DESC, importance DESC) 排序
-- 这是从 "语义相关" 到 "时间+重要" 的降级
-
-### Level 3: Pseudo-2D Timeline
-- 使用 TimeSpine 结构按时间倒序扫描
-- 每个时间点取 top-N 个最重要的 memory cluster
-- 伪二维: Y轴=时间(倒序), X轴=重要度(降序)
-- "右上到左下" 滑动窗口扫描
-- 保证即使语义和时间都匹配不到，也能回溯出最近的记忆
-
-## Pseudo-2D "右上→左下" 扫描
-
-```
-重要度 ↑
-       │  ┌─ 今天 (high importance)
-       │  │  ┌─ 昨天 (high)
-       │  │  │  ┌─ 前天 (high)
-       │  │  │  │
-       │  │  │  │     ┌─ 上周 (medium)
-       │  │  │  │     │
-       │  │  │  │     │     ┌─ 上月 (low)
-       └──┴──┴──┴─────┴─────┴──────────→ 时间 (倒序)
-    
-    扫描方向: 右上角 → 左下角
-    = 最近且重要的 → 最近但不太重要的 → 久远但重要的 → 久远且不重要的
-```
-
-每个时间单位（天）内按重要度降序排列，横向宽度受 `max_clusters_per_day` 限制。
-
-## 4D Hub Nodes (四维中枢节点)
-
-中枢节点是跨 Cortex 的桥梁，不是超级节点：
-
-```
-                    Global Self Hub
-                    /              \
-            Dev Identity Hub    Personal Identity Hub
-            /          \           /           \
-    Python Hub    Docker Hub   Preferences   Relationships
-       /  \         /  \         /  \          /  \
-    [memories in DevCortex]    [memories in PersonalCortex]
-```
-
-### 中枢节点属性
-- 不存储原始记忆，只存储摘要 + 指针
-- 属于特定的抽象层 (leaf / domain / global)
-- 有独立的 embedding (摘要的 embedding，不是原始记忆的)
-- 可以跨 Cortex 引用（这是唯一允许跨 Cortex 的边类型）
-- 稳定性极高 (stability > 0.9)，几乎不衰减
-
-### 四维空间定位
-- (X, Y, Z) = 语义 + 时间 + 重要度（三维星群）
-- 第四维 = 所属脑区 (Cortex Layer)
-- 中枢节点在第四维上连接不同脑区的三维星群
+| Priority | Count | Impact |
+|----------|-------|--------|
+| **P0** | 3 issues | Correctness, performance, data consistency |
+| **P1** | 3 issues | Architecture, maintainability, retrieval quality |
+| **P2** | 3 issues | Cognitive fidelity, production readiness |
+| **P3** | 11 issues | Code quality, testing, developer experience |
 
 ---
 
-## Implementation Tasks (ordered by priority)
+## P0 — Correctness & Performance (do first)
 
-### P0: Cortex 分区系统 + 路由
+### 1. Ghost 子系统统一 (数据一致性)
 
-**#46** `cortex.py` — `MemoryCortex` 类
-- 独立 StarGraph + ANNIndex + embedding provider
-- 独立遗忘曲线参数 (decay_half_life, retention_threshold)
-- 独立 token budget
-- `route(query_emb) -> float`: 判断 query 是否属于此脑区
-- `recall(query, context) -> MemoryContext`: 局部召回
-- `consolidate() -> SleepReport`: 独立睡眠
-
-**#47** `router.py` — `CortexRouter` 类
-- 管理所有 Cortex 实例
-- `route(query) -> list[tuple[MemoryCortex, float]]`: 返回 top-3 脑区
-- 路由逻辑: 语义匹配 + 标签匹配 + 最近使用
-- 默认 cortex (fallback): 当所有 cortex 都不匹配时使用
-- 动态创建 cortex: 当检测到新领域时自动创建
-
-### P0: 激活门控
-
-**#48** `gate.py` — `MemoryGate` 类
-- `gate(candidates, context, k) -> list[Anchor]`: winner-take-all
-- 多维竞争分数: importance, recency, emotional_valence, semantic_match, causal_relevance, user_focus
-- 侧向抑制: 相似记忆互相压制
-- 保证输出数量固定 (不随总记忆量增长)
-
-### P1: 降维检索 + 伪二维扫描
-
-**#49** 在 `scheduler.py` 中实现三级降维检索
-- `_retrieve_3d_semantic()`: 现有语义搜索 (Level 1)
-- `_retrieve_2d_plane()`: 时间×重要度 投影 (Level 2)
-- `_retrieve_timeline()`: TimeSpine 扫描 (Level 3)
-- `_dimensional_reduction_retrieve()`: 串联三级，自动降级
-
-### P1: 时间脊柱
-
-**#50** `timespine.py` — `TimeSpine` 类
-- 按天/小时分桶的层级时间结构
-- 每个时间桶挂载 Memory Cluster
-- `max_clusters_per_unit`: 限制横向宽度
-- `scan(start_time, end_time, direction)`: 时间窗口扫描
-- "右上→左下" 扫描器: `scan_priority(recent_first=True, importance_desc=True)`
-- 自动聚合: 同主题同日记忆合并为一个 cluster
-
-### P1: 因果链回忆
-
-**#51** `cascade.py` — `CascadeRecall` 类
-- 从 query 种子节点沿因果边 (caused_by, derived_from) 遍历
-- 不是随机散步，而是有方向的因果链追溯
-- `cascade(query, max_depth=5) -> list[CausalChain]`
-- 每条 CausalChain 是 (cause → effect → effect → ...) 的序列
-- 支持向前追溯 (what caused this?) 和向后推理 (what did this cause?)
-
-### P1: 中枢抽象层
-
-**#52** `hub.py` — `HubLayer` + `HubNode` 类
-- `HubNode`: 摘要节点，包含指向 source anchors 的指针
-- `HubLayer`: 管理多级中枢 (leaf → domain → global)
-- `abstract_to_hub(cluster) -> HubNode`: 从 cluster 提取中枢节点
-- 跨 Cortex 边只能通过中枢节点
-- 中枢节点不参与遗忘 (stability = 0.95+)
-
-### P2: 热管理生命周期
-
-**#53** 在 `anchor.py` 中扩展 MemoryState
-- HOT (高频激活): 对应 ACTIVE + REHEARSING
-- WARM (低频但重要): 对应 CONSOLIDATING + DORMANT
-- COLD (冷冻仅索引): 对应 DORMANT + 低 retention
-- DEAD (仅 metadata/hash): 对应 GHOST 的最终状态
-- 自动降级: HOT → WARM → COLD → DEAD
-- 复苏机制: COLD 可以被 GHOST revival 机制重新激活
-
-### P2: 动态人格记忆
-
-**#54** 自适应遗忘曲线 + 元认知层
-- 每个 Cortex 独立学习最优遗忘参数
-- 元认知: AI 知道自己记得什么、忘记了什么
-- `know_what_i_know()`: 返回知识覆盖图
-- `confidence_calibration()`: 校准记忆置信度
-
----
-
-## Existing Modules to Modify
-
-| Module | Changes |
-|--------|---------|
-| `manager.py` | 初始化 CortexRouter, TimeSpine, MemoryGate; 新 API: `add_cortex()`, `route_to_cortex()` |
-| `scheduler.py` | 三阶段路由+门控 pipeline; 三级降维检索; 废除全图扫描 |
-| `graph.py` | 添加 HubNode; 导出 ReflectionNode |
-| `anchor.py` | 扩展 MemoryState 支持 HOT/WARM/COLD/DEAD; gate_score 属性 |
-| `__init__.py` | 导出所有新模块 |
-| `defaults.yaml` | cortex, routing, gate, timespine, cascade, hub 配置段 |
-
----
-
-## File Layout (new modules only)
-
+**现状**: `graph.py` 有 `add_ghost()` 创建 `GhostAnchor`，`ghost.py` 有 `GhostSubsystem` 创建 `GhostNode`。两者数据结构不同，`sleep.py` 的 `_prune_anchors()` 需要 fallback:
+```python
+if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
+    self.graph._ghost_subsystem.create(anchor, residual_edges)
+else:
+    self.graph.add_ghost(anchor)
 ```
-star_graph/
-├── cortex.py          # NEW — MemoryCortex
-├── router.py          # NEW — CortexRouter
-├── gate.py            # NEW — MemoryGate
-├── timespine.py       # NEW — TimeSpine, TimeBucket, MemoryCluster
-├── cascade.py         # NEW — CascadeRecall, CausalChain
-├── hub.py             # NEW — HubLayer, HubNode
-├── ... (existing 28 files unchanged)
+
+**问题**: `GhostAnchor` 和 `GhostNode` 字段不兼容，持久化/加载可能丢失信息。
+
+**方案**:
+- 统一为 `GhostNode`，`StarGraph` 只持有 ghost ID 引用，实际数据由 `GhostSubsystem` 管理
+- `add_ghost()` 委托给 subsystem
+- 清理 `graph.py` 中的 `GhostAnchor` 类
+
+### 2. Raw Buffer 优先级提升 (检索质量)
+
+**现状**: `recall()` 中 Path 0 (Exact Cache) → Path A (Raw Buffer) → Path B (Graph)，但 Raw Buffer 结果被放在 graph 结果**之后**合并。
+
+**问题**: Raw Buffer 存的是最近 1-2 个 session 的原始对话，对于短期事实类查询命中率远高于压缩后的 anchor。
+
+**方案**:
+```python
+# 当前：exact → graph → raw
+# 改为：exact → raw → graph
+merged_items = exact_results + raw_results + graph_results
+```
+
+### 3. ANN 索引增量维护 (大图性能)
+
+**现状**: `cortical_lookup()` 每次查询时如果索引不同步就全量重建:
+```python
+if not self._ids_in_ann_sync():
+    ann.clear()
+    for aid, a in self.anchors.items():
+        if a.embedding: ann.add(aid, a.embedding)
+    ann.rebuild()
+```
+
+**方案**:
+- `add_anchor()` 时同步添加到 ANN
+- `remove_anchor()` 时同步从 ANN 删除
+- 取消 `_ids_in_ann_sync()` 检查
+- 只在 sleep 的 Index Rebuild 阶段做全量 rebuild
+
+---
+
+## P1 — Architecture & Maintainability
+
+### 4. MemoryManager 拆分 (可维护性)
+
+**现状**: `manager.py` 已有 1700+ 行，导入 40+ 模块，20+ lazy property。同时承担:
+- Facade API
+- 依赖注入容器（管理所有子系统生命周期）
+- 检索编排器（recall / retrieve_with_descent）
+- 持久化协调器（save/load/snapshot）
+
+**方案**: 拆分为三个角色:
+```python
+class MemoryRuntime:      # 依赖容器 + 生命周期管理
+class RetrievalPipeline:  # 检索编排（L0→L4 降级逻辑）
+class MemoryManager:      # 仅保留 facade API，委托给上面两个
+```
+
+### 5. Cortex 独立睡眠 (架构一致性)
+
+**现状**: `add_cortex()` 创建 `MemoryCortex`，但 `sleep()` 仍对 `self.graph` 做统一睡眠，各 cortex 不独立休眠。
+
+**方案**:
+- `MemoryManager.sleep()` 遍历 `router.cortices`，对每个 cortex 调用 `cortex.sleep()`
+- 全局 sleep 只做跨 cortex 的事情（Hub 桥接、全局 schema 提取）
+- 各 cortex 的 `ANNIndex` 独立，不共用 `self.graph._ann_index`
+
+### 6. Dual-Channel 自动触发 (检索质量)
+
+**现状**: `dual_recall()` 存在，但 `recall()` 内部没有调用它。用户必须显式选择 `dual_recall()`。
+
+**方案**: 在 `recall()` 中增加自动路由:
+```python
+def recall(self, query, context, max_items=10):
+    result = self._system1_recall(query, context, max_items)
+    system2_keywords = {"all", "which", "before", "last", "list", "every"}
+    needs_system2 = (
+        any(kw in query.lower() for kw in system2_keywords)
+        or result.confidence < 0.35
+    )
+    if needs_system2:
+        s2_result = self._system2_recall(query, context, max_items)
+        return self._merge_channels(result, s2_result)
+    return result
 ```
 
 ---
 
-# v0.7: LoCoMo Benchmark Optimization Plan
+## P2 — Cognitive Architecture Fidelity
 
-## Problem Diagnosis
+### 7. 自传体记忆层 ("我"的形成)
 
-LoCoMo scores are low NOT due to design philosophy failure, but because:
-- High-level cognitive capabilities aren't triggered in pure retrieval eval
-- Basic retrieval mechanisms expose critical gaps
+**现状**: `reflection.py` 的 reflection 是"对用户的反思"（"用户喜欢什么"），而非"对自我的反思"（"我如何理解用户"）。
 
-| Category | Current Score | Root Cause |
-|----------|--------------|------------|
-| Cat 1 (临时) | ~4.3% | No raw short-term channel — 1:1 compression drops immediate facts |
-| Cat 2 (短时) | ~1.9% | Same as above — no uncompressed recent-session buffer |
-| Cat 3-5 (综合) | Low | Pure embedding search, no goal-directed structural traversal |
-
----
-
-## P0: Multi-Level Memory Architecture (Raw Chunk + Working Memory)
-
-**Problem**: 1:1 compression irreversibly discards short-term facts. No uncompressed short-term channel.
-
-**Solution**: Three-tier memory hierarchy:
-
-| Tier | Retention | Content | Retrieval Priority |
-|------|-----------|---------|-------------------|
-| Raw Chunk Buffer | Last 1-2 sessions | Uncompressed dialogue segments | Highest |
-| Mid-level Anchors | Compressed + rehearsed | Structured memory anchors | Medium |
-| Long-term Graph | Persistent + decayed | Stable abstract knowledge | Normal |
-
-**Implementation**:
-- `raw_buffer.py` — Raw Chunk Buffer storing original dialogue segments per session
-- No compression applied; TTL = 2 sessions max
-- `MemoryManager` queries raw buffer first before graph retrieval
-- Inspired by MemGPT's multi-level OS-style memory design
-
-**Expected**: Cat 1 + 2 from 2-4% → 50-60%+
-
----
-
-## P0: Dual-Write + Multi-Path Retrieval
-
-**Problem**: 1:1 compression is irreversible and lossy. Once a fact is abstracted away, it's permanently lost.
-
-**Solution**: Parallel write + concurrent recall:
-
+**方案**: 增加 `AutobiographicalMemory` 层:
+```python
+@dataclass
+class SelfNarrative:
+    episode_summary: str      # "我和用户讨论过 Redis 超时"
+    self_belief: str          # "我认为用户偏好简洁代码"
+    emotional_tone: float     # 这次互动中"我"的情绪
+    formed_at: float
+    stability: float
 ```
-Each dialogue turn:
-  ├─ Write Path A: Raw chunk → RawBuffer (uncompressed, full text)
-  └─ Write Path B: Anchor → Graph (compressed, structured)
+区别于 reflection node 的"客观分析"，而是"主观体验"。
 
-Retrieval:
-  ├─ Path A: BM25 + vector similarity on raw chunks (50%)
-  └─ Path B: Star graph resonance mechanism (50%)
-  └─ Merge/Re-rank → Final Top-K
+### 8. State / Thermal State 统一 (认知架构清晰度)
+
+**现状**: 两套状态系统并存，映射关系散落在多个文件:
+- `MemoryState`: ACTIVE, REHEARSING, CONSOLIDATING, DORMANT, GHOST, REACTIVATED
+- `ThermalState`: HOT, WARM, COLD, DEAD
+
+**方案**: 明确定义状态转换矩阵，在状态转换时同步更新 thermal state:
+```python
+_STATE_THERMAL_MAP = {
+    MemoryState.ACTIVE: ThermalState.HOT,
+    MemoryState.REHEARSING: ThermalState.HOT,
+    MemoryState.CONSOLIDATING: ThermalState.WARM,
+    MemoryState.DORMANT: ThermalState.WARM,
+    MemoryState.GHOST: ThermalState.COLD,
+    MemoryState.REACTIVATED: ThermalState.HOT,
+}
 ```
 
-**Reference**: Zep (78.94%), EverMemOS (92.3%) both use graph + chunk dual-path.
+### 9. 振荡共振 phase 来源修正
 
-**Expected**: has_answer doubles, short-term +20-30 percentage points
+**现状**: `Oscillator.derive_phase()` 和 `derive_frequency()` 从 embedding 统计量推导，缺乏生物学依据。
 
----
-
-## P1: System-1 + System-2 Dual-Channel Retrieval
-
-**Problem**: Pure similarity-based retrieval can't handle "goal-directed structural traversal" — can only find "semantically similar", can't do "all/which/before/last" structured queries.
-
-**Solution**: Inspired by Mnemis (93.9% on LoCoMo):
-
-| Channel | When | Mechanism |
-|---------|------|-----------|
-| System-1 (Fast Association) | Default, high-confidence queries | Existing Star graph similarity search |
-| System-2 (Goal-Directed) | Low confidence (< threshold) OR structural/exhaustive intent | Hierarchical graph top-down traversal |
-
-**Implementation**:
-- `dual_channel.py` — `DualChannelRetriever` combining both channels
-- System-2 builds hierarchical semantic summary graph (summary → detail index)
-- Triggers when: query contains "all/which/before/last", or System-1 confidence < 0.35
-
-**Expected**: Multi-hop/composite question scores +15-20 percentage points
+**方案**: phase 应来自:
+- 时间上下文（一天中的时段、会话序号）
+- 情绪节奏（对话中的情绪波动周期）
+- 而非 embedding 的统计特征
 
 ---
 
-## P2: LLM-Assisted Memory Abstraction
+## P3 — Code Quality & Production Readiness
 
-**Problem**: Pure algorithmic abstraction (1:1 anchors) can't extract deep semantic abstractions like user preferences or cross-session relationships from noisy dialogue.
+### 10. 配置访问脆弱性
 
-**Solution**: Lightweight LLM post-processing in sleep consolidation:
+**现状**: 大量 `getattr(self.cfg, 'something', None)` 链式调用，配置结构变化时静默失败。
 
-1. Pre-filter: Existing Star algorithm does initial anchor screening
-2. LLM post-process: Small model (GPT-4o-mini / Qwen-2.5 3B) converts anchors into entity/event-centric Atom Facts
-3. Hierarchical merge: Atom facts stored in new graph layer, hyperlinked to source anchors
-
-**Reference**: Synthius-Mem (94.37%) philosophy — "Don't retrieve what was said, extract what is known about the user/world"
-
-**Expected**: Adversarial QA (Cat 5) + composite fact scenarios → 50-70%
-
----
-
-## Implementation Priority
-
-| Priority | Item | Expected Gain | Complexity |
-|----------|------|--------------|------------|
-| P0 (now) | Raw Chunk Buffer + Multi-Path Retrieval | Cat 1+2 2-4%→50%+, has_answer 2x | Low-Med |
-| P1 (next) | System-1 + System-2 Dual Channel | Cross-session reasoning foundation | High |
-| P2 (later) | LLM-Assisted Abstraction | Long-term reasoning enhancement | High |
-
----
-
-## Verification Flow
-
-1. Implement raw buffer + raw chunks + multi-path recall baseline
-2. Re-run LoCoMo eval on Cat 1 + 2 (has_answer metric)
-3. If short-term improvement significant → push System-2 + LLM abstraction forward
-
----
-
-# v0.8 — Short-Term Precision + Production Readiness
-
-## Current Weakness
-
-Single-token retrieval accuracy ~2% (near random). Sleep consolidation
-heavy on LLM API calls. No persistence safety. No standard benchmark.
-
----
-
-## 1. 修复短时精确记忆 (P0)
-
-### 1a. KV 精确匹配旁路
-
-对于强关联实体对（人名-生日、地名-坐标），使用键值缓存表做确定性查找，
-不走模糊联想路径。
-
-```
-检索流程:
-  query → 提取实体 key → KV 缓存精确查找
-    ├── 命中 → 直接返回 (确定性，O(1))
-    └── 未命中 → System-1/2 模糊检索 → 降级结果
+**方案**: `_DotDict` 增加 `get_path()` 支持:
+```python
+self.cfg.get('exact_cache.auto_harvest', True)
 ```
 
-实施:
-- `exact_cache.py` — 实体对 KV 缓存表
-- 每个 anchor 增加 `exact_match_keys: list[str]` 字段
-- `remember()` 时自动提取实体对写入 KV 缓存
-- `recall()` 时优先精确匹配，再降级到混合检索
+### 11. Sleep Phase 编号统一
 
-### 1b. Salience 字段
+**现状**: `run_phased()` 中有 N1, N2, N3, REM, Wake-prep, Phase 5b, Phase 5c, Phase 6, Phase 7, Phase 8 — 命名不统一。
 
-为每个记忆节点增加显著性标记:
-- `Anchor.exact_match_key: str = ""` — 精确匹配键（如 "Alice-birthday"）
-- `Anchor.salience: float = 0.0` — 显著性评分（高 = 更容易被精确回忆）
-- 检索时先尝试精确匹配 `exact_match_key`，命中则跳过模糊检索
-
-### 1c. 扩展工作记忆栈
-
-现有 WorkingMemory (9 条, 30min TTL) 扩展为:
-- 容量 10-20 条
-- 专门缓存最近/最频繁被精确回忆的内容
-- 独立的 exact match 索引
-- 与 raw_buffer 互补：WM 存最热数据，raw_buffer 存最近 2 会话
-
----
-
-## 2. 降低推理调用开销 (P0)
-
-### 2a. 增量式微睡眠
-
-现状: `sleep()` 一次性运行完整 8 阶段，阻塞严重。
-
-改为:
+**方案**: 统一命名:
 ```
-micro_sleep(steps: int = 2):
-  每次 Agent 空闲时执行 1-2 个阶段
-  记录已完成的阶段，下次从断点继续
-  8 个阶段分 4-8 次微睡眠完成一轮完整周期
+N1_Replay, N2_Merge, N3_Compression, N3b_AtomFacts,
+REM_Emotion, N4_Prune, N5_HubConnect, N6_IndexRebuild
 ```
 
-新增:
-- `micro_sleep.py` — `MicroSleepScheduler` 管理阶段进度
-- `MemoryManager.micro_sleep()` — 增量入口
-- `SleepCycle` 增加 `resume_from(phase_idx)` 恢复能力
+### 12. 余弦相似度去重
 
-### 2b. 成本估算器
+**现状**: `graph.py`, `sleep.py`, `scheduler.py`, `manager.py`, `streaming.py` 各有自己的 `_cosine_sim` 实现。
 
-在运行 sleep 前输出预估:
-- 当前锚点数量 → 预估 SWR 重放耗时
-- 摘要节点数量 → 预估 LLM 调用次数和 token 消耗
-- 总体预估成本（美元）和耗时
-- 支持 dry-run 模式（只估算不执行）
+**方案**: 提取为 `star_graph/math_utils.py` 中的统一函数。
 
-新增:
-- `cost_estimator.py` — `SleepCostEstimator`
-- `MemoryManager.estimate_sleep_cost()` → 返回估算报告
+### 13. find_contradictions() O(n²) 优化
 
-### 2c. 轻量化后端（已完成）
+**现状**: 遍历所有 anchor 对计算 embedding 相似度。
 
-- `atom_facts.py` 已支持 `provider: template` 零 API 模式
-- `compression.py` 已用模板引擎替代 LLM 压缩（零 API）
-- 默认所有组件使用离线模式，LLM 为可选增强
+**方案**: 使用 ANN 索引先找出高相似度候选对，再检查情绪对立:
+```python
+# 复杂度从 O(n²) 降到 O(n * k)
+```
 
----
+### 14. retrieve_with_descent() Layer 3 全量扫描
 
-## 3. 补齐生产环境组件 (P1)
+**现状**: Layer 3 (2D Plane) 遍历所有 cortex 的所有 anchors，可能 O(50K)。
 
-### 3a. 快照 + WAL
+**方案**: 利用 TimeSpine 索引，只扫描最近 N 天的桶。
 
-- `snapshot.py` — 定时快照 (JSON/SQLite dump)
-- WAL 集成: 利用 SQLite 已有的 WAL 模式，增加应用层 snapshot 检查点
-- 中断恢复: `MemoryManager.load()` 自动检测未完成的操作并回滚
-- 状态回滚: 保留最近 N 个快照，支持手动回退
+### 15. retention_score 缓存
 
-### 3b. 异步接口
+**现状**: `retention_score` 是 `@property`，每次访问实时计算。检索路径中每个 anchor 被访问多次。
 
-- `async_manager.py` — `AsyncMemoryManager` (asyncio 封装)
-- 连接池: 多 Agent 共享同一个 MemoryManager 实例
-- 并发安全: 图操作加读写锁 `threading.RWLock`
+**方案**: 状态变化时缓存，设脏标记。
 
-### 3c. OpenTelemetry 追踪
+### 16. 测试覆盖率提升
 
-- `tracing.py` — OpenTelemetry span 包装
-- 记录每次检索:
-  - 查询文本、响应锚点 ID
-  - 相位值、共振强度、PageRank 得分
-  - 经过的检索层 (raw_buffer / community / cortex / hub / timeline)
-  - 耗时细分
-- 便于调试"为什么这条记忆被召回"
+**现状**: 232 个测试，但很多模块覆盖不足（benchmark, community, atom_facts 等）。
 
----
+**方案**:
+- 每个核心模块至少单元测试
+- 集成测试：模拟 100 轮对话 → sleep → 验证 ghost 复活
+- 基准测试自动化
 
-## 4. 标准评估基准 (P1)
+### 17. 静态类型检查
 
-### 基准套件
+**现状**: 大量 `| None` 和 `Any`，但很多地方没有类型注解。
 
-| 测试类别 | 内容 | 指标 |
-|---------|------|------|
-| 精确事实回忆 | LoRA 风格评估集 | exact_match, has_answer |
-| 联想迁移 | A→B→C 路径推理 | path_recall@k |
-| 时间混淆 | 新旧记忆干扰测试 | temporal_precision |
-| 抗噪能力 | 大量幽灵痕迹下的检索精度 | precision@k under noise |
-| 压缩保真度 | 压缩前后 recall 对比 | recall_drop_ratio |
+**方案**: 引入 mypy 或 pyright。
 
-### 对比实验
+### 18. 配置验证增强
 
-| 系统 | 对比维度 |
-|------|---------|
-| FAISS + Neo4j | 纯向量 + 图 vs Star 的认知图 |
-| MemGPT | OS 风格多级内存 vs Star 的认知架构 |
-| Zep | 图+块双路径 vs Star 的多路召回 |
-| Mnemis | 分层图检索 vs Star 的双系统路由 |
+**现状**: `_check_ranges()` 只检查数值范围，不检查配置段存在性和兼容性。
+
+**方案**: 增加配置 schema 验证。
+
+### 19. 日志系统标准化
+
+**现状**: `sleep.py` 用 `self.log: list[str]`，`manager.py` 用 `print()`。
+
+**方案**: 引入标准 `logging`，支持结构化日志。
+
+### 20. 文档与代码同步
+
+**现状**: README 中的 Quick Start 示例和实际 API 可能不完全一致。
+
+**方案**: CI 中增加 doctest，确保 README 代码示例可实际运行。
 
 ---
 
-# v1.0 — 长期演进
+## Implementation Order
 
-## 5. 可配置的模糊回忆策略
-
-- 开放记忆生存函数接口 `SurvivalFunction` 协议
-- 内置: 艾宾浩斯曲线、幂律衰减、指数衰减、自定义 lambda
-- 幽灵强度作为检索排序维度
-- 负向幽灵: 降低被矛盾/证伪记忆的置信度
-
-## 6. 多模态记忆
-
-- CLIP 风格多模态嵌入 (文本/图像/音频 → 统一向量空间)
-- 跨模态幽灵复活: 图像残余信号触发文本回忆
-
-## 7. 多 Agent 共享记忆
-
-- 记忆联邦层: 多 Agent 共享部分记忆子图
-- 全局幽灵共鸣: 跨 Agent 推荐/警告/协作
-- 记忆权限: 读/写/广播 ACL
-
-## 8. WASM 嵌入式版本
-
-- 核心图操作 + 相位共振编译为 Rust/WebAssembly
-- micro-star: 仅保留动态遗忘 + 混合检索，适配 IoT/边缘设备
+```
+Phase 1 (P0): Ghost 统一 → Raw Buffer 优先级 → ANN 增量
+Phase 2 (P1): Manager 拆分 → Cortex 独立睡眠 → Dual-Channel 自动触发
+Phase 3 (P2): 自传体记忆 → 状态机统一 → Phase 来源修正
+Phase 4 (P3): 代码质量逐项修复（10-20）
+```
 
 ---
 
-## v0.8 Implementation Priority
+## Recently Completed (v1.0.6)
 
-| Priority | Item | Impact | Complexity |
-|----------|------|--------|------------|
-| P0-1a | KV 精确匹配缓存 | 单 token 2%→60%+ | 低 |
-| P0-1b | Salience + exact_match_key | 实体对确定性查找 | 低 |
-| P0-1c | 扩展工作记忆栈 | 热数据命中率提升 | 低 |
-| P0-2a | 增量微睡眠 | 消除长时间阻塞 | 中 |
-| P0-2b | 成本估算器 | 运行前可预测 | 低 |
-| P0-2c | 轻量化后端（已完成） | 零 API 成本 | ✓ |
-| P1-3a | 快照 + WAL | 数据安全 | 中 |
-| P1-3b | 异步接口 | 高并发支持 | 中 |
-| P1-3c | OpenTelemetry | 可观测性 | 低 |
-| P1-4 | 标准基准套件 | 量化对比 | 中 |
-| v1.0-5 | 可配置遗忘曲线 | 学术创新 | 中 |
-| v1.0-6 | 多模态 | 能力扩展 | 高 |
-| v1.0-7 | 多 Agent 联邦 | 架构创新 | 高 |
-| v1.0-8 | WASM 嵌入 | 新平台 | 高 |
+- [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
+- [x] Ghost intensity + NegativeGhost contradiction tracking
+- [x] Multimodal memory (CLIP joint embedding text+image)
+- [x] Streaming memory buffer with backpressure
+- [x] Exact match cache (KV deterministic O(1) lookup)
+- [x] Micro-sleep scheduler (incremental non-blocking consolidation)
+- [x] Snapshot + WAL (crash recovery)
+- [x] Async manager + tracing (OpenTelemetry spans)
+- [x] Benchmark suite (5 categories)
+- [x] Dependency manifest (requirements.txt)
+- [x] Version unification (1.0.6) + orphan module exports
+- [x] 232 tests passing
