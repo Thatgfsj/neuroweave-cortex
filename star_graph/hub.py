@@ -4,7 +4,7 @@ Hubs are NOT super-nodes. They are compressed, stable summary nodes that
 bridge different cortices without creating O(n²) cross-connections.
 
 Hierarchy:
-    Leaf Hub (topic-level) → Domain Hub (cortex-level) → Global Self Hub
+    Leaf Hub (topic-level) -> Domain Hub (cortex-level) -> Global Self Hub
 
 A hub:
 - Stores a compressed summary, not raw memories
@@ -12,12 +12,15 @@ A hub:
 - Is near-immune to decay (stability > 0.9)
 - Is the ONLY mechanism for cross-cortex association
 - Forms the "4th dimension" connecting 3D star clusters across cortices
+- Can have edges to other hubs, forming a cross-domain reasoning network
+
+v0.6: Added HubEdge for hub-to-hub multi-hop reasoning.
 
 Example:
-    Python Memory (DevCortex) → Python Summary Hub
-    Budget Discussion (FinanceCortex) → Budget Summary Hub
-    Python Summary Hub + Budget Summary Hub → Developer Identity Hub
-    Developer Identity Hub → Global Self Hub
+    Python Memory (DevCortex) -> Python Summary Hub
+    Budget Discussion (FinanceCortex) -> Budget Summary Hub
+    Python Summary Hub + Budget Summary Hub -> Developer Identity Hub
+    Developer Identity Hub -> Global Self Hub
 """
 
 from __future__ import annotations
@@ -105,6 +108,38 @@ class HubNode:
         )
 
 
+@dataclass
+class HubEdge:
+    """An edge between two hub nodes in the HubSphere.
+
+    Hub edges enable multi-hop reasoning across domains:
+    "Python async" (DevCortex hub) -> "performance optimization" (InfraCortex hub)
+    """
+    id: str
+    source_hub_id: str
+    target_hub_id: str
+    weight: float = 0.5
+    edge_type: str = "cross_domain"  # "cross_domain", "causal", "analogical", "temporal"
+    confidence: float = 0.5
+    created_at: float = field(default_factory=time.time)
+    reinforcement_count: int = 0
+
+    def reinforce(self, delta: float = 0.05):
+        self.weight = min(1.0, self.weight + delta)
+        self.reinforcement_count += 1
+        self.confidence = min(1.0, self.confidence + delta * 0.5)
+
+    @classmethod
+    def create(cls, source_id: str, target_id: str,
+               weight: float = 0.5, edge_type: str = "cross_domain") -> HubEdge:
+        import hashlib
+        eid = hashlib.blake2b(
+            f"{source_id}:{target_id}:{edge_type}".encode(), digest_size=8
+        ).hexdigest()
+        return cls(id=eid, source_hub_id=source_id, target_hub_id=target_id,
+                   weight=weight, edge_type=edge_type)
+
+
 class HubLayer:
     """Manages the hierarchy of hub nodes across cortices.
 
@@ -122,8 +157,11 @@ class HubLayer:
 
     def __init__(self):
         self.hubs: dict[str, HubNode] = {}
-        # Index: cortex name → hub IDs in that cortex
+        self.edges: dict[str, HubEdge] = {}  # hub-to-hub edges
+        # Index: cortex name -> hub IDs in that cortex
         self._cortex_index: dict[str, list[str]] = {}
+        # Adjacency for hub-to-hub traversal
+        self._hub_adjacency: dict[str, set[str]] = {}
 
     # ── Hub creation ─────────────────────────────────────
 
@@ -217,6 +255,63 @@ class HubLayer:
         hub_b.add_cross_ref(hub_a_id)
         return True
 
+    # ── Hub-to-hub edges (cross-domain reasoning network) ─
+
+    def add_hub_edge(self, source_id: str, target_id: str,
+                     weight: float = 0.5,
+                     edge_type: str = "cross_domain") -> HubEdge | None:
+        """Create an edge between two hub nodes.
+
+        Hub edges form a cross-domain reasoning network:
+        "Python async" hub -> "performance optimization" hub -> "cost reduction" hub
+        """
+        if source_id not in self.hubs or target_id not in self.hubs:
+            return None
+        if source_id == target_id:
+            return None
+
+        edge = HubEdge.create(source_id, target_id, weight, edge_type)
+        self.edges[edge.id] = edge
+
+        # Update adjacency
+        if source_id not in self._hub_adjacency:
+            self._hub_adjacency[source_id] = set()
+        self._hub_adjacency[source_id].add(target_id)
+
+        return edge
+
+    def traverse_hubs(self, start_hub_id: str, max_hops: int = 2,
+                      max_results: int = 5) -> list[HubNode]:
+        """Multi-hop traversal on the hub-to-hub reasoning network.
+
+        From a starting hub, follow edges up to max_hops to discover
+        connected hubs in other domains. This enables cross-domain inference.
+        """
+        if start_hub_id not in self.hubs:
+            return []
+
+        visited: set[str] = {start_hub_id}
+        frontier: list[str] = [start_hub_id]
+        results: list[HubNode] = []
+
+        for _ in range(max_hops):
+            next_frontier: list[str] = []
+            for hub_id in frontier:
+                for neighbor_id in self._hub_adjacency.get(hub_id, set()):
+                    if neighbor_id not in visited:
+                        visited.add(neighbor_id)
+                        neighbor = self.hubs.get(neighbor_id)
+                        if neighbor:
+                            results.append(neighbor)
+                            next_frontier.append(neighbor_id)
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        # Sort by importance
+        results.sort(key=lambda h: -h.importance)
+        return results[:max_results]
+
     # ── Queries ──────────────────────────────────────────
 
     def get_hubs_for_cortex(self, cortex_name: str,
@@ -229,7 +324,7 @@ class HubLayer:
         return sorted(hubs, key=lambda h: -h.importance)
 
     def get_parent_chain(self, hub_id: str) -> list[HubNode]:
-        """Get the chain of parent hubs from leaf → global."""
+        """Get the chain of parent hubs from leaf -> global."""
         chain: list[HubNode] = []
         current = self.hubs.get(hub_id)
         while current:
@@ -262,9 +357,14 @@ class HubLayer:
         for hub in self.hubs.values():
             if hub.hub_level in levels:
                 levels[hub.hub_level] += 1
+        edge_types: dict[str, int] = {}
+        for e in self.edges.values():
+            edge_types[e.edge_type] = edge_types.get(e.edge_type, 0) + 1
         return {
             "total_hubs": len(self.hubs),
             "by_level": levels,
+            "total_edges": len(self.edges),
+            "edge_types": edge_types,
             "cortices_indexed": len(self._cortex_index),
             "cross_cortex_bridges": sum(
                 len(h.cross_ref_hubs) for h in self.hubs.values()) // 2,

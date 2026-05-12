@@ -198,7 +198,14 @@ class Oscillator:
 
 @dataclass
 class Anchor:
-    """A single memory anchor point with state machine and oscillatory properties."""
+    """A single memory anchor point with state machine and oscillatory properties.
+
+    Fields added in v0.6:
+    - cortex_path: hierarchical path within a cortex (e.g. "dev.python.gui")
+    - segment_id: which Segment this node belongs to (for hub bridging)
+    - semantic_density (property): 0=raw event → 1=abstract rule
+    - activation_potential (property): dynamic energy for gating competition
+    """
 
     id: str
     text: str
@@ -215,6 +222,9 @@ class Anchor:
     # v0.4: state machine
     state: MemoryState = MemoryState.ACTIVE
     state_history: list[tuple[MemoryState, float]] = field(default_factory=list)
+    # v0.6: cortex integration
+    cortex_path: str = ""          # hierarchical path e.g. "dev.python.gui"
+    segment_id: str = ""           # which Segment this node belongs to
 
     @classmethod
     def create(cls, text: str, source_session: str = "",
@@ -482,6 +492,74 @@ class Anchor:
         """Memory that hasn't been accessed/verified recently."""
         hours_since = (time.time() - self.last_activated_at) / 3600
         return hours_since > 168  # 1 week
+
+    # ── v0.6: Semantic density & activation potential ───
+
+    @property
+    def semantic_density(self) -> float:
+        """How abstracted this memory is: 0=raw episodic event, 1=abstract rule.
+
+        Derived from:
+        - hippocampal_dependency: high hipp → episodic → low density
+        - stability: high stability → consolidated → high density
+        - schema_ref: has schema → abstracted → high density
+        - procedural tags: preference/style/rule → high density
+        """
+        v = self.vector
+        # Base: inverse of hippocampal dependency (cortical = abstract)
+        density = 1.0 - v.hippocampal_dependency
+
+        # Stability boosts density (consolidated memories are more abstract)
+        density = 0.6 * density + 0.4 * v.stability
+
+        # Schema association strongly indicates abstraction
+        if self.schema_ref:
+            density = max(density, 0.7)
+
+        # Check for procedural/rule-like tags
+        abstract_tags = {'preference', 'style', 'rule', 'pattern', 'habit',
+                         'convention', 'principle', 'lesson', 'knowledge',
+                         'architecture', 'design'}
+        tag_overlap = abstract_tags & {t.lower() for t in self.tags}
+        if tag_overlap:
+            density = max(density, 0.5 + 0.1 * len(tag_overlap))
+
+        return max(0.0, min(1.0, density))
+
+    @property
+    def activation_potential(self) -> float:
+        """Dynamic energy level for gating competition.
+
+        Combines:
+        - retention_score (stability + importance)
+        - recency (recently active = higher potential)
+        - frequency (often accessed = easier to activate)
+        - thermal_priority (HOT > WARM > COLD > DEAD)
+        - emotional salience (|valence| gives slight boost)
+
+        This is the main signal used in MemoryGate winner-take-all competition.
+        Higher = more likely to "fire" and enter the agent's context.
+        """
+        v = self.vector
+        hours_idle = (time.time() - self.last_activated_at) / 3600
+
+        # Base activation from retention
+        base = self.retention_score
+
+        # Recency boost: exponential decay over 7 days
+        recency_boost = math.exp(-hours_idle / 168)
+
+        # Frequency bonus: up to +20% for frequently accessed memories
+        freq_bonus = 1.0 + min(0.2, v.frequency * 0.2)
+
+        # Emotional salience: |valence| gives up to +15%
+        emotional_boost = 1.0 + abs(v.emotional_valence) * 0.15
+
+        # Thermal weighting
+        thermal_weight = self.thermal_priority
+
+        potential = base * recency_boost * freq_bonus * emotional_boost * thermal_weight
+        return max(0.0, min(1.0, potential))
 
     # ── Thermal lifecycle ───────────────────────────────
 

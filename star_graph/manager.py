@@ -27,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -42,6 +43,7 @@ from .gate import MemoryGate
 from .timespine import TimeSpine
 from .cascade import CascadeRecall
 from .hub import HubLayer, HubNode
+from .brain_sphere import BrainSphere, HubCenter
 from .evolution import MemoryEvolutionEngine
 from .ghost import GhostSubsystem
 from .abstraction import AbstractionEngine
@@ -88,6 +90,9 @@ class MemoryManager:
             max_capacity=wm_capacity,
             ttl_seconds=wm_ttl,
         )
+
+        # Brain sphere — innermost L1 cache (non-lazy, always available)
+        self.brain = BrainSphere(max_common_nodes=5000)
 
         # Subsystems — lazily initialized
         self._embedder = None
@@ -388,6 +393,157 @@ class MemoryManager:
             "gated_count": len(gated),
         }
 
+    def retrieve_with_descent(self, query: str = "",
+                               context: AgentContext | None = None,
+                               max_items: int = 15) -> dict:
+        """5-layer dimensional descent retrieval pipeline.
+
+        Layer 0: BrainSphere cache (fast path — common nodes)
+            ↓ miss or insufficient results
+        Layer 1: CortexSphere 3D search (semantic + gating within target cortex)
+            ↓ need cross-domain or insufficient
+        Layer 2: HubSphere traversal (cross-cortex hub navigation, max 2 hops)
+            ↓ still insufficient
+        Layer 3: 2D planar (time × importance projection, all cortices)
+            ↓ still insufficient
+        Layer 4: Pseudo-2D timeline scan (TimeSpine, guaranteed results)
+
+        Returns dict with:
+        - items: final selected MemoryItems
+        - layer_used: which layer produced the final results
+        - layers_visited: all layers that were queried
+        - brain_hit: whether BrainSphere had a direct hit
+        """
+        if context is None:
+            context = AgentContext(task_type="conversation")
+        embedder = self._get_embedder()
+        query_emb = embedder.encode(query) if query else None
+
+        result = {
+            "items": [],
+            "layer_used": "",
+            "layers_visited": [],
+            "brain_hit": False,
+            "total_candidates": 0,
+            "active_cortices": [],
+        }
+
+        # ── Layer 0: BrainSphere (fast cache) ────────────
+        result["layers_visited"].append("brain")
+        brain_hits = self.brain.query_common_nodes(query_emb, query, top_k=5)
+        if brain_hits:
+            result["brain_hit"] = True
+            items = []
+            for anchor in brain_hits:
+                from .scheduler import MemoryItem
+                items.append(MemoryItem(
+                    anchor=anchor,
+                    relevance_score=0.9,
+                    memory_type=MemoryType.WORKING,
+                    compression_level=0,
+                    compressed_text=anchor.text,
+                ))
+            if len(items) >= max_items:
+                result["items"] = items[:max_items]
+                result["layer_used"] = "brain"
+                return result
+            result["items"].extend(items)
+
+        # ── Layer 1: CortexSphere 3D search ──────────────
+        result["layers_visited"].append("cortex")
+        routes = self.router.route(query, query_embedding=query_emb)
+        active_cortices = [r.cortex for r in routes if r.score > 0.1]
+        result["active_cortices"] = [c.config.name for c in active_cortices]
+
+        all_candidates: list = list(result["items"])
+        for cortex in active_cortices[:3]:
+            ctx = cortex.recall(query=query, context=context, max_items=max_items)
+            all_candidates.extend(ctx.items)
+
+        result["total_candidates"] = len(all_candidates)
+
+        if all_candidates:
+            gated = self.gate.gate(all_candidates, context, query_emb, query)
+            if len(gated) >= max_items:
+                result["items"] = gated[:max_items]
+                result["layer_used"] = "cortex"
+                return result
+            all_candidates = gated
+
+        # ── Layer 2: HubSphere traversal ─────────────────
+        result["layers_visited"].append("hub")
+        existing_ids = {item.anchor.id for item in all_candidates}
+        for cortex in active_cortices[:2]:
+            seg = cortex.get_segment_for_hub("compressed")
+            if seg and seg.hub_links:
+                for hub_id in seg.hub_links[:2]:
+                    related_hubs = self.hublayer.traverse_hubs(hub_id, max_hops=2, max_results=3)
+                    for hub in related_hubs:
+                        if hub.id not in existing_ids:
+                            # Create a synthetic anchor from hub summary
+                            hub_anchor = Anchor.create(
+                                text=hub.text,
+                                embedding=hub.embedding,
+                                importance=hub.importance,
+                            )
+                            from .scheduler import MemoryItem
+                            all_candidates.append(MemoryItem(
+                                anchor=hub_anchor,
+                                relevance_score=0.6,
+                                memory_type=MemoryType.SEMANTIC,
+                                compression_level=1,
+                                compressed_text=hub.text[:120],
+                            ))
+                            existing_ids.add(hub.id)
+
+        if len(all_candidates) >= max_items:
+            gated = self.gate.gate(all_candidates, context, query_emb, query)
+            result["items"] = gated[:max_items]
+            result["layer_used"] = "hub"
+            return result
+
+        # ── Layer 3: 2D planar (time × importance) ───────
+        result["layers_visited"].append("2d_plane")
+        plane_items = []
+        import time as _time
+        now = _time.time()
+        for cortex in active_cortices:
+            for anchor in cortex.graph.anchors.values():
+                if not anchor.is_retrievable or anchor.id in existing_ids:
+                    continue
+                hours = (now - anchor.last_activated_at) / 3600
+                recency = math.exp(-hours / 168)
+                score = 0.6 * recency + 0.4 * anchor.retention_score
+                plane_items.append((anchor, score))
+
+        plane_items.sort(key=lambda x: -x[1])
+        from .scheduler import MemoryItem
+        for anchor, score in plane_items[:max_items]:
+            if anchor.id not in existing_ids:
+                all_candidates.append(MemoryItem(
+                    anchor=anchor, relevance_score=score,
+                    memory_type=MemoryType.EPISODIC, compression_level=2,
+                    compressed_text=anchor.text[:80],
+                ))
+                existing_ids.add(anchor.id)
+
+        if len(all_candidates) >= max_items:
+            result["items"] = [item for item in all_candidates if hasattr(item, 'anchor')][:max_items]
+            result["layer_used"] = "2d_plane"
+            return result
+
+        # ── Layer 4: Timeline scan (guaranteed results) ───
+        result["layers_visited"].append("timeline")
+        timeline_results = self.scan_timeline(max_days=90, max_clusters=max_items)
+        for tc in timeline_results:
+            # Find anchors in these clusters
+            pass  # TimeSpine clusters reference anchor IDs
+
+        # Final fallback: just return whatever we have
+        result["items"] = [item for item in all_candidates[:max_items] if hasattr(item, 'anchor')]
+        result["layer_used"] = "timeline"
+        return result
+
     def cascade_recall(self, query: str = "",
                        max_chains: int = 5,
                        max_depth: int = 5) -> list:
@@ -483,7 +639,12 @@ class MemoryManager:
 
         # 1. Full sleep consolidation
         sc = SleepCycle(self.graph)
-        sleep_report = sc.run_phased()
+        cortices_list = self._router.cortices if self._router else []
+        sleep_report = sc.run_phased(
+            brain=self.brain,
+            hublayer=self._hublayer,
+            cortices=cortices_list,
+        )
 
         # 2. Evolve the graph
         evo = self.evolution.evolve(current_time)

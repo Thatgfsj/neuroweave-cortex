@@ -49,7 +49,8 @@ from .router import CortexRouter, RouteResult
 from .gate import MemoryGate, GateScore
 from .timespine import TimeSpine, TimeBucket, MemoryCluster
 from .cascade import CascadeRecall, CausalChain
-from .hub import HubLayer, HubNode
+from .hub import HubLayer, HubNode, HubEdge
+from .brain_sphere import BrainSphere, HubCenter
 from .manager import MemoryManager, ManagerStats
 
 # MCP server is optional — requires `pip install mcp`

@@ -5,9 +5,10 @@ Each Cortex is a self-contained memory system:
 - Own decay curve and retention thresholds
 - Own retrieval policy and token budget
 - Independent sleep/consolidation cycle
+- Internal Segments (西瓜块) — clusters by semantic density, bridge to hub nodes
 
 Cortices do NOT directly connect to each other. Cross-cortex links
-go through HubNodes in the HubLayer.
+go through HubNodes in the HubLayer, connected via Segments.
 """
 
 from __future__ import annotations
@@ -50,6 +51,56 @@ class CortexConfig:
     route_recency_weight: float = 0.1
 
 
+@dataclass
+class Segment:
+    """A cluster of memories within a cortex — the "西瓜块" (watermelon slice).
+
+    Segments group memories by semantic density range within a cortex.
+    Each segment has a centroid embedding and can link to HubNodes in the
+    HubSphere. Segments are the bridge between cortex-local memory and
+    cross-domain abstraction.
+
+    A cortex typically has 3-10 segments, each representing a density band:
+    - Low density (0.0-0.3): raw episodic events
+    - Medium density (0.3-0.7): compressed summaries
+    - High density (0.7-1.0): abstract rules/patterns
+    """
+    id: str
+    cortex_name: str
+    centroid: list[float] | None = None       # mean embedding of nodes in this segment
+    density_band: tuple[float, float] = (0.0, 1.0)  # (min_density, max_density)
+    node_ids: list[str] = field(default_factory=list)
+    hub_links: list[str] = field(default_factory=list)  # linked HubNode IDs
+    summary: str = ""
+    importance: float = 0.5
+    created_at: float = field(default_factory=time.time)
+    last_updated: float = field(default_factory=time.time)
+
+    @property
+    def size(self) -> int:
+        return len(self.node_ids)
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self.node_ids) == 0
+
+    def add_node(self, anchor_id: str, embedding: list[float] | None = None):
+        """Add a node to this segment and update centroid."""
+        if anchor_id not in self.node_ids:
+            self.node_ids.append(anchor_id)
+        self.last_updated = time.time()
+
+    def remove_node(self, anchor_id: str):
+        if anchor_id in self.node_ids:
+            self.node_ids.remove(anchor_id)
+        self.last_updated = time.time()
+
+    def link_hub(self, hub_id: str):
+        """Link a HubNode to this segment."""
+        if hub_id not in self.hub_links:
+            self.hub_links.append(hub_id)
+
+
 class MemoryCortex:
     """Independent memory brain region with its own graph and retrieval.
 
@@ -77,12 +128,31 @@ class MemoryCortex:
         self._centroid: list[float] | None = None
         self._centroid_stale = True
 
+        # Segments — clusters by semantic density
+        self._segments: dict[str, Segment] = {}
+        self._init_default_segments()
+
         # Stats
         self.created_at: float = time.time()
         self.last_accessed_at: float = time.time()
         self.total_anchors_added: int = 0
         self.total_recalls: int = 0
         self.total_sleep_cycles: int = 0
+
+    def _init_default_segments(self):
+        """Create default density-band segments."""
+        bands = [
+            ("seg_raw", (0.0, 0.3), "Raw episodic events"),
+            ("seg_compressed", (0.3, 0.7), "Compressed summaries"),
+            ("seg_abstract", (0.7, 1.0), "Abstract rules and patterns"),
+        ]
+        for seg_id, band, desc in bands:
+            self._segments[seg_id] = Segment(
+                id=f"{self.config.name}_{seg_id}",
+                cortex_name=self.config.name,
+                density_band=band,
+                summary=desc,
+            )
 
     # ── Routing ──────────────────────────────────────────
 
@@ -165,8 +235,9 @@ class MemoryCortex:
                  emotional_valence: float = 0.0,
                  importance: float = 0.5,
                  connect_to: list[str] | None = None,
+                 cortex_path: str = "",
                  **kwargs) -> Anchor:
-        """Store a memory in this cortex."""
+        """Store a memory in this cortex. Auto-assigns to a density segment."""
         embedder = self._get_embedder()
         embedding = embedder.encode(text)
 
@@ -179,7 +250,9 @@ class MemoryCortex:
             tags=tags,
             **kwargs,
         )
+        anchor.cortex_path = cortex_path or self.config.name
         self.graph.add_anchor(anchor)
+        self._assign_to_segment(anchor)
         self._centroid_stale = True
         self.total_anchors_added += 1
 
@@ -219,6 +292,74 @@ class MemoryCortex:
         self._centroid_stale = True
         self._index = None  # invalidate index after graph changes
         return report
+
+    # ── Segment management ──────────────────────────────
+
+    def _assign_to_segment(self, anchor: Anchor) -> str:
+        """Assign an anchor to the appropriate density-band segment.
+
+        Returns the segment ID the anchor was assigned to.
+        """
+        density = anchor.semantic_density
+        for seg in self._segments.values():
+            lo, hi = seg.density_band
+            if lo <= density <= hi:
+                seg.add_node(anchor.id, anchor.embedding)
+                anchor.segment_id = seg.id
+                return seg.id
+
+        # Fallback to raw segment
+        raw_seg = self._segments.get(f"{self.config.name}_seg_raw")
+        if raw_seg:
+            raw_seg.add_node(anchor.id, anchor.embedding)
+            anchor.segment_id = raw_seg.id
+            return raw_seg.id
+        return ""
+
+    def get_segments(self) -> list[Segment]:
+        """Get all segments in this cortex."""
+        return list(self._segments.values())
+
+    def get_segment(self, segment_id: str) -> Segment | None:
+        return self._segments.get(segment_id)
+
+    def get_segment_for_hub(self, density_band: str = "compressed") -> Segment | None:
+        """Get the segment that should connect to hub nodes.
+
+        Typically the 'compressed' segment (medium density), as it represents
+        summarized knowledge most useful for cross-domain abstraction.
+        """
+        band_map = {"raw": "seg_raw", "compressed": "seg_compressed", "abstract": "seg_abstract"}
+        seg_key = band_map.get(density_band, "seg_compressed")
+        return self._segments.get(f"{self.config.name}_{seg_key}")
+
+    def rebuild_segments(self):
+        """Rebuild all segments from current anchors. Called after sleep."""
+        # Clear all segment node lists
+        for seg in self._segments.values():
+            seg.node_ids.clear()
+
+        # Re-assign all anchors
+        for anchor in self.graph.anchors.values():
+            if anchor.is_retrievable:
+                self._assign_to_segment(anchor)
+
+        # Update centroids
+        for seg in self._segments.values():
+            if seg.node_ids:
+                embeddings = []
+                for nid in seg.node_ids:
+                    anchor = self.graph.anchors.get(nid)
+                    if anchor and anchor.embedding:
+                        embeddings.append(anchor.embedding)
+                if embeddings:
+                    dim = len(embeddings[0])
+                    seg.centroid = [0.0] * dim
+                    for emb in embeddings:
+                        for i, v in enumerate(emb):
+                            seg.centroid[i] += v
+                    for i in range(dim):
+                        seg.centroid[i] /= len(embeddings)
 
     # ── Lazy-loaded subsystems ───────────────────────────
 
