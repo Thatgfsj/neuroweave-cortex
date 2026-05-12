@@ -202,6 +202,10 @@ graph:
     min_weight: 0.05
   ghost_revival_threshold: 0.75
 
+working_memory:
+  max_capacity: 9
+  ttl_seconds: 1800.0
+
 index:
   algorithm: "brute"
   metric: "cosine"

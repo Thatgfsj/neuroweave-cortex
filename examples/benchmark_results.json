@@ -46,8 +46,8 @@
         "recall@1": 0.0,
         "recall@3": 0.0,
         "recall@5": 0.0,
-        "content_recall@3": 1.0,
-        "content_recall@5": 1.0,
+        "content_recall@3": 0.833,
+        "content_recall@5": 0.833,
         "mrr": 0.0,
         "interference_score": 0.0
       },
@@ -96,8 +96,8 @@
         "recall@1": 0.0,
         "recall@3": 0.0,
         "recall@5": 0.0,
-        "content_recall@3": 1.0,
-        "content_recall@5": 1.0,
+        "content_recall@3": 0.5,
+        "content_recall@5": 0.5,
         "mrr": 0.0,
         "interference_score": 0.0
       },
@@ -143,8 +143,8 @@
   "baselines": {},
   "aggregate": {
     "star_graph": {
-      "content_recall@3": 0.967,
-      "content_recall@5": 0.967,
+      "content_recall@3": 0.833,
+      "content_recall@5": 0.833,
       "interference_score": 0.667,
       "tokens": 3982
     },

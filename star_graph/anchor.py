@@ -416,6 +416,10 @@ class Anchor:
         # Apply natural decay
         score *= self.decay_factor
 
+        # Importance bonus: richer memories (novel, task-relevant, reusable) get up to +30%
+        importance_bonus = 1.0 + self.importance_score * 0.3
+        score *= importance_bonus
+
         # Confidence penalty: each contradiction reduces confidence
         confidence_penalty = max(0.1, 1.0 - getattr(self, '_contradiction_count', 0) * 0.15)
         score *= confidence_penalty

@@ -35,6 +35,7 @@ from typing import Optional
 from .anchor import Anchor, MemoryState
 from .graph import StarGraph, Constellation, Edge, RichEdge
 from .config import Config
+from .working_memory import WorkingMemory, WorkingMemoryEntry
 
 
 # ── Memory types ───────────────────────────────────────
@@ -80,6 +81,7 @@ class MemoryContext:
     active_patterns: list[str] = field(default_factory=list)  # detected behavioral patterns
     relevant_facts: list[str] = field(default_factory=list)   # key facts
     reasoning_traces: list[str] = field(default_factory=list) # how memories were connected
+    reflections: list[dict] = field(default_factory=list)     # meta-cognitive insights
     total_tokens: int = 0
     retrieval_latency_ms: float = 0.0
 
@@ -96,9 +98,11 @@ class CognitiveMemoryScheduler:
         print(memory.memory_summary)
     """
 
-    def __init__(self, graph: StarGraph, config: Config | None = None):
+    def __init__(self, graph: StarGraph, config: Config | None = None,
+                 working_memory: WorkingMemory | None = None):
         self.graph = graph
         self.cfg = config or Config.get()
+        self.working_memory = working_memory
         self._embedder = None
 
     def _get_embedder(self):
@@ -123,6 +127,12 @@ class CognitiveMemoryScheduler:
         embedder = self._get_embedder()
         query_embedding = embedder.encode(query) if query else None
 
+        # Step 0: Check working memory first — immediate, high-priority
+        wm_items: list[MemoryItem] = []
+        if self.working_memory:
+            wm_items = self._retrieve_from_working_memory(
+                context, query, query_embedding)
+
         # Step 1: Select memory types
         memory_types = self._select_memory_types(context)
 
@@ -139,9 +149,58 @@ class CognitiveMemoryScheduler:
         # Step 5: Adaptive compression
         compressed = self._adaptive_compress(ranked[:max_items], context)
 
+        # Prepend working memory items (they take priority as immediate context)
+        remaining = max_items - len(wm_items)
+        if remaining > 0:
+            compressed = wm_items + compressed[:remaining]
+        else:
+            compressed = wm_items[:max_items]
+
         # Step 6: Build context
         latency = (time.perf_counter() - t0) * 1000
         return self._build_context(compressed, context, latency)
+
+    # ── Step 0: Working memory retrieval ────────────────
+
+    def _retrieve_from_working_memory(self, context: AgentContext, query: str,
+                                       query_embedding: list[float] | None
+                                       ) -> list[MemoryItem]:
+        """Check working memory for directly relevant items.
+
+        Working memory is the fastest, most plastic buffer — checked first
+        before any long-term retrieval. Items here represent what the agent
+        is actively thinking about.
+        """
+        if self.working_memory is None:
+            return []
+
+        wm_results = self.working_memory.get_relevant(
+            query_embedding=query_embedding,
+            query_text=query,
+            max_items=3,
+        )
+
+        items: list[MemoryItem] = []
+        for entry, score in wm_results:
+            # Create a synthetic anchor for the working memory entry
+            anchor = Anchor.create(
+                text=entry.text,
+                source_session=entry.source_session,
+                embedding=entry.embedding,
+                emotional_valence=entry.emotional_valence,
+                importance=entry.importance,
+                tags=entry.tags,
+            )
+            items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=score + 0.15,  # small boost for being in WM
+                confidence=0.7,
+                memory_type=MemoryType.WORKING,
+                compression_level=0,
+                compressed_text=entry.text,
+            ))
+
+        return items
 
     # ── Step 1: Memory type selection ───────────────────
 
@@ -444,12 +503,22 @@ class CognitiveMemoryScheduler:
             summary_parts.append(f"Reasoning chains: {len(traces)}")
         summary = " | ".join(summary_parts) if summary_parts else "No relevant memories"
 
+        # Find meta-cognitive reflections connected to retrieved anchors
+        retrieved_aids = [item.anchor.id for item in items]
+        reflection_nodes = self.graph.find_reflections(retrieved_aids)
+        reflections = [
+            {"id": r.id, "text": r.text, "type": r.reflection_type,
+             "confidence": r.confidence, "strength": r.strength}
+            for r in reflection_nodes[:5]
+        ]
+
         return MemoryContext(
             items=items,
             memory_summary=summary,
             active_patterns=patterns[:3],
             relevant_facts=facts[:5],
             reasoning_traces=traces[:5],
+            reflections=reflections,
             total_tokens=total_tokens,
             retrieval_latency_ms=latency_ms,
         )

@@ -35,6 +35,7 @@ from .anchor import Anchor, MemoryState
 from .graph import StarGraph, Edge
 from .config import Config
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryContext
+from .working_memory import WorkingMemory, WorkingMemoryEntry
 from .evolution import MemoryEvolutionEngine
 from .ghost import GhostSubsystem
 from .abstraction import AbstractionEngine
@@ -49,6 +50,7 @@ class ManagerStats:
     ghosts: int = 0
     schemas: int = 0
     abstracts: int = 0
+    working_memory: int = 0
     sleep_cycles: int = 0
     total_evolutions: int = 0
     uptime_seconds: float = 0.0
@@ -69,6 +71,15 @@ class MemoryManager:
         self.storage_path = storage_path
         self._started_at = time.time()
 
+        # Working memory — short-term buffer (not persisted)
+        wm_cfg = getattr(self.cfg, 'working_memory', None)
+        wm_capacity = getattr(wm_cfg, 'max_capacity', 9) if wm_cfg else 9
+        wm_ttl = getattr(wm_cfg, 'ttl_seconds', 1800.0) if wm_cfg else 1800.0
+        self.working_memory = WorkingMemory(
+            max_capacity=wm_capacity,
+            ttl_seconds=wm_ttl,
+        )
+
         # Subsystems — lazily initialized
         self._embedder = None
         self._scheduler: CognitiveMemoryScheduler | None = None
@@ -87,7 +98,8 @@ class MemoryManager:
     @property
     def scheduler(self) -> CognitiveMemoryScheduler:
         if self._scheduler is None:
-            self._scheduler = CognitiveMemoryScheduler(self.graph, self.cfg)
+            self._scheduler = CognitiveMemoryScheduler(
+                self.graph, self.cfg, working_memory=self.working_memory)
         return self._scheduler
 
     @property
@@ -212,6 +224,49 @@ class MemoryManager:
         self.graph.remove_anchor(anchor_id)
         return anchor
 
+    # ── Working Memory (short-term buffer) ───────────────────
+
+    def remember_working(self, text: str, *,
+                         importance: float = 0.5,
+                         tags: list[str] | None = None,
+                         source_session: str = "",
+                         emotional_valence: float = 0.0) -> WorkingMemoryEntry:
+        """Add an item to working memory — fast, ephemeral, high-priority.
+
+        Working memory is checked BEFORE long-term memory during recall.
+        Items auto-expire after the TTL (default 30 min).
+        """
+        embedder = self._get_embedder()
+        embedding = embedder.encode(text)
+        return self.working_memory.add(
+            text=text,
+            embedding=embedding,
+            importance=importance,
+            tags=tags,
+            source_session=source_session,
+            emotional_valence=emotional_valence,
+        )
+
+    def get_working(self) -> list[WorkingMemoryEntry]:
+        """Get all active working memory items."""
+        return self.working_memory.get_all()
+
+    def promote_working(self, entry: WorkingMemoryEntry) -> str | None:
+        """Promote a working memory item to long-term storage.
+
+        Returns the new anchor ID, or None if the entry is no longer valid.
+        """
+        if entry not in self.working_memory._entries:
+            return None
+        return self.working_memory.promote(entry, self)
+
+    def clear_working_memory(self, session_id: str = ""):
+        """Clear working memory. If session_id given, only clears that session."""
+        if session_id:
+            self.working_memory.clear_session(session_id)
+        else:
+            self.working_memory.clear()
+
     def update(self, anchor_id: str, text: str | None = None,
                tags: list[str] | None = None,
                importance: float | None = None) -> Anchor | None:
@@ -235,12 +290,27 @@ class MemoryManager:
     # ── Cognitive maintenance ─────────────────────────────────
 
     def micro_consolidate(self) -> dict:
-        """Lightweight online consolidation — call after every few interactions."""
+        """Lightweight online consolidation — call after every few interactions.
+
+        Includes working memory maintenance:
+        - Items accessed 3+ times get auto-promoted to long-term memory
+        - Stale items are cleared
+        """
         if self._online_consolidator is None:
             from .online import OnlineConsolidator
             self._online_consolidator = OnlineConsolidator(self.graph)
         self._online_consolidator.record_interaction()
-        return self._online_consolidator._micro_sleep()
+
+        # Auto-promote well-rehearsed working memory items
+        promoted = 0
+        for entry in list(self.working_memory._entries):
+            if entry.access_count >= 3:
+                self.working_memory.promote(entry, self)
+                promoted += 1
+
+        result = self._online_consolidator._micro_sleep()
+        result["working_memory_promoted"] = promoted
+        return result
 
     def sleep(self, current_time: float | None = None) -> dict:
         """Run a full 5-phase sleep cycle.
@@ -357,6 +427,61 @@ class MemoryManager:
         self._metrics = None
         return self.graph
 
+    # ── Reflection (meta-cognitive insights) ───────────────
+
+    def reflect(self, text: str, source_anchor_ids: list[str],
+                reflection_type: str = "lesson_learned",
+                confidence: float = 0.6) -> str:
+        """Create a meta-cognitive reflection on past memories.
+
+        Args:
+            text: The insight or lesson text.
+            source_anchor_ids: Which anchor IDs this insight is based on.
+            reflection_type: One of "failure_analysis", "success_pattern",
+                            "root_cause", "lesson_learned".
+            confidence: How confident we are in this insight (0..1).
+        Returns:
+            The reflection node ID.
+        """
+        from .graph import ReflectionNode
+        if reflection_type == "failure_analysis":
+            r = ReflectionNode.from_failure(text, source_anchor_ids, confidence)
+        elif reflection_type == "success_pattern":
+            r = ReflectionNode.from_success(text, source_anchor_ids, confidence)
+        elif reflection_type == "root_cause":
+            import hashlib
+            rid = hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+            r = ReflectionNode(id=rid, text=text, reflection_type="root_cause",
+                              source_anchor_ids=source_anchor_ids,
+                              confidence=confidence, strength=0.5)
+        else:
+            r = ReflectionNode.from_lesson(text, source_anchor_ids, confidence)
+        return self.graph.add_reflection(r)
+
+    def get_reflections(self, anchor_ids: list[str],
+                        types: list[str] | None = None) -> list[dict]:
+        """Get reflection nodes connected to given anchors."""
+        nodes = self.graph.find_reflections(anchor_ids, types)
+        return [
+            {"id": r.id, "text": r.text, "type": r.reflection_type,
+             "confidence": r.confidence, "strength": r.strength}
+            for r in nodes
+        ]
+
+    def strengthen_reflection(self, reflection_id: str) -> bool:
+        """Reinforce a reflection when confirmed by new evidence."""
+        if reflection_id in self.graph.reflections:
+            self.graph.reflections[reflection_id].reinforce()
+            return True
+        return False
+
+    def weaken_reflection(self, reflection_id: str) -> bool:
+        """Weaken a reflection when contradicted."""
+        if reflection_id in self.graph.reflections:
+            self.graph.reflections[reflection_id].weaken()
+            return True
+        return False
+
     # ── Health & reporting ────────────────────────────────────
 
     @property
@@ -369,6 +494,7 @@ class MemoryManager:
             ghosts=ghost_count,
             schemas=len(self.graph.schemas),
             abstracts=abstract_count,
+            working_memory=self.working_memory.size,
             sleep_cycles=self.sleep_cycles,
             total_evolutions=self.total_evolutions,
             uptime_seconds=time.time() - self._started_at,
@@ -387,7 +513,7 @@ class MemoryManager:
             "  Star Graph Memory — Cognitive Health Report",
             "=" * 55,
             f"  Anchors: {s.anchors}    Edges: {s.edges}    Ghosts: {s.ghosts}",
-            f"  Schemas: {s.schemas}    Abstracts: {s.abstracts}",
+            f"  Schemas: {s.schemas}    Abstracts: {s.abstracts}    Working: {s.working_memory}",
             f"  Sleep cycles: {s.sleep_cycles}    Evolutions: {s.total_evolutions}",
             f"  Uptime: {s.uptime_seconds:.0f}s",
             f"",

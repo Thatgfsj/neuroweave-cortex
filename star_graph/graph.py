@@ -27,6 +27,9 @@ class Edge:
 
     Simple edge — kept for backward compatibility. For rich temporal edges
     with versioning, confidence, and lifecycle, use RichEdge.
+
+    Edge types: topical, semantic, causal, temporal, contradiction,
+    superseded_by, invalidated_by, caused_by, derived_from.
     """
 
     source: str
@@ -50,6 +53,19 @@ class Edge:
         return self.weight > 0.1
 
 
+# Valid temporal ordering values
+TEMPORAL_ORDER_BEFORE = "before"
+TEMPORAL_ORDER_AFTER = "after"
+TEMPORAL_ORDER_SIMULTANEOUS = "simultaneous"
+
+# State-transition edge types — track knowledge evolution, not just association
+EDGE_SUPERSEDED_BY = "superseded_by"    # new info replaces old (A is obsolete, B is current)
+EDGE_INVALIDATED_BY = "invalidated_by"  # evidence contradicts this (A is disproven by B)
+EDGE_CONTRADICTS = "contradicts"        # mutual contradiction (A and B cannot both be true)
+EDGE_CAUSED_BY = "caused_by"            # reverse causal (A was caused by B)
+EDGE_DERIVED_FROM = "derived_from"      # inference chain (A was deduced from B)
+
+
 @dataclass
 class RichEdge:
     """A temporal, versioned edge with confidence and lifecycle management.
@@ -61,9 +77,24 @@ class RichEdge:
     - When it decays and at what rate
     - Version history for contradiction resolution
     - Whether it's been superseded by a newer belief
+    - Temporal ordering (which happened first)
+    - Causal strength (how strongly A implies/causes B)
+    - State-transition types for knowledge evolution
+
+    Edge types:
+      topical — shared subject matter (default)
+      semantic — embedding similarity
+      causal — A causes B
+      temporal — A happened before/after B
+      contradiction — A and B conflict
+      superseded_by — A is replaced by newer B
+      invalidated_by — A is disproven by B
+      caused_by — A was caused by B (reverse causal)
+      derived_from — A was inferred from B
 
     Retrieval scoring:
-      score = graph_proximity + confidence + recency_bonus + reinforcement_bonus
+      score = weight + 0.2*confidence + 0.1*recency_bonus + 0.15*reinforcement_bonus
+              + 0.1*causal_strength (if causal/temporal)
 
     This is the foundation for temporal memory, contradiction resolution,
     and memory lifecycle management — what separates a graph DB from a
@@ -88,6 +119,12 @@ class RichEdge:
     replaced_by: str = ""         # edge_key that supersedes this one
     version_history: list[dict] = field(default_factory=list)  # [{old_w, new_w, ts, reason}]
     source_session: str = ""      # which session created this edge
+    # v0.5: temporal and causal fields
+    temporal_order: str = ""      # "before" | "after" | "simultaneous" | ""
+    causal_strength: float = 0.0  # 0..1: how strongly A implies/causes B
+    stability: float = 0.0        # 0..1: resistance to change (grows with reinforcement)
+    valid_until: float = 0.0      # optional expiration timestamp (0 = never)
+    used_at: float = 0.0          # last time this edge contributed to a retrieval
 
     def strengthen(self, delta: float = 0.05) -> None:
         old_w = self.weight
@@ -110,6 +147,8 @@ class RichEdge:
         boost = 0.1 * (1.0 - self.confidence)
         old_c = self.confidence
         self.confidence = min(1.0, self.confidence + boost)
+        # Stability grows with each reinforcement
+        self.stability = min(1.0, self.stability + 0.05)
         self._log_version(old_c, self.confidence, f"reinforced (session={source_session})")
 
     def mark_stale(self, replaced_by_edge_key: str = "") -> None:
@@ -120,13 +159,17 @@ class RichEdge:
         self._log_version(self.weight, self.weight * 0.3, "stale")
 
     def apply_decay(self, elapsed_hours: float) -> None:
-        """Apply temporal decay: w_t = w_0 * e^(-λt)."""
+        """Apply temporal decay: w_t = w_0 * e^(-λt * (1 - stability*0.7)).
+
+        Stability slows decay — well-reinforced edges resist forgetting.
+        Stale edges decay 2x faster.
+        """
+        stability_damping = 1.0 - self.stability * 0.7  # 1.0 → 0.3 as stability grows
+        effective_rate = self.decay_rate * stability_damping
         if self.is_stale:
-            old_w = self.weight
-            self.weight *= math.exp(-self.decay_rate * 2 * elapsed_hours)
-        else:
-            old_w = self.weight
-            self.weight *= math.exp(-self.decay_rate * elapsed_hours)
+            effective_rate *= 2.0
+        old_w = self.weight
+        self.weight *= math.exp(-effective_rate * elapsed_hours)
         self.weight = max(0.0, self.weight)
         if abs(old_w - self.weight) > 0.001:
             self._log_version(old_w, self.weight, f"decay ({elapsed_hours:.1f}h)")
@@ -146,23 +189,53 @@ class RichEdge:
     def is_active(self) -> bool:
         return self.weight > 0.1 and not self.is_stale
 
+    def mark_used(self) -> None:
+        """Record that this edge contributed to a retrieval."""
+        self.used_at = time.time()
+        self.last_activated_at = time.time()
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if this temporal edge has passed its validity window."""
+        return self.valid_until > 0 and time.time() > self.valid_until
+
     @property
     def retrieval_score(self) -> float:
         """Composite retrieval score for ranking during graph traversal.
 
         score = weight + 0.2*confidence + 0.1*recency_bonus + 0.15*reinforcement_bonus
+                + 0.1*causal_strength
+
+        State-transition edges (superseded_by, invalidated_by) get a penalty
+        since they represent outdated knowledge paths.
         """
+        if self.is_expired:
+            return 0.0
+
         hours_since = (time.time() - self.last_activated_at) / 3600
         recency_bonus = math.exp(-hours_since / 168)  # decays over 1 week
         reinforcement_bonus = min(1.0, self.reinforcement_count * 0.2)
         staleness_penalty = 0.3 if self.is_stale else 1.0
 
-        return staleness_penalty * (
+        # State-transition edges: useful for tracing evolution, but not for traversal
+        state_transition_types = {EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS}
+        state_penalty = 0.4 if self.edge_type in state_transition_types else 1.0
+
+        # Causal/temporal edges get a bonus from causal_strength
+        causal_bonus = 0.1 * self.causal_strength if self.causal_strength > 0 else 0.0
+
+        # Temporal ordering bonus: ordered edges are more informative
+        temporal_bonus = 0.05 if self.temporal_order else 0.0
+
+        score = staleness_penalty * state_penalty * (
             self.weight
             + 0.2 * self.confidence
             + 0.1 * recency_bonus
             + 0.15 * reinforcement_bonus
+            + causal_bonus
+            + temporal_bonus
         )
+        return min(1.5, max(0.0, score))
 
     @classmethod
     def explicit(cls, source: str, target: str, relation: str = "",
@@ -172,6 +245,16 @@ class RichEdge:
             source=source, target=target, weight=weight,
             relation=relation, confidence=0.95, source_type="explicit",
             source_session=session, edge_type="topical",
+        )
+
+    @classmethod
+    def implicit(cls, source: str, target: str, relation: str = "",
+                 weight: float = 0.4) -> "RichEdge":
+        """Create an edge from co-occurrence — basic implicit association."""
+        return cls(
+            source=source, target=target, weight=weight,
+            relation=relation, confidence=0.42, source_type="implicit",
+            edge_type="topical",
         )
 
     @classmethod
@@ -185,6 +268,71 @@ class RichEdge:
         )
 
     @classmethod
+    def temporal(cls, source: str, target: str, order: str,
+                 weight: float = 0.6, valid_days: float = 0.0,
+                 causal_strength: float = 0.0, session: str = "") -> "RichEdge":
+        """Create a temporal edge — A happened `order` B.
+
+        Args:
+            order: "before" | "after" | "simultaneous"
+            valid_days: how many days until this temporal link expires (0 = never)
+        """
+        valid_until = time.time() + valid_days * 86400 if valid_days > 0 else 0.0
+        return cls(
+            source=source, target=target, weight=weight,
+            edge_type="temporal", relation=order,
+            confidence=0.85, source_type="explicit",
+            temporal_order=order, causal_strength=causal_strength,
+            valid_until=valid_until,
+            source_session=session,
+        )
+
+    @classmethod
+    def causal(cls, source: str, target: str, strength: float = 0.7,
+               session: str = "") -> "RichEdge":
+        """Create a causal edge — A causes/implies B."""
+        return cls(
+            source=source, target=target, weight=strength,
+            edge_type="causal", relation="causes",
+            confidence=0.8, source_type="inferred",
+            causal_strength=strength,
+            source_session=session,
+        )
+
+    @classmethod
+    def supersedes(cls, old_edge_key: str, new_source: str, new_target: str,
+                   session: str = "") -> "RichEdge":
+        """Create an edge showing new knowledge replaces old."""
+        return cls(
+            source=new_source, target=new_target, weight=0.6,
+            edge_type=EDGE_SUPERSEDED_BY, relation="supersedes",
+            confidence=0.7, source_type="explicit",
+            source_session=session,
+        )
+
+    @classmethod
+    def contradicts(cls, source: str, target: str, confidence: float = 0.6,
+                    session: str = "") -> "RichEdge":
+        """Create a contradiction edge — A and B cannot both be true."""
+        return cls(
+            source=source, target=target, weight=0.5,
+            edge_type=EDGE_CONTRADICTS, relation="contradicts",
+            confidence=confidence, source_type="inferred",
+            source_session=session,
+        )
+
+    @classmethod
+    def derived_from(cls, source: str, target: str, weight: float = 0.4,
+                     session: str = "") -> "RichEdge":
+        """Create a derivation edge — A was inferred/deduced from B."""
+        return cls(
+            source=source, target=target, weight=weight,
+            edge_type=EDGE_DERIVED_FROM, relation="derived_from",
+            confidence=0.6, source_type="inferred",
+            source_session=session,
+        )
+
+    @classmethod
     def from_edge(cls, edge: Edge) -> "RichEdge":
         """Upgrade a simple Edge to RichEdge."""
         return cls(
@@ -194,6 +342,76 @@ class RichEdge:
             created_at=edge.created_at,
             last_activated_at=edge.last_activated_at,
         )
+
+
+@dataclass
+class ReflectionNode:
+    """Meta-cognitive insight about past memories — "what did I learn?"
+
+    Reflection nodes sit above the memory graph, connecting to source anchors
+    via state-transition edges (caused_by, derived_from, invalidated_by).
+
+    Types:
+      - failure_analysis: why something failed, what to avoid
+      - success_pattern: what worked well, what to repeat
+      - root_cause: underlying reason for an outcome
+      - lesson_learned: actionable takeaway for future decisions
+
+    During retrieval, reflection nodes connected to highly-scored anchors
+    surface as context-enriching insights.
+    """
+
+    id: str
+    text: str                            # the insight / lesson
+    reflection_type: str = "lesson_learned"  # failure_analysis | success_pattern | root_cause | lesson_learned
+    source_anchor_ids: list[str] = field(default_factory=list)  # anchors this insight is based on
+    confidence: float = 0.5              # how confident we are in this insight
+    created_at: float = field(default_factory=time.time)
+    last_accessed_at: float = field(default_factory=time.time)
+    tags: list[str] = field(default_factory=list)
+    strength: float = 0.5                # grows with confirmatory evidence, decays with neglect
+
+    @classmethod
+    def from_failure(cls, text: str, source_anchor_ids: list[str],
+                     confidence: float = 0.7) -> "ReflectionNode":
+        import hashlib
+        rid = hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+        return cls(id=rid, text=text, reflection_type="failure_analysis",
+                   source_anchor_ids=source_anchor_ids, confidence=confidence,
+                   strength=0.6)
+
+    @classmethod
+    def from_success(cls, text: str, source_anchor_ids: list[str],
+                     confidence: float = 0.8) -> "ReflectionNode":
+        import hashlib
+        rid = hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+        return cls(id=rid, text=text, reflection_type="success_pattern",
+                   source_anchor_ids=source_anchor_ids, confidence=confidence,
+                   strength=0.7)
+
+    @classmethod
+    def from_lesson(cls, text: str, source_anchor_ids: list[str],
+                    confidence: float = 0.6) -> "ReflectionNode":
+        import hashlib
+        rid = hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+        return cls(id=rid, text=text, reflection_type="lesson_learned",
+                   source_anchor_ids=source_anchor_ids, confidence=confidence,
+                   strength=0.5)
+
+    @property
+    def is_relevant(self) -> bool:
+        """Is this reflection still fresh enough to surface?"""
+        days_since = (time.time() - self.last_accessed_at) / 86400
+        return days_since < 30 and self.strength > 0.1
+
+    def reinforce(self) -> None:
+        """Boost strength when confirmed by new evidence."""
+        self.strength = min(1.0, self.strength + 0.1)
+        self.last_accessed_at = time.time()
+
+    def weaken(self) -> None:
+        """Reduce strength when contradicted."""
+        self.strength = max(0.0, self.strength - 0.15)
 
 
 @dataclass
@@ -276,6 +494,7 @@ class StarGraph:
         self._ann_index = None  # lazy init on first use
         self.abstracts: dict[str, any] = {}  # AbstractNode dict, lazy import
         self._ghost_subsystem = None  # GhostSubsystem, lazy init
+        self.reflections: dict[str, ReflectionNode] = {}  # v0.5: meta-cognitive insights
 
     def _key(self, a: str, b: str) -> tuple[str, str]:
         return (a, b) if a < b else (b, a)
@@ -298,17 +517,44 @@ class StarGraph:
 
     def add_edge(self, src: str, tgt: str, weight: float = 0.5,
                  edge_type: str = "topical", confidence: float | None = None,
-                 source_type: str = "implicit") -> Optional[Edge]:
+                 source_type: str = "implicit",
+                 temporal_order: str = "", causal_strength: float = 0.0,
+                 valid_until: float = 0.0, relation: str = "",
+                 session: str = "") -> Optional[Edge]:
         if src not in self.anchors or tgt not in self.anchors:
             return None
         key = self._key(src, tgt)
 
-        # Use RichEdge when confidence or explicit source_type is specified
-        if confidence is not None or source_type != "implicit":
+        # State-transition edges: mark the old edge as stale
+        if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS):
+            if key in self.edges:
+                existing = self.edges[key]
+                if isinstance(existing, RichEdge):
+                    existing.mark_stale(replaced_by_edge_key=str(key))
+
+        # Use RichEdge when confidence, explicit source_type, temporal, or causal fields are set
+        is_rich = (
+            confidence is not None
+            or source_type != "implicit"
+            or temporal_order
+            or causal_strength > 0
+            or valid_until > 0
+            or relation
+            or edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS,
+                             EDGE_CAUSED_BY, EDGE_DERIVED_FROM, "causal", "temporal")
+        )
+
+        if is_rich:
             edge = RichEdge(
                 source=key[0], target=key[1], weight=weight,
-                edge_type=edge_type, confidence=confidence or 0.5,
+                edge_type=edge_type,
+                confidence=confidence or (0.85 if source_type == "explicit" else 0.5),
                 source_type=source_type,
+                temporal_order=temporal_order,
+                causal_strength=causal_strength,
+                valid_until=valid_until,
+                relation=relation or edge_type,
+                source_session=session,
             )
         else:
             edge = Edge(source=key[0], target=key[1], weight=weight, edge_type=edge_type)
@@ -317,6 +563,32 @@ class StarGraph:
         self._adjacency[src].add(tgt)
         self._adjacency[tgt].add(src)
         return edge
+
+    def add_reflection(self, reflection: ReflectionNode) -> str:
+        """Store a meta-cognitive reflection and link it to source anchors.
+
+        Reflections are NOT graph nodes — they don't participate in traversal.
+        They are discovered via find_reflections() which checks source_anchor_ids.
+        """
+        self.reflections[reflection.id] = reflection
+        return reflection.id
+
+    def find_reflections(self, anchor_ids: list[str],
+                         types: list[str] | None = None) -> list[ReflectionNode]:
+        """Find reflection nodes connected to any of the given anchor IDs."""
+        result: list[ReflectionNode] = []
+        seen: set[str] = set()
+        for rid, r in self.reflections.items():
+            if rid in seen:
+                continue
+            if types and r.reflection_type not in types:
+                continue
+            if any(aid in r.source_anchor_ids for aid in anchor_ids):
+                if r.is_relevant:
+                    result.append(r)
+                    seen.add(rid)
+                    r.last_accessed_at = time.time()
+        return sorted(result, key=lambda r: -(r.strength * r.confidence))
 
     def remove_anchor(self, anchor_id: str) -> None:
         if anchor_id in self.anchors:

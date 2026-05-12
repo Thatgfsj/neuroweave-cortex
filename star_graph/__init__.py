@@ -52,6 +52,7 @@ from .storage_backend import StorageBackend
 from .sqlite_storage import SQLiteStorage
 from .evolution import MemoryEvolutionEngine, EvolutionEvent, BeliefTransition
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryType, MemoryItem, MemoryContext
+from .working_memory import WorkingMemory, WorkingMemoryEntry
 from .manager import MemoryManager, ManagerStats
 
 # MCP server is optional — requires `pip install mcp`
