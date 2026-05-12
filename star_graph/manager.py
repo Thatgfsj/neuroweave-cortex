@@ -36,6 +36,12 @@ from .graph import StarGraph, Edge
 from .config import Config
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryContext
 from .working_memory import WorkingMemory, WorkingMemoryEntry
+from .cortex import MemoryCortex, CortexConfig
+from .router import CortexRouter, RouteResult
+from .gate import MemoryGate
+from .timespine import TimeSpine
+from .cascade import CascadeRecall
+from .hub import HubLayer, HubNode
 from .evolution import MemoryEvolutionEngine
 from .ghost import GhostSubsystem
 from .abstraction import AbstractionEngine
@@ -51,6 +57,9 @@ class ManagerStats:
     schemas: int = 0
     abstracts: int = 0
     working_memory: int = 0
+    cortices: int = 0
+    hubs: int = 0
+    clusters: int = 0
     sleep_cycles: int = 0
     total_evolutions: int = 0
     uptime_seconds: float = 0.0
@@ -88,6 +97,11 @@ class MemoryManager:
         self._abstraction: AbstractionEngine | None = None
         self._metrics: CognitiveMetrics | None = None
         self._online_consolidator = None
+        self._router: CortexRouter | None = None
+        self._gate: MemoryGate | None = None
+        self._timespine: TimeSpine | None = None
+        self._cascade: CascadeRecall | None = None
+        self._hublayer: HubLayer | None = None
 
         # Stats
         self.sleep_cycles: int = 0
@@ -125,6 +139,38 @@ class MemoryManager:
         if self._metrics is None:
             self._metrics = CognitiveMetrics(self.graph)
         return self._metrics
+
+    @property
+    def router(self) -> CortexRouter:
+        if self._router is None:
+            self._router = CortexRouter(self.cfg)
+        return self._router
+
+    @property
+    def gate(self) -> MemoryGate:
+        if self._gate is None:
+            self._gate = MemoryGate(k=self.cfg.gate.k if hasattr(self.cfg, 'gate') else 20)
+        return self._gate
+
+    @property
+    def timespine(self) -> TimeSpine:
+        if self._timespine is None:
+            self._timespine = TimeSpine(
+                max_clusters_per_day=getattr(
+                    getattr(self.cfg, 'timespine', None), 'max_clusters_per_day', 10))
+        return self._timespine
+
+    @property
+    def cascade(self) -> CascadeRecall:
+        if self._cascade is None:
+            self._cascade = CascadeRecall(self.graph)
+        return self._cascade
+
+    @property
+    def hublayer(self) -> HubLayer:
+        if self._hublayer is None:
+            self._hublayer = HubLayer()
+        return self._hublayer
 
     def _get_embedder(self):
         if self._embedder is None:
@@ -286,6 +332,119 @@ class MemoryManager:
 
         anchor.activate()
         return anchor
+
+    # ── Cortex management ────────────────────────────────────
+
+    def add_cortex(self, name: str, domain_keywords: list[str],
+                   description: str = "", **kwargs) -> MemoryCortex:
+        """Create and register a new domain-specific memory cortex."""
+        cortex = self.router.find_or_create_cortex(
+            name=name,
+            domain_keywords=domain_keywords,
+            description=description,
+            **kwargs,
+        )
+        return cortex
+
+    def route_to_cortex(self, query: str = "",
+                        query_embedding: list[float] | None = None
+                        ) -> list[RouteResult]:
+        """Route a query to the most relevant cortices (1-3)."""
+        return self.router.route(query, query_embedding=query_embedding)
+
+    def sparse_recall(self, query: str = "",
+                      context: AgentContext | None = None,
+                      max_items: int = 20) -> dict:
+        """Full sparse-activation recall pipeline.
+
+        1. Cortex routing — activate only 1-3 cortices
+        2. Local recall within each activated cortex
+        3. Memory gating — winner-take-all selection
+        """
+        if context is None:
+            context = AgentContext(task_type="conversation")
+
+        embedder = self._get_embedder()
+        query_emb = embedder.encode(query) if query else None
+
+        # Phase 1: Cortex routing
+        routes = self.router.route(query, query_embedding=query_emb)
+        active_cortices = [r.cortex for r in routes]
+
+        # Phase 2: Local recall from activated cortices only
+        all_items: list = []
+        for cortex in active_cortices:
+            ctx = cortex.recall(query=query, context=context, max_items=max_items)
+            all_items.extend(ctx.items)
+
+        # Phase 3: Memory gating
+        gated = self.gate.gate(all_items, context, query_emb, query)
+
+        return {
+            "items": gated,
+            "active_cortices": [c.config.name for c in active_cortices],
+            "route_scores": {r.cortex.config.name: r.score for r in routes},
+            "total_candidates": len(all_items),
+            "gated_count": len(gated),
+        }
+
+    def cascade_recall(self, query: str = "",
+                       max_chains: int = 5,
+                       max_depth: int = 5) -> list:
+        """Causal chain recall — trace event chains from query-relevant seeds."""
+        embedder = self._get_embedder()
+        query_emb = embedder.encode(query)
+
+        # Find seed anchors
+        seeds = self.scheduler._discover_seeds(
+            AgentContext(task_type="reflection"), query, query_emb,
+            self.scheduler._select_memory_types(AgentContext()))
+
+        seed_ids = [a.id for a in seeds[:3]]
+        chains = self.cascade.cascade_from_seeds(seed_ids, max_depth, max_chains)
+        return [
+            {"narrative": c.narrative, "confidence": c.total_confidence,
+             "depth": c.depth, "type": c.chain_type}
+            for c in chains if c.is_valid
+        ]
+
+    # ── Time spine ────────────────────────────────────────────
+
+    def index_on_timeline(self, anchor_id: str, timestamp: float | None = None,
+                          importance: float = 0.5,
+                          embedding: list[float] | None = None,
+                          topic: str = ""):
+        """Index an anchor into the TimeSpine."""
+        self.timespine.index_anchor(anchor_id, timestamp, importance, embedding, topic)
+
+    def scan_timeline(self, max_days: int = 30,
+                      max_clusters: int = 20) -> list:
+        """'Upper-right to lower-left' priority scan of the TimeSpine."""
+        clusters = self.timespine.scan_priority(max_days, max_clusters)
+        return [
+            {"id": c.id, "topic": c.topic, "importance": c.importance,
+             "size": c.size, "summary": c.summary}
+            for c in clusters
+        ]
+
+    # ── Hub layer ─────────────────────────────────────────────
+
+    def create_topic_hub(self, text: str, source_anchor_ids: list[str],
+                         cortex_name: str) -> HubNode:
+        """Create a leaf hub from a topic cluster within a cortex."""
+        return self.hublayer.create_leaf(text, source_anchor_ids, cortex_name)
+
+    def create_domain_hub(self, text: str, child_hub_ids: list[str],
+                          cortex_name: str) -> HubNode | None:
+        """Create a domain hub aggregating leaf hubs in the same cortex."""
+        return self.hublayer.create_domain(text, child_hub_ids, cortex_name)
+
+    def bridge_cortices(self, hub_a_id: str, hub_b_id: str) -> bool:
+        """Create a cross-cortex bridge between two hubs.
+
+        This is the ONLY mechanism for cross-cortex associations.
+        """
+        return self.hublayer.bridge(hub_a_id, hub_b_id)
 
     # ── Cognitive maintenance ─────────────────────────────────
 
@@ -488,6 +647,9 @@ class MemoryManager:
     def stats(self) -> ManagerStats:
         ghost_count = len(self.ghosts.ghosts) if self._ghosts else len(self.graph.ghosts)
         abstract_count = len(self._abstraction.abstracts) if self._abstraction else len(getattr(self.graph, 'abstracts', {}))
+        cortex_count = len(self._router.cortices) if self._router else 0
+        hub_count = len(self._hublayer.hubs) if self._hublayer else 0
+        cluster_count = self._timespine.stats["total_clusters"] if self._timespine else 0
         return ManagerStats(
             anchors=len(self.graph.anchors),
             edges=len(self.graph.edges),
@@ -495,6 +657,9 @@ class MemoryManager:
             schemas=len(self.graph.schemas),
             abstracts=abstract_count,
             working_memory=self.working_memory.size,
+            cortices=cortex_count,
+            hubs=hub_count,
+            clusters=cluster_count,
             sleep_cycles=self.sleep_cycles,
             total_evolutions=self.total_evolutions,
             uptime_seconds=time.time() - self._started_at,
@@ -513,6 +678,7 @@ class MemoryManager:
             "  Star Graph Memory — Cognitive Health Report",
             "=" * 55,
             f"  Anchors: {s.anchors}    Edges: {s.edges}    Ghosts: {s.ghosts}",
+            f"  Cortices: {s.cortices}    Hubs: {s.hubs}    Clusters: {s.clusters}",
             f"  Schemas: {s.schemas}    Abstracts: {s.abstracts}    Working: {s.working_memory}",
             f"  Sleep cycles: {s.sleep_cycles}    Evolutions: {s.total_evolutions}",
             f"  Uptime: {s.uptime_seconds:.0f}s",

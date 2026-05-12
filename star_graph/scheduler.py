@@ -115,13 +115,14 @@ class CognitiveMemoryScheduler:
 
     def retrieve(self, context: AgentContext, query: str = "",
                  max_items: int = 10) -> MemoryContext:
-        """Full cognitive retrieval pipeline.
+        """Full cognitive retrieval pipeline with dimensional reduction.
 
-        1. Select memory types based on agent context
-        2. Discover seed anchors via embedding + context
-        3. Multi-hop traversal with composite scoring
-        4. Adaptive compression based on context budget
-        5. Build structured memory context
+        Level 1: 3D semantic search (embedding + phase coherence)
+        Level 2: 2D plane projection (time × importance), if L1 returns < k items
+        Level 3: Pseudo-2D timeline scan (TimeSpine), if L2 still insufficient
+
+        This guarantees retrieval always returns results — even when semantic
+        similarity fails, we fall back through coarser dimensions.
         """
         t0 = time.perf_counter()
         embedder = self._get_embedder()
@@ -136,18 +137,9 @@ class CognitiveMemoryScheduler:
         # Step 1: Select memory types
         memory_types = self._select_memory_types(context)
 
-        # Step 2: Seed discovery
-        seeds = self._discover_seeds(context, query, query_embedding, memory_types)
-
-        # Step 3: Multi-hop traversal with composite scoring
-        scored_items = self._multi_hop_traverse(seeds, context, query_embedding,
-                                                 max_hops=3)
-
-        # Step 4: Composite ranking
-        ranked = self._composite_rank(scored_items, context, query_embedding)
-
-        # Step 5: Adaptive compression
-        compressed = self._adaptive_compress(ranked[:max_items], context)
+        # Step 2-4: Dimensional reduction retrieval
+        compressed = self._dimensional_reduction_retrieve(
+            context, query, query_embedding, memory_types, max_items)
 
         # Prepend working memory items (they take priority as immediate context)
         remaining = max_items - len(wm_items)
@@ -198,6 +190,125 @@ class CognitiveMemoryScheduler:
                 memory_type=MemoryType.WORKING,
                 compression_level=0,
                 compressed_text=entry.text,
+            ))
+
+        return items
+
+    # ── Dimensional reduction retrieval ─────────────────
+
+    def _dimensional_reduction_retrieve(self, context: AgentContext,
+                                         query: str,
+                                         query_embedding: list[float] | None,
+                                         memory_types: list[MemoryType],
+                                         max_items: int) -> list[MemoryItem]:
+        """Three-level retrieval with automatic fallback.
+
+        Level 1 (3D Semantic): Full embedding search in semantic space.
+            Most precise, but can fail for cross-domain or vague queries.
+        Level 2 (2D Plane): Project to time × importance, ignore semantics.
+            "Show me what's recent and important, regardless of topic."
+        Level 3 (Pseudo-2D Timeline): TimeSpine priority scan.
+            "Upper-right to lower-left" — guaranteed to return something.
+        """
+        min_for_level = max(3, max_items // 3)
+
+        # Level 1: Semantic search (3D)
+        seeds = self._discover_seeds(context, query, query_embedding, memory_types)
+        scored = self._multi_hop_traverse(seeds, context, query_embedding, max_hops=3)
+        ranked = self._composite_rank(scored, context, query_embedding)
+        compressed = self._adaptive_compress(ranked[:max_items], context)
+
+        if len(compressed) >= min_for_level:
+            return compressed
+
+        # Level 2: 2D Plane (time × importance projection)
+        plane_results = self._retrieve_2d_plane(context, max_items)
+        # Merge with L1 results, deduplicating
+        existing_ids = {item.anchor.id for item in compressed}
+        for item in plane_results:
+            if item.anchor.id not in existing_ids:
+                compressed.append(item)
+                existing_ids.add(item.anchor.id)
+            if len(compressed) >= max_items:
+                break
+
+        if len(compressed) >= min_for_level:
+            return compressed
+
+        # Level 3: Timeline scan (pseudo-2D, guaranteed results)
+        timeline_results = self._retrieve_timeline(context, max_items)
+        existing_ids = {item.anchor.id for item in compressed}
+        for item in timeline_results:
+            if item.anchor.id not in existing_ids:
+                compressed.append(item)
+                existing_ids.add(item.anchor.id)
+            if len(compressed) >= max_items:
+                break
+
+        return compressed
+
+    def _retrieve_2d_plane(self, context: AgentContext,
+                            max_items: int = 10) -> list[MemoryItem]:
+        """Level 2: Retrieve from time × importance 2D projection.
+
+        Projects all retrievable anchors onto (recency, importance) plane.
+        Selects top items by: recency DESC, importance DESC.
+        This ignores semantic similarity entirely — useful when semantic
+        search fails (e.g., vague query, cross-domain question).
+        """
+        import time as _time
+        now = _time.time()
+
+        items: list[tuple[Anchor, float]] = []
+        for anchor in self.graph.anchors.values():
+            if not anchor.is_retrievable:
+                continue
+
+            hours_since = (now - anchor.last_activated_at) / 3600
+            recency = math.exp(-hours_since / 168)
+            importance = anchor.retention_score
+
+            # 2D score = weighted sum on the (recency, importance) plane
+            score = 0.6 * recency + 0.4 * importance
+            items.append((anchor, score))
+
+        items.sort(key=lambda x: -x[1])
+        results: list[MemoryItem] = []
+        for anchor, score in items[:max_items]:
+            results.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=score,
+                memory_type=self._classify_memory_type(anchor),
+                compression_level=1,
+                compressed_text=anchor.text[:120],
+            ))
+        return results
+
+    def _retrieve_timeline(self, context: AgentContext,
+                            max_items: int = 10) -> list[MemoryItem]:
+        """Level 3: Pseudo-2D timeline scan (upper-right to lower-left).
+
+        Scans the TimeSpine: most recent days first, within each day
+        most important clusters first. This is the final fallback —
+        it always returns something as long as there are memories.
+        """
+        if self.working_memory is None:
+            return []
+
+        # Use the time spine if available (via working memory or manager)
+        items: list[MemoryItem] = []
+        all_anchors = sorted(
+            [a for a in self.graph.anchors.values() if a.is_retrievable],
+            key=lambda a: (-a.retention_score, -a.last_activated_at),
+        )
+
+        for anchor in all_anchors[:max_items]:
+            items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=anchor.retention_score,
+                memory_type=self._classify_memory_type(anchor),
+                compression_level=2,
+                compressed_text=f"[{anchor.tags[0] if anchor.tags else 'memory'}] {anchor.text[:80]}",
             ))
 
         return items

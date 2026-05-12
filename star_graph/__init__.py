@@ -1,28 +1,19 @@
-"""Star Graph Memory System — v0.4 real mechanisms.
+"""Star Graph Memory System — v0.6 cognitive architecture.
 
-A hippocampal-inspired cognitive memory architecture for AI agents.
+A sparse-activated, cortex-partitioned cognitive memory runtime for AI agents.
 
-Three-layer architecture:
-  Layer 1 (Storage): CRUD, persistence, indexing (graph.py, index.py, storage.py)
-  Layer 2 (Cognitive): resonance, abstraction, replay, consolidation
-                       (retriever.py, sleep.py, resonance.py, abstraction.py)
-  Layer 3 (Behavior): retrieval policy, forgetting policy, adaptive replay
-                       (seed.py, embedding.py)
-
-Key v0.4 additions:
-  - MemoryState machine: ACTIVE→REHEARSING→CONSOLIDATING→DORMANT→GHOST→REACTIVATED
-  - Ghost Subsystem: latent memory traces with fuzzy recall
-  - Abstraction Engine: emergent higher-order concepts from anchor clusters
-  - Real embeddings: sentence-transformers with meaningful phase derivation
-  - ANN-indexed sub-linear retrieval
-  - Prioritized Experience Replay
-  - Deterministic mode for reproducible benchmarks
+Architecture:
+  Layer 3 (Behavior):  Cortex routing, memory gating, working memory,
+                        dimensional reduction retrieval, adaptive replay
+  Layer 2 (Cognitive): Hub abstraction, cascade recall, time spine,
+                        sleep consolidation, evolution, ghost revival
+  Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "0.4.0-dev"
+__version__ = "0.6.0-dev"
 
 from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator, MemoryState
-from .graph import StarGraph, Edge, RichEdge, Constellation, Schema
+from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
 from .sleep import SleepCycle, SleepReport, PhaseMetrics
 from .online import OnlineConsolidator
 from .retriever import (
@@ -53,6 +44,12 @@ from .sqlite_storage import SQLiteStorage
 from .evolution import MemoryEvolutionEngine, EvolutionEvent, BeliefTransition
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryType, MemoryItem, MemoryContext
 from .working_memory import WorkingMemory, WorkingMemoryEntry
+from .cortex import MemoryCortex, CortexConfig
+from .router import CortexRouter, RouteResult
+from .gate import MemoryGate, GateScore
+from .timespine import TimeSpine, TimeBucket, MemoryCluster
+from .cascade import CascadeRecall, CausalChain
+from .hub import HubLayer, HubNode
 from .manager import MemoryManager, ManagerStats
 
 # MCP server is optional — requires `pip install mcp`
