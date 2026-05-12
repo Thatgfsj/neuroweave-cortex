@@ -12,7 +12,7 @@ Architecture:
 
 __version__ = "0.6.0-dev"
 
-from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator, MemoryState
+from .anchor import Anchor, AnchorVector, GhostAnchor, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
 from .sleep import SleepCycle, SleepReport, PhaseMetrics
 from .online import OnlineConsolidator

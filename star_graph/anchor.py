@@ -47,10 +47,33 @@ class EmbedderRegistry:
             return False
 
 
+class ThermalState(enum.Enum):
+    """Four-level thermal memory lifecycle — governs storage tier and retrieval cost.
+
+    HOT  → high-frequency, full retrieval, highest priority
+    WARM → low frequency but important, compressed summary available
+    COLD → frozen, index-only, must be thawed for full retrieval
+    DEAD → metadata/hash only, not retrievable (audit trail)
+
+    Thermal state is DERIVED from retention_score and access patterns —
+    it is not stored directly. This avoids dual-state-machine sync issues.
+    """
+    HOT = "hot"
+    WARM = "warm"
+    COLD = "cold"
+    DEAD = "dead"
+
+
 class MemoryState(enum.Enum):
     """Six-state memory lifecycle — not just 'stored' or 'deleted'.
 
     Each state governs retrieval behavior, update plasticity, and decay rate.
+
+    Thermal overlay:
+      HOT  ← ACTIVE, REHEARSING
+      WARM ← CONSOLIDATING, DORMANT
+      COLD ← DORMANT (low retention), GHOST (with partial recall)
+      DEAD ← GHOST (fully decayed, metadata only)
     """
     ACTIVE = "active"              # Just created or recently retrieved — full plasticity
     REHEARSING = "rehearsing"      # Being replayed during sleep SWR — temporarily elevated
@@ -287,8 +310,15 @@ class Anchor:
 
     @property
     def is_retrievable(self) -> bool:
-        """Can this anchor be returned in retrieval results?"""
-        return self.state not in (MemoryState.GHOST,)
+        """Can this anchor be returned in retrieval results?
+
+        Ghosts are not retrievable unless revived. DEAD memories are inaccessible.
+        """
+        if self.state == MemoryState.GHOST:
+            return False
+        if self.thermal_state == ThermalState.DEAD:
+            return False
+        return True
 
     @property
     def is_plastic(self) -> bool:
@@ -452,6 +482,134 @@ class Anchor:
         """Memory that hasn't been accessed/verified recently."""
         hours_since = (time.time() - self.last_activated_at) / 3600
         return hours_since > 168  # 1 week
+
+    # ── Thermal lifecycle ───────────────────────────────
+
+    @property
+    def thermal_state(self) -> ThermalState:
+        """Derived thermal level governing storage tier and retrieval cost.
+
+        HOT  — recent access (< 24h idle) OR high retention (> 0.4) OR high frequency
+        WARM — retention > 0.15, not recently accessed but still relevant
+        COLD — retention <= 0.15, or state GHOST with some reactivation probability
+        DEAD — state GHOST with near-zero reactivation probability (metadata only)
+
+        The state is derived from retention_score + recency + frequency,
+        not stored. This avoids dual-state-machine sync issues.
+        """
+        r = self.retention_score
+        v = self.vector
+        hours_idle = (time.time() - self.last_activated_at) / 3600
+
+        if self.state == MemoryState.GHOST:
+            react_prob = getattr(self, '_ghost_reactivation_prob', 0.0)
+            if react_prob <= 0.05:
+                return ThermalState.DEAD
+            return ThermalState.COLD
+
+        # Recently active memories are HOT regardless of computed retention
+        is_recent = hours_idle < 24
+        is_high_plasticity = self.state in (MemoryState.ACTIVE, MemoryState.REHEARSING, MemoryState.REACTIVATED)
+
+        # Only treat as HOT if genuinely recent AND in a high-plasticity state
+        if is_high_plasticity and is_recent:
+            return ThermalState.HOT
+
+        # High retention or frequency → HOT
+        if r > 0.4 or v.frequency > 0.1:
+            return ThermalState.HOT
+
+        # Medium retention → WARM
+        if r > 0.15:
+            return ThermalState.WARM
+
+        # Low retention but not quite dead → COLD
+        if r > 0.03:
+            return ThermalState.COLD
+
+        # Near-zero retention → DEAD (offload to metadata)
+        return ThermalState.DEAD
+
+    @property
+    def thermal_priority(self) -> float:
+        """Retrieval priority weight based on thermal state.
+
+        HOT:  1.0 (full priority)
+        WARM: 0.6 (medium priority)
+        COLD: 0.2 (low priority, must be explicitly sought)
+        DEAD: 0.0 (not retrievable)
+        """
+        return {
+            ThermalState.HOT: 1.0,
+            ThermalState.WARM: 0.6,
+            ThermalState.COLD: 0.2,
+            ThermalState.DEAD: 0.0,
+        }[self.thermal_state]
+
+    @property
+    def retrieval_cost(self) -> float:
+        """Relative cost to retrieve this memory (0=free, 1=expensive).
+
+        HOT memories are cheap (active in working set).
+        COLD memories are expensive (must be thawed from index).
+        DEAD memories are inaccessible.
+        """
+        return {
+            ThermalState.HOT: 0.0,
+            ThermalState.WARM: 0.3,
+            ThermalState.COLD: 0.8,
+            ThermalState.DEAD: 1.0,
+        }[self.thermal_state]
+
+    @property
+    def storage_tier(self) -> str:
+        """Which storage backend tier this memory belongs in.
+
+        HOT  → in-memory graph (fast, plastic)
+        WARM → disk-backed graph (indexed, retrievable)
+        COLD → index-only (metadata + embedding, text offloaded)
+        DEAD → audit log (hash only, retention for compliance)
+        """
+        return {
+            ThermalState.HOT: "memory",
+            ThermalState.WARM: "disk",
+            ThermalState.COLD: "index",
+            ThermalState.DEAD: "audit",
+        }[self.thermal_state]
+
+    def thaw(self) -> bool:
+        """Attempt to revive from COLD → WARM/HOT.
+
+        Success depends on having enough residual information
+        (embedding or ghost trace) to reconstruct the memory.
+        """
+        if self.thermal_state == ThermalState.DEAD:
+            return False
+        if self.thermal_state == ThermalState.COLD:
+            if self.state == MemoryState.GHOST:
+                self.transition('revive')
+            else:
+                # Boost retention enough to reach WARM
+                self.vector.recency = 1.0
+                self.last_activated_at = time.time()
+                self.vector.frequency = max(self.vector.frequency, 0.05)
+            return True
+        return True  # already HOT or WARM
+
+    @property
+    def is_thermally_retrievable(self) -> bool:
+        """Can this memory be retrieved at its current thermal state?
+
+        HOT/WARM: yes
+        COLD: partial (metadata + summary only)
+        DEAD: no
+        """
+        return self.thermal_state != ThermalState.DEAD
+
+    @property
+    def thermal_summary(self) -> str:
+        """One-line thermal status for health reports."""
+        return f"{self.thermal_state.value} (ret={self.retention_score:.2f}, freq={self.vector.frequency:.2f})"
 
     def record_success(self, benefit: float = 0.1):
         """Call when this memory contributed to a successful outcome."""

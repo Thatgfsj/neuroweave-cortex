@@ -100,6 +100,9 @@ class MemoryEvolutionEngine:
         # 5. Evolve anchors (merge highly similar, long-stable anchors)
         evolution_stats = self._evolve_anchors()
 
+        # 6. Thermal degradation (HOT→WARM→COLD→DEAD)
+        thermal_stats = self._apply_thermal_degradation()
+
         return {
             "cycle": self._cycle_count,
             "elapsed_hours": elapsed / 3600,
@@ -108,6 +111,7 @@ class MemoryEvolutionEngine:
             "conflicts": conflict_stats,
             "interference": interference_stats,
             "evolution": evolution_stats,
+            "thermal": thermal_stats,
             "total_events": len(self.events),
         }
 
@@ -472,6 +476,57 @@ class MemoryEvolutionEngine:
                 print(f"      ← {bt['old']}")
                 print(f"      → {bt['new']}")
 
+
+    # ── 6. Thermal degradation ─────────────────────────────
+
+    def _apply_thermal_degradation(self) -> dict:
+        """Apply thermal lifecycle transitions based on retention scores.
+
+        Monitors all anchors and applies storage tiering:
+        - COLD anchors with retention < 0.05 → finalize to DEAD (hash only)
+        - Stale COLD anchors → ensure they remain in index-only mode
+        - GHOST anchors with decaying reactivation → finalize to DEAD
+
+        This is NOT deletion. It's a graduated offload:
+        HOT (memory) → WARM (disk) → COLD (index) → DEAD (audit)
+        """
+        from .anchor import ThermalState, MemoryState
+        stats = {"hot": 0, "warm": 0, "cold": 0, "dead": 0,
+                 "finalized": 0, "thawed": 0}
+
+        for anchor in self.graph.anchors.values():
+            ts = anchor.thermal_state
+            stats[ts.value] = stats.get(ts.value, 0) + 1
+
+            if ts == ThermalState.DEAD:
+                # Already dead — ensure it's marked as ghost
+                if anchor.state != MemoryState.GHOST:
+                    anchor.state = MemoryState.GHOST
+                    anchor.state_history.append((MemoryState.GHOST, time.time()))
+                continue
+
+            if ts == ThermalState.COLD:
+                r = anchor.retention_score
+                # Check if COLD → DEAD: retention has dropped below 0.05
+                if r < 0.05 and anchor.state != MemoryState.GHOST:
+                    # Offload to ghost with metadata preservation
+                    anchor.state = MemoryState.GHOST
+                    anchor.state_history.append((MemoryState.GHOST, time.time()))
+                    anchor._ghost_reactivation_prob = max(0.01, r * 0.2)
+                    stats["finalized"] += 1
+                    stats["dead"] += 1
+                    stats["cold"] -= 1
+                elif r < 0.05 and anchor.state == MemoryState.GHOST:
+                    # Ghost with near-zero retention → fully dead
+                    anchor._ghost_reactivation_prob = 0.0
+                    stats["dead"] += 1
+                    stats["cold"] -= 1
+
+            elif ts == ThermalState.WARM and anchor.state == MemoryState.GHOST:
+                # Ghost that warmed up somehow — verify revival
+                stats["thawed"] += 1
+
+        return stats
 
 # ── Helpers ─────────────────────────────────────────────
 

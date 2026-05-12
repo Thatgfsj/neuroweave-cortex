@@ -84,8 +84,8 @@
         "content_recall@5": 0.833
       },
       "hybrid_fusion": {
-        "content_recall@3": 0.833,
-        "content_recall@5": 0.833,
+        "content_recall@3": 0.667,
+        "content_recall@5": 0.667,
         "interference_score": 0.0
       }
     },
@@ -153,8 +153,8 @@
       "content_recall@5": 0.933
     },
     "hybrid_fusion": {
-      "content_recall@3": 0.933,
-      "content_recall@5": 0.933,
+      "content_recall@3": 0.9,
+      "content_recall@5": 0.9,
       "interference_score": 0.667
     },
     "raw_history": {

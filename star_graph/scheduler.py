@@ -264,12 +264,16 @@ class CognitiveMemoryScheduler:
             if not anchor.is_retrievable:
                 continue
 
+            if not anchor.is_thermally_retrievable:
+                continue
+
             hours_since = (now - anchor.last_activated_at) / 3600
             recency = math.exp(-hours_since / 168)
             importance = anchor.retention_score
 
             # 2D score = weighted sum on the (recency, importance) plane
-            score = 0.6 * recency + 0.4 * importance
+            # multiplied by thermal priority (COLD memories ranked lower)
+            score = (0.6 * recency + 0.4 * importance) * anchor.thermal_priority
             items.append((anchor, score))
 
         items.sort(key=lambda x: -x[1])
@@ -384,8 +388,10 @@ class CognitiveMemoryScheduler:
                 if goal_keywords & anchor_words:
                     context_boost += 0.3
 
-            total_score = base_score + context_boost
-            if total_score > 0.05 or anchor_type == MemoryType.WORKING:
+            # Thermal priority weighting
+            thermal_weight = anchor.thermal_priority
+            total_score = (base_score + context_boost) * thermal_weight
+            if total_score > 0.02 or anchor_type == MemoryType.WORKING:
                 candidates.append((anchor, total_score))
 
         candidates.sort(key=lambda x: -x[1])
