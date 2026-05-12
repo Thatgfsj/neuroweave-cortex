@@ -40,10 +40,21 @@ mgr.remember("User knows Python async programming with asyncio",
 mgr.remember("User prefers type hints and concise code",
              tags=["preference", "style"])
 
-# Context-aware recall — knows what you're doing and picks the right memories
+# Working memory — fast, ephemeral buffer for active context
+mgr.remember_working("Currently debugging auth middleware timeout",
+                     tags=["debug", "auth"])
+
+# Context-aware recall — working memory items get retrieval priority
 ctx = AgentContext(task_type="debugging", active_goals=["fix Redis connection"])
 memories = mgr.recall("Redis connection pool config", context=ctx)
 print(memories.memory_summary)
+
+# Working memory auto-promotes to long-term after 3+ accesses during micro_consolidate
+mgr.micro_consolidate()
+
+# Meta-cognitive reflection on past memories
+mgr.reflect("Redis timeouts always trace back to pool exhaustion",
+            source_anchor_ids=["abc123"], reflection_type="lesson_learned")
 
 # Let the system sleep — it merges, prunes, abstracts, and forms schemas
 mgr.sleep()
@@ -57,17 +68,19 @@ mgr.save("agent_memory.json")
 Three-layer design. Each layer depends only on the one below.
 
 ```
-Layer 3: Behavior    │  Retrieval policy, forgetting policy, adaptive replay
-    (scheduler.py,   │  "What should I recall right now, at what detail level?"
-     embedding.py)   │
+Layer 3: Behavior    │  Retrieval policy, forgetting policy, adaptive replay,
+    (scheduler.py,   │  working memory, context-aware memory type selection
+     embedding.py,   │  "What should I recall right now, at what detail level?"
+     working_memory.py) │
                      │
-Layer 2: Cognitive   │  Resonance, abstraction, sleep consolidation, evolution
-    (retriever.py,   │  "How do memories connect, strengthen, and fade?"
-     sleep.py,       │
+Layer 2: Cognitive   │  Resonance, abstraction, sleep consolidation, evolution,
+    (retriever.py,   │  reflection, ghost revival
+     sleep.py,       │  "How do memories connect, strengthen, and fade?"
      evolution.py,   │
      ghost.py,       │
      abstraction.py, │
-     competition.py) │
+     competition.py, │
+     reflection.py)  │
                      │
 Layer 1: Storage     │  CRUD, persistence, indexing, ANN lookup
     (graph.py,       │  "Where is this memory stored?"
@@ -79,14 +92,16 @@ Layer 1: Storage     │  CRUD, persistence, indexing, ANN lookup
 
 | Module | Role |
 |---|---|
-| `manager.py` | High-level facade — `remember()`, `recall()`, `sleep()`, `save()` |
-| `scheduler.py` | Context-aware retrieval with memory type selection and compression |
+| `manager.py` | High-level facade — `remember()`, `recall()`, `sleep()`, `save()`, `reflect()` |
+| `scheduler.py` | Context-aware retrieval with memory type selection, working memory priority, adaptive compression |
+| `working_memory.py` | Short-term buffer (9-item, 30min TTL) — auto-promotes rehearsed items to long-term |
 | `sleep.py` | 5-phase sleep: replay → merge → compress → emotional-decouple → prune |
 | `evolution.py` | Time decay, frequency boost, conflict resolution, interference |
 | `retriever.py` | Hybrid fusion retrieval + Personalized PageRank + explainable scores |
 | `ghost.py` | Latent memory traces with fuzzy recall ("I seem to remember...") |
 | `abstraction.py` | Emergent category discovery from anchor clusters |
-| `anchor.py` | Memory unit with 6-state lifecycle (active → rehearsing → ... → reactivated) |
+| `anchor.py` | Memory unit with 6-state lifecycle, 13-dim vector, multiplicative retention |
+| `graph.py` | Star graph with RichEdge (temporal, causal, state-transition), ReflectionNode |
 
 ## Retrieval Benchmarks
 
