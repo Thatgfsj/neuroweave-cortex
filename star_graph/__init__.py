@@ -31,7 +31,7 @@ from .retriever import (
 from .embedding import EmbeddingProvider, get_embedder
 from .index import ANNIndex
 from .seed import seed_everything, is_deterministic
-from .ghost import GhostNode, GhostSubsystem
+from .ghost import GhostNode, NegativeGhost, GhostSubsystem
 from .abstraction import AbstractNode, AbstractionEngine
 from .community import Community, CommunityHealth, CommunityDetection
 from .raw_buffer import RawBuffer, RawChunk
@@ -68,6 +68,16 @@ from .cost_estimator import SleepCostEstimator, CostEstimate
 from .snapshot import SnapshotManager, SnapshotMeta
 from .async_manager import AsyncMemoryManager, AsyncManagerStats
 from .tracing import MemoryTracer, TraceSpan, Trace, get_tracer, trace_recall
+from .survival import (
+    SurvivalFunction,
+    EbbinghausSurvival,
+    PowerLawSurvival,
+    ExponentialSurvival,
+    CustomSurvival,
+    SurvivalRegistry,
+    SurvivalState,
+    derive_strength,
+)
 from .benchmark import (
     BenchmarkSuite,
     BenchmarkScenario,

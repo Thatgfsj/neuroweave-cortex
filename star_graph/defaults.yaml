@@ -297,6 +297,26 @@ snapshot:
   compress: true                # gzip-compress snapshot files
   auto_interval_hours: 6.0      # min hours between auto-snapshots
 
+survival:
+  function: ebbinghaus          # ebbinghaus, power_law, exponential, custom
+
+  # Ebbinghaus params: S = min_hours + strength * (max_hours - min_hours)
+  ebbinghaus_min_hours: 1.0
+  ebbinghaus_max_hours: 336.0
+
+  # Power-law params: R = (1 + t/S)^(-alpha)
+  power_law_alpha: 0.5
+  power_law_scale: 50.0
+
+  # Exponential params: lambda per day
+  exponential_lambda_per_day: 0.05
+
+  # Ghost decay uses compressed S range (faster decay)
+  ghost:
+    ebbinghaus_min_factor: 0.2
+    ebbinghaus_max_factor: 0.15
+    base_strength_factor: 0.5
+
 tracing:
   enabled: true                 # enable/disable all tracing
   max_traces: 100               # max traces to keep in memory

@@ -56,6 +56,7 @@ from .exact_cache import ExactMatchCache
 from .cost_estimator import SleepCostEstimator, CostEstimate
 from .snapshot import SnapshotManager, SnapshotMeta
 from .tracing import MemoryTracer, get_tracer, trace_recall
+from .survival import SurvivalFunction, SurvivalRegistry
 
 
 @dataclass
@@ -143,6 +144,13 @@ class MemoryManager:
         # Tracer — lightweight observability spans
         self.tracer: MemoryTracer = get_tracer(enabled=True)
 
+        # Survival function — configurable memory decay curve
+        self._survival_fn: SurvivalFunction | None = None
+        # Set as class-level default for all Anchor and GhostNode instances
+        Anchor.set_survival_function(self.survival_function)
+        from .ghost import GhostNode
+        GhostNode.set_survival_function(self.survival_function)
+
         # Stats
         self.sleep_cycles: int = 0
         self.total_evolutions: int = 0
@@ -220,6 +228,13 @@ class MemoryManager:
             max_per_key = getattr(ec_cfg, 'max_entries_per_key', 5) if ec_cfg else 5
             self._exact_cache = ExactMatchCache(max_entries_per_key=max_per_key)
         return self._exact_cache
+
+    @property
+    def survival_function(self) -> SurvivalFunction:
+        """Lazy-init survival function from config."""
+        if self._survival_fn is None:
+            self._survival_fn = SurvivalRegistry.from_config(self.cfg)
+        return self._survival_fn
 
     @property
     def metrics(self) -> CognitiveMetrics:
@@ -1019,6 +1034,84 @@ class MemoryManager:
             embedding = embedder.encode(query)
         return self.ghosts.fuzzy_recall(embedding, threshold)
 
+    def ghost_intensity_recall(self, query: str = "",
+                               embedding: list[float] | None = None,
+                               top_k: int = 10) -> list[dict]:
+        """Rank ghost traces by intensity for retrieval boosting.
+
+        Returns top ghosts sorted by intensity (descending), each with
+        resonance score and semantic shadow for partial recall.
+        """
+        if embedding is None:
+            embedder = self._get_embedder()
+            embedding = embedder.encode(query)
+        ranked = self.ghosts.ranked_resonance(embedding, top_k=top_k)
+        return [
+            {
+                "ghost_id": ghost.id,
+                "intensity": round(intensity, 4),
+                "semantic_shadow": ghost.semantic_shadow,
+                "original_tags": ghost.original_tags,
+                "original_importance": ghost.original_importance,
+                "emotion_trace": ghost.emotion_trace,
+                "revival_count": ghost.revival_count,
+            }
+            for ghost, intensity in ranked
+        ]
+
+    def create_negative_ghost(self, original_text: str,
+                             contradiction_text: str,
+                             target_anchor_id: str = "",
+                             original_importance: float = 0.5,
+                             contradiction_type: str = "direct") -> str:
+        """Create a negative ghost to track a contradiction.
+
+        During future retrievals, this ghost will suppress memories similar
+        to the contradicted one. Returns the ghost ID.
+        """
+        embedder = self._get_embedder()
+        embedding = embedder.encode(original_text)
+        ghost = self.ghosts.create_negative(
+            original_text=original_text,
+            contradiction_text=contradiction_text,
+            target_anchor_id=target_anchor_id,
+            original_importance=original_importance,
+            contradiction_type=contradiction_type,
+            embedding=embedding,
+        )
+        return ghost.id
+
+    def check_ghost_suppression(self, embedding: list[float] | None = None,
+                               query: str = "") -> dict:
+        """Check if a query or embedding is suppressed by negative ghosts.
+
+        Returns a dict with the overall suppression factor and details
+        about which negative ghosts are contributing.
+        """
+        if embedding is None and query:
+            embedder = self._get_embedder()
+            embedding = embedder.encode(query)
+        if embedding is None:
+            return {"suppression_factor": 1.0, "active_negatives": []}
+
+        factor = self.ghosts.check_suppression(embedding)
+        active = []
+        for ghost in self.ghosts.negative_ghosts:
+            resonance = ghost.resonance(embedding)
+            if resonance > 0.1:
+                active.append({
+                    "ghost_id": ghost.id,
+                    "resonance": round(resonance, 4),
+                    "intensity": round(ghost.intensity, 4),
+                    "contradiction_type": ghost.contradiction_type,
+                    "contradiction_text": ghost.contradiction_text[:120],
+                })
+
+        return {
+            "suppression_factor": round(factor, 4),
+            "active_negatives": active,
+        }
+
     # ── Persistence ───────────────────────────────────────────
 
     @property
@@ -1114,6 +1207,12 @@ class MemoryManager:
         self._evolution = None
         self._metrics = None
         self._community_detection = None
+
+        # Re-set survival function (class vars don't survive process restart)
+        Anchor.set_survival_function(self.survival_function)
+        from .ghost import GhostNode
+        GhostNode.set_survival_function(self.survival_function)
+
         return self.graph
 
     # ── Reflection (meta-cognitive insights) ───────────────

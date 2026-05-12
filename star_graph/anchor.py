@@ -358,18 +358,51 @@ class Anchor:
 
     # ── Dynamics ──────────────────────────────────────
 
-    def decay(self, elapsed_hours: float, half_life: float | None = None) -> None:
-        from .config import Config
-        c = Config.get().anchor.decay
-        if half_life is None:
-            half_life = c.base_half_life_hours
-        if self.state == MemoryState.GHOST:
-            half_life *= c.ghost_half_life_factor
-        elif self.state == MemoryState.DORMANT:
-            half_life *= c.dormant_half_life_factor
-        elif self.state == MemoryState.REACTIVATED:
-            half_life *= c.reactivated_half_life_factor
-        self.vector.recency *= 0.5 ** (elapsed_hours / half_life)
+    # Class-level survival function — set by MemoryManager at init
+    _survival_fn: object = None
+
+    @classmethod
+    def set_survival_function(cls, fn) -> None:
+        """Set the survival function for all anchors (called by MemoryManager)."""
+        cls._survival_fn = fn
+
+    def decay(self, elapsed_hours: float, half_life: float | None = None,
+              survival_fn=None) -> None:
+        """Apply time-based decay to recency.
+
+        If a survival function is available (class-level or passed), uses the
+        configurable curve. Otherwise falls back to simple exponential decay.
+        """
+        sf = survival_fn or Anchor._survival_fn
+        if sf is not None:
+            from .survival import derive_strength
+            strength = derive_strength(self)
+            retention = sf.survive(elapsed_hours, strength)
+
+            # State modifiers adjust retention
+            from .config import Config
+            c = Config.get().anchor.decay
+            if self.state == MemoryState.GHOST:
+                retention *= c.ghost_half_life_factor
+            elif self.state == MemoryState.DORMANT:
+                retention = retention + (1.0 - retention) * 0.3  # slower decay
+            elif self.state == MemoryState.REACTIVATED:
+                retention = retention + (1.0 - retention) * 0.15  # moderate decay
+
+            self.vector.recency *= retention
+        else:
+            from .config import Config
+            c = Config.get().anchor.decay
+            if half_life is None:
+                half_life = c.base_half_life_hours
+            if self.state == MemoryState.GHOST:
+                half_life *= c.ghost_half_life_factor
+            elif self.state == MemoryState.DORMANT:
+                half_life *= c.dormant_half_life_factor
+            elif self.state == MemoryState.REACTIVATED:
+                half_life *= c.reactivated_half_life_factor
+            self.vector.recency *= 0.5 ** (elapsed_hours / half_life)
+
         self.vector.recency = max(0.01, self.vector.recency)
 
     def activate(self) -> None:
@@ -412,15 +445,24 @@ class Anchor:
 
     @property
     def decay_factor(self) -> float:
-        """Natural decay: exponential based on age and decay_rate."""
-        from .config import Config
-        c = Config.get().anchor.retention
+        """Natural decay factor based on age and memory strength.
+
+        If a survival function is configured (class-level), uses the full
+        configurable curve. Otherwise falls back to simple exponential decay.
+        """
         hours_since = (time.time() - self.last_activated_at) / 3600
-        days_since = hours_since / 24
-        # Exponential decay with configurable half-life
-        half_life_days = c.decay_half_life_days
-        decay = math.exp(-days_since * math.log(2) / half_life_days)
-        # Stability slows decay
+
+        if Anchor._survival_fn is not None:
+            from .survival import derive_strength
+            strength = derive_strength(self)
+            decay = Anchor._survival_fn.survive(hours_since, strength)
+        else:
+            from .config import Config
+            c = Config.get().anchor.retention
+            half_life_days = c.decay_half_life_days
+            decay = math.exp(-hours_since * math.log(2) / (half_life_days * 24))
+
+        # Stability slows decay (keeps retention higher for stable memories)
         decay = decay + (1.0 - decay) * self.vector.stability * 0.5
         return max(0.01, decay)
 
