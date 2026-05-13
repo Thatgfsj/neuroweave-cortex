@@ -432,17 +432,54 @@ class RetrievalPipeline:
             return result
 
         # ── Layer 3: 2D planar (time × importance) ───────
+        # Use TimeSpine-indexed scan for O(days*buckets) instead of O(all_anchors).
+        # Falls back to time-limited cortex scan when TimeSpine is sparse/empty.
         result["layers_visited"].append("2d_plane")
         plane_items = []
         now = time.time()
-        for cortex in active_cortices:
-            for anchor in cortex.graph.anchors.values():
-                if not anchor.is_retrievable or anchor.id in existing_ids:
+
+        max_days = self._rt.cfg.get_path('timespine.max_days_scan', 30) if hasattr(self._rt.cfg, 'get_path') else 30
+        spine_clusters = self._rt.scan_timeline(max_days=max_days, max_clusters=max_items * 2)
+        spine_ids: set[str] = set()
+        if spine_clusters:
+            for sc in spine_clusters:
+                for aid in sc.get("anchor_ids", []):
+                    spine_ids.add(aid)
+
+        candidates_from_spine = 0
+        if spine_ids:
+            # Look up spine-indexed anchors from global graph + all cortices
+            for aid in spine_ids:
+                if aid in existing_ids:
                     continue
-                hours = (now - anchor.last_activated_at) / 3600
-                recency = math.exp(-hours / 168)
-                score = 0.6 * recency + 0.4 * anchor.retention_score
-                plane_items.append((anchor, score))
+                anchor = self._rt.graph.anchors.get(aid)
+                if anchor is None:
+                    for cortex in self._rt.router.cortices:
+                        anchor = cortex.graph.anchors.get(aid)
+                        if anchor:
+                            break
+                if anchor and anchor.is_retrievable:
+                    hours = (now - anchor.last_activated_at) / 3600
+                    recency = math.exp(-hours / 168)
+                    score = 0.6 * recency + 0.4 * anchor.retention_score
+                    plane_items.append((anchor, score))
+                    candidates_from_spine += 1
+
+        # Fallback: if TimeSpine is sparse, scan active cortices limited to recent window
+        if candidates_from_spine < max_items:
+            cutoff = now - max_days * 86400
+            for cortex in active_cortices:
+                for anchor in cortex.graph.anchors.values():
+                    if not anchor.is_retrievable or anchor.id in existing_ids:
+                        continue
+                    if anchor.id in spine_ids:
+                        continue  # already scored above
+                    if anchor.last_activated_at < cutoff:
+                        continue  # outside time window
+                    hours = (now - anchor.last_activated_at) / 3600
+                    recency = math.exp(-hours / 168)
+                    score = 0.6 * recency + 0.4 * anchor.retention_score
+                    plane_items.append((anchor, score))
 
         plane_items.sort(key=lambda x: -x[1])
         for anchor, score in plane_items[:max_items]:

@@ -352,6 +352,15 @@ class MemoryRuntime:
 
         self.graph.add_anchor(anchor)
 
+        # Index on the temporal spine for time-windowed retrieval (Layer 3)
+        self.timespine.index_anchor(
+            anchor.id,
+            timestamp=anchor.created_at,
+            importance=importance,
+            embedding=embedding,
+            topic=(tags[0] if tags else ""),
+        )
+
         # Dual-write: also store raw uncompressed chunk in L0 buffer
         self.raw_buffer.add(
             text=text, session_id=source_session,
@@ -398,6 +407,7 @@ class MemoryRuntime:
             self.ghosts.create(anchor, residual)
 
         self.graph.remove_anchor(anchor_id)
+        self.timespine.remove_anchor(anchor_id)
         return anchor
 
     # ── Working Memory (short-term buffer) ───────────────────

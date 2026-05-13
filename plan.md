@@ -275,6 +275,7 @@ Phase 4 (P3): 代码质量逐项修复（10-20）
 - [x] Cosine similarity dedup: math_utils.cosine_sim (runtime + retrieval_pipeline migrated)
 - [x] find_contradictions() ANN-accelerated: O(n²) → O(n*k) with near-neighbor pre-filter
 - [x] retention_score caching: 0.5s TTL cache saves recomputation in hot retrieval loops
+- [x] Layer 3 TimeSpine-indexed scan: O(days*buckets) replaces full O(n) cortex scan; remember()/forget() auto-populate spine
 
 ### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
