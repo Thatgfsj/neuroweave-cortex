@@ -917,51 +917,91 @@ class SleepCycle:
     # ── Phase 5: Merge Similar ──────────────────────────
 
     def _merge_similar(self, threshold: float) -> int:
-        """Merge near-duplicate anchors using embedding similarity."""
+        """Merge near-duplicate anchors using embedding similarity.
+
+        Uses ANN-index pre-filtering to avoid O(n²) pair enumeration.
+        Only checks anchor pairs within cosine-distance reach (top-k per anchor).
+        Falls back to O(n²) text-overlap scan for anchors without embeddings.
+        """
         merged = 0
-        ids = list(self.graph.anchors.keys())
         processed: set[str] = set()
+        ids = list(self.graph.anchors.keys())
+        n = len(ids)
+        min_tag_overlap = getattr(self.cfg.sleep.merge, 'min_tag_overlap', 1)
 
-        for i, aid_a in enumerate(ids):
-            if aid_a in processed or aid_a not in self.graph.anchors:
+        # Build candidate pairs via ANN pre-filter (O(n log n) instead of O(n²))
+        candidate_pairs: set[tuple[str, str]] = set()
+        ann = self.graph._get_ann_index()
+        ann_k = min(20, max(5, n // 4))
+
+        # Anchors with embeddings: use ANN for candidate discovery
+        embed_ids = [aid for aid in ids if aid in self.graph.anchors
+                     and self.graph.anchors[aid].embedding]
+        no_embed_ids = [aid for aid in ids if aid in self.graph.anchors
+                        and not self.graph.anchors[aid].embedding]
+
+        for aid in embed_ids:
+            anchor = self.graph.anchors.get(aid)
+            if anchor is None or aid in processed:
                 continue
-            for aid_b in ids[i + 1:]:
-                if aid_b in processed or aid_b not in self.graph.anchors:
+            neighbors = ann.query(anchor.embedding, k=ann_k)
+            for nid, sim in neighbors:
+                if nid != aid and sim > threshold * 0.8:  # pre-filter: near threshold
+                    key = (aid, nid) if aid < nid else (nid, aid)
+                    candidate_pairs.add(key)
+
+        # Anchors without embeddings: add text-overlap candidates against all others
+        for i, aid_a in enumerate(no_embed_ids):
+            if aid_a in processed:
+                continue
+            for aid_b in ids:
+                if aid_b in processed or aid_b == aid_a:
                     continue
-                a = self.graph.anchors[aid_a]
-                b = self.graph.anchors[aid_b]
+                # Only include if the other anchor has no embedding either,
+                # or skip — embedding anchors are handled above via ANN
+                b = self.graph.anchors.get(aid_b)
+                if b and b.embedding:
+                    continue  # was already covered by ANN scan
+                key = (aid_a, aid_b) if aid_a < aid_b else (aid_b, aid_a)
+                candidate_pairs.add(key)
 
-                # Prefer embedding similarity, fall back to bigrams
-                if a.embedding and b.embedding:
-                    overlap = self._embedding_similarity(a.embedding, b.embedding)
-                else:
-                    overlap = self._text_overlap(a.text, b.text)
+        # Process candidate pairs
+        for aid_a, aid_b in candidate_pairs:
+            if aid_a in processed or aid_b in processed:
+                continue
+            a = self.graph.anchors.get(aid_a)
+            b = self.graph.anchors.get(aid_b)
+            if a is None or b is None:
+                continue
 
-                # Gate: require tag overlap to prevent cross-topic cascade merging
-                tag_overlap = len(set(a.tags) & set(b.tags))
-                min_tag_overlap = getattr(self.cfg.sleep.merge, 'min_tag_overlap', 1)
+            # Prefer embedding similarity, fall back to bigrams
+            if a.embedding and b.embedding:
+                overlap = self._embedding_similarity(a.embedding, b.embedding)
+            else:
+                overlap = self._text_overlap(a.text, b.text)
 
-                if overlap > threshold and tag_overlap >= min_tag_overlap:
-                    core, variant = (a, b) if a.created_at < b.created_at else (b, a)
-                    core.vector.importance = max(core.vector.importance, variant.vector.importance)
-                    core.vector.frequency = (core.vector.frequency + variant.vector.frequency) / 2
-                    core.vector.stability = min(1.0, core.vector.stability + self.cfg.sleep.merge.stability_boost)
-                    core.tags = list(set(core.tags + variant.tags))
-                    for neighbor in list(self.graph._adjacency.get(variant.id, set())):
-                        k = self.graph._key(variant.id, neighbor)
-                        old = self.graph.edges.pop(k, None)
-                        if old:
-                            nk = self.graph._key(core.id, neighbor)
-                            if nk not in self.graph.edges:
-                                new_edge = self._transfer_edge(old, nk)
-                                self.graph.edges[nk] = new_edge
-                                self.graph._adjacency[core.id].add(neighbor)
-                                self.graph._adjacency[neighbor].add(core.id)
-                    self.graph.remove_anchor(variant.id)
-                    processed.add(variant.id)
-                    merged += 1
-                    if variant is a:
-                        break
+            # Gate: require tag overlap to prevent cross-topic cascade merging
+            tag_overlap = len(set(a.tags) & set(b.tags))
+
+            if overlap > threshold and tag_overlap >= min_tag_overlap:
+                core, variant = (a, b) if a.created_at < b.created_at else (b, a)
+                core.vector.importance = max(core.vector.importance, variant.vector.importance)
+                core.vector.frequency = (core.vector.frequency + variant.vector.frequency) / 2
+                core.vector.stability = min(1.0, core.vector.stability + self.cfg.sleep.merge.stability_boost)
+                core.tags = list(set(core.tags + variant.tags))
+                for neighbor in list(self.graph._adjacency.get(variant.id, set())):
+                    k = self.graph._key(variant.id, neighbor)
+                    old = self.graph.edges.pop(k, None)
+                    if old:
+                        nk = self.graph._key(core.id, neighbor)
+                        if nk not in self.graph.edges:
+                            new_edge = self._transfer_edge(old, nk)
+                            self.graph.edges[nk] = new_edge
+                            self.graph._adjacency[core.id].add(neighbor)
+                            self.graph._adjacency[neighbor].add(core.id)
+                self.graph.remove_anchor(variant.id)
+                processed.add(variant.id)
+                merged += 1
 
         if merged:
             self.log.append(f"Merge: fused {merged} duplicate anchor pairs")
