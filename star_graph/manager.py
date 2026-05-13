@@ -403,17 +403,51 @@ class MemoryManager:
 
         return anchor
 
+    # ── Structural intent keywords for System-2 auto-trigger ──
+    _SYSTEM2_KEYWORDS = {
+        'all', 'every', 'list', 'enumerate', 'each',
+        'which', 'select', 'what kind', 'what type',
+        'before', 'after', 'last', 'first', 'previous', 'next',
+        'earlier', 'later', 'since', 'until',
+        'how many', 'what caused', 'why did', 'steps', 'sequence',
+        'summarize', 'summary', 'overview', 'history', 'timeline', 'pattern',
+        'across sessions', 'previously', 'past conversations',
+    }
+
     def recall(self, query: str = "",
                context: AgentContext | None = None,
                max_items: int = 10) -> MemoryContext:
-        """Multi-path retrieval with tracing instrumentation.
+        """Multi-path retrieval with tracing instrumentation and auto System-2 trigger.
 
         Path 0 (Exact Cache): Deterministic O(1) entity-pair lookup.
         Path A (L0 Raw Buffer): BM25 + vector search on uncompressed chunks.
         Path B (L1-L5 Graph): Dimensional descent through structured anchors.
+
+        Auto-triggers System-2 (goal-directed traversal) when:
+        - Query contains structural intent keywords (all/which/before/last/...)
+        - System-1 confidence drops below 0.35
         """
         if context is None:
             context = AgentContext(task_type="conversation")
+
+        # Detect if System-2 is warranted before running System-1
+        # Check multi-word phrases first, then single-word with word boundaries
+        query_lower = query.lower()
+        s2_keyword = False
+        for kw in self._SYSTEM2_KEYWORDS:
+            if ' ' in kw:
+                if kw in query_lower:
+                    s2_keyword = True
+                    break
+            else:
+                import re
+                if re.search(r'\b' + re.escape(kw) + r'\b', query_lower):
+                    s2_keyword = True
+                    break
+
+        if s2_keyword:
+            return self._system2_recall(query, context, max_items,
+                                        trigger_reason="structural_keyword")
 
         embedder = self._get_embedder()
         query_emb = embedder.encode(query) if query else None
@@ -492,6 +526,12 @@ class MemoryManager:
         merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
         merged_items = merged_items[:max_items]
 
+        # Auto-trigger System-2 if System-1 confidence is low
+        s1_confidence = graph_result.get("confidence", 1.0)
+        if s1_confidence < 0.35 and len(merged_items) < max_items:
+            return self._system2_recall(query, context, max_items,
+                                        trigger_reason="low_confidence")
+
         layers_visited = (["exact_cache"] if exact_results else []) + ["raw_buffer"] + graph_result.get("layers_visited", [])
         total_ms = (time.time() - t_start) * 1000
 
@@ -504,6 +544,7 @@ class MemoryManager:
             "graph_items": len(graph_result.get("items", [])),
             "final_count": len(merged_items),
             "layers_visited": str(layers_visited)[:300],
+            "channel": "system1",
             "exact_ms": round(exact_ms, 3),
             "raw_ms": round(raw_ms, 3),
             "graph_ms": round(graph_ms, 3),
@@ -512,7 +553,7 @@ class MemoryManager:
 
         return MemoryContext(
             items=merged_items,
-            memory_summary=f"Exact+Raw+Graph merge | Layer: {graph_result.get('layer_used', 'graph')}, visited: {layers_visited}",
+            memory_summary=f"System-1 | Layer: {graph_result.get('layer_used', 'graph')}, visited: {layers_visited}",
             active_patterns=[],
             relevant_facts=[],
             reasoning_traces=[
@@ -520,6 +561,50 @@ class MemoryManager:
                 f"raw_chunks={len(raw_results)}",
                 f"graph_items={len(graph_result.get('items', []))}",
                 f"merged={len(merged_items)}",
+            ],
+        )
+
+    def _system2_recall(self, query: str, context: AgentContext,
+                        max_items: int, trigger_reason: str) -> MemoryContext:
+        """Run System-2 (goal-directed) recall via DualChannelRetriever.
+
+        Triggered automatically when structural keywords are detected
+        or System-1 confidence is below threshold.
+        """
+        t_start = time.time()
+        dc_output = self.dual_channel.retrieve(
+            query=query, context=context,
+            query_embedding=None, max_items=max_items,
+        )
+        total_ms = (time.time() - t_start) * 1000
+
+        self.tracer.record("recall", attributes={
+            "query": query[:200],
+            "max_items": max_items,
+            "final_count": len(dc_output.items),
+            "channel": dc_output.active_channel,
+            "s2_triggered": dc_output.s2_triggered,
+            "trigger_reason": trigger_reason,
+            "s1_confidence": round(dc_output.s1_confidence, 3),
+            "s2_confidence": round(dc_output.s2_confidence, 3),
+            "total_ms": round(total_ms, 3),
+        }, duration_ms=total_ms)
+
+        channel_label = dc_output.active_channel
+        if dc_output.s2_triggered:
+            channel_label += f" (S2: {trigger_reason})"
+
+        return MemoryContext(
+            items=dc_output.items[:max_items],
+            memory_summary=f"Dual-Channel [{channel_label}]",
+            active_patterns=[],
+            relevant_facts=[],
+            reasoning_traces=[
+                f"channel={dc_output.active_channel}",
+                f"s2_triggered={dc_output.s2_triggered}",
+                f"reason={trigger_reason}",
+                f"s1_confidence={dc_output.s1_confidence:.3f}",
+                f"s2_confidence={dc_output.s2_confidence:.3f}",
             ],
         )
 
