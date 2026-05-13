@@ -6,10 +6,84 @@
 
 | Priority | Count | Impact |
 |----------|-------|--------|
-| **P0** | 3 issues | Correctness, performance, data consistency |
-| **P1** | 3 issues | Architecture, maintainability, retrieval quality |
+| **P0** | 6 issues | Correctness, performance, data consistency, retrieval quality |
+| **P1** | 6 issues | Architecture, maintainability, retrieval quality |
 | **P2** | 3 issues | Cognitive fidelity, production readiness |
 | **P3** | 11 issues | Code quality, testing, developer experience |
+
+---
+
+## v1.0.8 — Retrieval Quality & Scale Hardening (NEW)
+
+> Based on external code review (2026-05-13). Addresses retrieval quality gaps,
+> O(n²) bottlenecks, singleton pollution, and storage tier mismatch.
+
+| Issue | Priority | Impact |
+|-------|----------|--------|
+| #21 Sleep merge O(n²) → ANN | **P0** | Scale blocker — sleep() freezes on 10K+ anchors |
+| #22 BM25 + embedding hybrid | **P0** | Retrieval quality — pure embedding caps at 15% has_answer |
+| #23 PPR precompute/approximate | **P0** | 805ms → <200ms latency target |
+| #24 EmbedderRegistry instance | **P1** | Multi-instance pollution |
+| #25 AnchorVector cleanup | **P1** | Remove self-cycling dimensions |
+| #26 Tiered storage (HOT→disk) | **P1** | ThermalState has no actual storage switching |
+
+### 21. Sleep merge 用 ANN 近似 (规模化 blocker)
+
+**现状**: `sleep.py` `_merge_similar()` 双重循环遍历所有 anchor 对，O(n²)。
+
+**方案**: 用 HNSW/ANN 索引预筛选候选对，只对 embedding 相似的 anchor 对计算合并分数:
+```python
+def _merge_similar(self, anchors: list[Anchor]) -> list[MergePair]:
+    candidates = self.ann.query_batch([a.embedding for a in anchors], top_k=20)
+    # Only check pairs returned by ANN, O(n * k) instead of O(n²)
+```
+
+### 22. HybridFusion 引入 BM25 关键词通道 (检索质量)
+
+**现状**: 所有检索路径最终都是 embedding cosine 变体。LoCoMo 15% has_answer 说明语义匹配不够。
+
+**方案**: HybridFusion 增加 SparseRetrieval 通道:
+```python
+class HybridFusionRetriever:
+    def retrieve(self, query, ...):
+        dense_results = self._dense_search(query, query_emb, top_k)
+        sparse_results = self._bm25_search(query, top_k)  # NEW
+        fused = self._reciprocal_rank_fusion(dense_results, sparse_results)
+```
+
+### 23. PPR 预计算或采样近似 (延迟优化)
+
+**现状**: `personalized_pagerank()` 每次查询全量矩阵迭代，HybridFusion 单次查询 805ms。
+
+**方案**:
+- 预计算：sleep 时对每个社区预计算 PPR 向量
+- 运行时：只取预计算向量中 query-relevant 的 top-k
+- 或：用 sampling-based PPR (Monte Carlo random walks) 近似
+
+### 24. EmbedderRegistry 改为 instance-level
+
+**现状**: `EmbedderRegistry` 是 class-level 单例，多 MemoryManager 实例共享 embedding provider，配置互相覆盖。
+
+**方案**: 改为 instance attribute，每个 MemoryRuntime 持有独立的 `EmbedderRegistry` 实例。
+
+### 25. AnchorVector 维度清理
+
+**现状**: 13 维中 `success_feedback`、`future_reusability` 没有外部输入机制，基本是随机初始值自循环。
+
+**方案**:
+- 移除无外部输入的维度（success_feedback, future_reusability）
+- 合并语义重复的维度
+- 保留有明确更新路径的维度
+
+### 26. 分层存储：ThermalState → 实际介质切换
+
+**现状**: HOT/WARM/COLD 只是属性标签，没有对应的存储切换。
+
+**方案**:
+- HOT: 内存 (Python dict)
+- WARM: 内存 + 定期 flush 到磁盘
+- COLD: 仅磁盘，按需加载到内存
+- 在 `_on_enter_state()` 中触发介质迁移
 
 ---
 
@@ -244,10 +318,11 @@ REM_Emotion, N4_Prune, N5_HubConnect, N6_IndexRebuild
 ## Implementation Order
 
 ```
-Phase 1 (P0): Ghost 统一 → Raw Buffer 优先级 → ANN 增量
-Phase 2 (P1): Manager 拆分 → Cortex 独立睡眠 → Dual-Channel 自动触发
-Phase 3 (P2): 自传体记忆 → 状态机统一 → Phase 来源修正
-Phase 4 (P3): 代码质量逐项修复（10-20）
+Phase 1 (P0, v1.0.7): Ghost 统一 → Raw Buffer 优先级 → ANN 增量
+Phase 2 (P1, v1.0.7): Manager 拆分 → Cortex 独立睡眠 → Dual-Channel 自动触发
+Phase 3 (P2, v1.0.7): 自传体记忆 → 状态机统一 → Phase 来源修正
+Phase 4 (P3, v1.0.7): 代码质量逐项修复（10-15）
+Phase 5 (v1.0.8):    Sleep merge ANN → BM25 hybrid → PPR approx → EmbedderRegistry → AnchorVector → Tiered storage
 ```
 
 ---
