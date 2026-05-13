@@ -273,6 +273,8 @@ Phase 4 (P3): 代码质量逐项修复（10-20）
 - [x] Config dot-path access: _DotDict.get('a.b.c', default) + Config.get_path()
 - [x] Sleep phase naming standardized (N1_Replay → N7_IndexRebuild)
 - [x] Cosine similarity dedup: math_utils.cosine_sim (runtime + retrieval_pipeline migrated)
+- [x] find_contradictions() ANN-accelerated: O(n²) → O(n*k) with near-neighbor pre-filter
+- [x] retention_score caching: 0.5s TTL cache saves recomputation in hot retrieval loops
 
 ### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)

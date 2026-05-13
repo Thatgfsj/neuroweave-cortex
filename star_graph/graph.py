@@ -769,26 +769,54 @@ class StarGraph:
 
     # ── Contradiction detection ──────────────────────────
 
-    def find_contradictions(self, threshold: float | None = None) -> list[tuple[str, str, float]]:
-        if threshold is None:
-            threshold = Config.get().graph.contradiction_threshold
+    def find_contradictions(self, threshold: float | None = None,
+                            k: int = 10) -> list[tuple[str, str, float]]:
         """Find anchor pairs that may contradict each other.
 
         Contradiction = high semantic similarity but opposite emotional valence
         or mutually exclusive tags.
+
+        Uses ANN index for O(n*k) pre-filtering when available; falls back
+        to O(n²) full scan only when ANN is not populated.
         """
+        if threshold is None:
+            threshold = Config.get().graph.contradiction_threshold
+
         contradictions = []
-        ids = list(self.anchors.keys())
-        for i, aid_a in enumerate(ids):
-            for aid_b in ids[i + 1:]:
+        seen_pairs: set[tuple[str, str]] = set()
+
+        ann = self._get_ann_index()
+        if ann.size > 0:
+            # ANN-accelerated: O(n * k) — check only near neighbors
+            for aid_a, anchor_a in self.anchors.items():
+                if not anchor_a.embedding:
+                    continue
+                neighbors = ann.query(anchor_a.embedding, k=k + 1)  # +1 for self
+                anchor_valence = anchor_a.vector.emotional_valence
+                for aid_b, sim in neighbors:
+                    if aid_b == aid_a:
+                        continue
+                    pair_key = (aid_a, aid_b) if aid_a < aid_b else (aid_b, aid_a)
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+                    if sim > threshold:
+                        anchor_b = self.anchors.get(aid_b)
+                        if anchor_b and abs(anchor_valence - anchor_b.vector.emotional_valence) > 1.0:
+                            contradictions.append((aid_a, aid_b, sim))
+        else:
+            # Fallback O(n²) for graphs without ANN index
+            from .math_utils import cosine_sim
+            ids = list(self.anchors.keys())
+            for i, aid_a in enumerate(ids):
                 a = self.anchors[aid_a]
-                b = self.anchors[aid_b]
-                # Opposite valence on similar topics
-                if a.embedding and b.embedding:
-                    dot = sum(x * y for x, y in zip(a.embedding, b.embedding))
-                    na = math.sqrt(sum(x**2 for x in a.embedding))
-                    nb = math.sqrt(sum(x**2 for x in b.embedding))
-                    sim = dot / (na * nb + 1e-8)
+                if not a.embedding:
+                    continue
+                for aid_b in ids[i + 1:]:
+                    b = self.anchors[aid_b]
+                    if not b.embedding:
+                        continue
+                    sim = cosine_sim(a.embedding, b.embedding)
                     valence_opposed = abs(a.vector.emotional_valence - b.vector.emotional_valence) > 1.0
                     if sim > threshold and valence_opposed:
                         contradictions.append((aid_a, aid_b, sim))

@@ -234,6 +234,8 @@ class Anchor:
     state: MemoryState = MemoryState.ACTIVE
     state_history: list[tuple[MemoryState, float]] = field(default_factory=list)
     _thermal_state: ThermalState | None = None  # set during transition(), avoids dual-state drift
+    _ret_cached: float = -1.0   # cached retention_score, -1 = dirty
+    _ret_ts: float = 0.0        # timestamp of last cache write
     # v0.6: cortex integration
     cortex_path: str = ""          # hierarchical path e.g. "dev.python.gui"
     segment_id: str = ""           # which Segment this node belongs to
@@ -337,8 +339,9 @@ class Anchor:
         c = Config.get().anchor.state_entry
         now = time.time()
 
-        # Synchronize thermal state from MemoryState — single source of truth
+        # Synchronize thermal state and invalidate retention cache
         self._thermal_state = _STATE_THERMAL_MAP.get(state, ThermalState.WARM)
+        self._ret_cached = -1.0
 
         if state == MemoryState.REHEARSING:
             self.replay_count += 1
@@ -429,6 +432,7 @@ class Anchor:
         self.vector.recency = 1.0
         self.vector.stability *= c.consolidation.reconsolidation_stability_factor
         self.last_activated_at = time.time()
+        self._ret_cached = -1.0  # invalidate cache
         # Retrieve from dormant → active
         if self.state == MemoryState.DORMANT:
             self.transition('retrieve')
@@ -503,10 +507,13 @@ class Anchor:
 
         retention = (relevance × recency × frequency′ × success_feedback × confidence)^(1/5)
 
-        Geometric mean preserves multiplicative interaction (a near-zero factor hurts)
-        while keeping scores in a normal range. Compared to raw product, it doesn't
-        collapse to near-zero just because one dimension is untested.
+        Cached for 0.5s to avoid recomputation in hot retrieval loops
+        where the same anchor is scored multiple times.
         """
+        # Return cached value if fresh (< 0.5s since last compute)
+        if self._ret_cached >= 0.0 and (time.time() - self._ret_ts) < 0.5:
+            return self._ret_cached
+
         from .config import Config
         c = Config.get().anchor.retention
         v = self.vector
@@ -535,15 +542,18 @@ class Anchor:
         # Apply natural decay
         score *= self.decay_factor
 
-        # Importance bonus: richer memories (novel, task-relevant, reusable) get up to +30%
+        # Importance bonus
         importance_bonus = 1.0 + self.importance_score * 0.3
         score *= importance_bonus
 
-        # Confidence penalty: each contradiction reduces confidence
+        # Confidence penalty
         confidence_penalty = max(0.1, 1.0 - getattr(self, '_contradiction_count', 0) * 0.15)
         score *= confidence_penalty
 
-        return max(0.0, min(1.0, score))
+        score = max(0.0, min(1.0, score))
+        self._ret_cached = score
+        self._ret_ts = time.time()
+        return score
 
     @property
     def confidence_score(self) -> float:
