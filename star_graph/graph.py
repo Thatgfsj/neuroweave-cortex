@@ -734,15 +734,10 @@ class StarGraph:
             return []
 
         # Use ANNIndex for sub-linear lookup
+        # add_anchor/remove_anchor maintain the index incrementally;
+        # full rebuild only happens during sleep Index Rebuild phase
         ann = self._get_ann_index()
         if ann.size > 0:
-            # Ensure index is built
-            if not self._ids_in_ann_sync():
-                ann.clear()
-                for aid, a in self.anchors.items():
-                    if a.embedding:
-                        ann.add(aid, a.embedding)
-                ann.rebuild()
             results = ann.query(embedding, k=top_k * 2)
             # Weight by retention_score and filter to existing anchors
             weighted = []

@@ -251,12 +251,6 @@ class VectorSimilarityRetriever(Retriever):
         ann = self.graph._get_ann_index() if self.graph._ann_index is not None else None
 
         if ann is not None and ann.size > 0:
-            if not self.graph._ids_in_ann_sync():
-                ann.clear()
-                for a in self.graph.anchors.values():
-                    if a.embedding:
-                        ann.add(a.id, a.embedding)
-                ann.rebuild()
             results = ann.query(embedding, k=top_k * 3)
             scored = []
             for aid, sim in results:
