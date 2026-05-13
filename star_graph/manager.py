@@ -1194,32 +1194,40 @@ class MemoryManager:
         return result
 
     def sleep(self, current_time: float | None = None) -> dict:
-        """Run a full 8-phase sleep consolidation cycle.
+        """Run a full sleep consolidation cycle.
 
-        Phases: Replay -> Conflict Detection -> Clustering -> Summary ->
-        Tier Promotion -> Hub Connection -> Forgetting -> Index Rebuild.
+        Each cortex consolidates independently (own graph + decay params).
+        Cross-cortex operations (Hub bridging, global schema extraction)
+        run afterwards as a lightweight global pass.
         """
-        from .sleep import SleepCycle
+        # 1. Per-cortex independent sleep consolidation
+        cortex_reports = {}
+        for cortex in self.router.cortices:
+            try:
+                cortex_reports[cortex.config.name] = cortex.consolidate()
+            except Exception as e:
+                cortex_reports[cortex.config.name] = {"error": str(e)}
 
-        # 1. Full sleep consolidation
+        # 2. Cross-cortex operations (Hub bridging, global schema, edge pruning)
+        from .sleep import SleepCycle
         sc = SleepCycle(self.graph)
-        cortices_list = self.router.cortices
-        sleep_report = sc.run_phased(
+        global_report = sc.run_phased(
             brain=self.brain,
             hublayer=self.hublayer,
-            cortices=cortices_list,
+            cortices=self.router.cortices,
         )
 
-        # 2. Evolve the graph
+        # 3. Evolve the graph
         evo = self.evolution.evolve(current_time)
         self.total_evolutions += 1
 
-        # 3. Decay ghosts
+        # 4. Decay ghosts
         ghost_purged = self.ghosts.decay_all()
 
         self.sleep_cycles += 1
         return {
-            "sleep_report": sleep_report,
+            "cortex_reports": cortex_reports,
+            "global_report": global_report,
             "evolution": evo,
             "ghost_stats": self.ghosts.stats,
             "ghosts_purged": ghost_purged,

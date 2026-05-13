@@ -288,9 +288,10 @@ async def call_tool(name: str, arguments: dict):
             t0 = time.perf_counter()
             result = mgr.sleep()
             elapsed = time.perf_counter() - t0
-            report = result.get("sleep_report")
+            report = result.get("global_report")
             summary = report.summary() if report else "Sleep complete"
             evo = result.get("evolution", {})
+            cortex_reports = result.get("cortex_reports", {})
             return [TextContent(
                 type="text",
                 text=json.dumps({
@@ -305,6 +306,7 @@ async def call_tool(name: str, arguments: dict):
                     "schemas_formed": report.schemas_formed if report else 0,
                     "compression_ratio": round(report.compression_ratio, 2) if report else 1.0,
                     "evolution_events": evo.get("total_events", 0),
+                    "cortex_count": len(cortex_reports),
                 }, ensure_ascii=False, indent=2),
             )]
 
