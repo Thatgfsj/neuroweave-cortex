@@ -252,8 +252,19 @@ Phase 4 (P3): 代码质量逐项修复（10-20）
 
 ---
 
-## Recently Completed (v1.0.6)
+## Recently Completed (v1.0.7-dev)
 
+### P0 (correctness & performance)
+- [x] Ghost subsystem unification (GhostAnchor removed, GhostNode/GhostSubsystem single source)
+- [x] Raw Buffer priority elevation (exact → raw → graph merge order)
+- [x] ANN index incremental maintenance (add/remove sync, no full rebuild on query)
+
+### P1 (architecture & maintainability)
+- [x] MemoryManager split (MemoryRuntime + RetrievalPipeline + MemoryManager facade)
+- [x] Cortex independent sleep (per-cortex consolidate() before global cross-cortex pass)
+- [x] Dual-Channel auto-trigger (structural keyword detection + low-confidence fallback)
+
+### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
 - [x] Ghost intensity + NegativeGhost contradiction tracking
 - [x] Multimodal memory (CLIP joint embedding text+image)

@@ -55,7 +55,9 @@ from .timespine import TimeSpine, TimeBucket, MemoryCluster
 from .cascade import CascadeRecall, CausalChain
 from .hub import HubLayer, HubNode, HubEdge, HubShard
 from .brain_sphere import BrainSphere, HubCenter
-from .manager import MemoryManager, ManagerStats
+from .manager import MemoryManager
+from .runtime import MemoryRuntime, ManagerStats
+from .retrieval_pipeline import RetrievalPipeline
 from .compression import (
     CompressionLevel,
     SummaryAnchor,

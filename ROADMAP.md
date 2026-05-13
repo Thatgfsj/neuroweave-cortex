@@ -31,16 +31,16 @@
 - [x] Dependency manifest (requirements.txt)
 - [x] Version unification (1.0.6 across all files)
 
-## v1.0.7 (next — correctness & architecture)
+## v1.0.7 (current — correctness & architecture)
 
-P0 fixes from code audit:
+P0 + P1 fixes from code audit:
 
-- [ ] Ghost subsystem unification (GhostAnchor → GhostNode, single data model)
-- [ ] Raw Buffer priority elevation in recall() merge order
-- [ ] ANN index incremental maintenance (add/remove sync, no full rebuild on query)
-- [ ] MemoryManager split (MemoryRuntime + RetrievalPipeline + MemoryManager)
-- [ ] Cortex independent sleep (per-cortex consolidation cycles)
-- [ ] Dual-Channel auto-trigger in recall() (structural query detection + low-confidence fallback)
+- [x] Ghost subsystem unification (GhostAnchor → GhostNode, single data model)
+- [x] Raw Buffer priority elevation in recall() merge order
+- [x] ANN index incremental maintenance (add/remove sync, no full rebuild on query)
+- [x] MemoryManager split (MemoryRuntime + RetrievalPipeline + MemoryManager)
+- [x] Cortex independent sleep (per-cortex consolidation cycles)
+- [x] Dual-Channel auto-trigger in recall() (structural query detection + low-confidence fallback)
 
 ## v1.0.8 (cognitive fidelity)
 
