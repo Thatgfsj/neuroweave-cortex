@@ -94,13 +94,15 @@ class DualChannelRetriever:
                  s2_max_depth: int = 4,
                  s2_max_items: int = 20,
                  merge_weight_s1: float = 0.4,
-                 merge_weight_s2: float = 0.6):
+                 merge_weight_s2: float = 0.6,
+                 bm25_index=None):
         self.graph = graph
         self.s1_threshold = s1_confidence_threshold
         self.s2_max_depth = s2_max_depth
         self.s2_max_items = s2_max_items
         self.merge_w1 = merge_weight_s1
         self.merge_w2 = merge_weight_s2
+        self._bm25 = bm25_index  # BM25Index for sparse retrieval channel
 
         # Cached structural analysis of the graph
         self._abstract_nodes: dict[str, Anchor] = {}  # summary/abstract anchors
@@ -472,55 +474,94 @@ class DualChannelRetriever:
 
     def _system1_search(self, query: str, query_embedding: list[float] | None,
                         context: AgentContext, max_items: int) -> ChannelResult:
-        """System-1 fast associative search using existing graph mechanisms.
+        """System-1 fast associative search — embedding + BM25 hybrid.
 
-        This is the default channel — embedding similarity + resonance.
+        Uses Reciprocal Rank Fusion to merge dense (embedding cosine) and
+        sparse (BM25 keyword) result lists, giving each channel equal weight.
         """
         t0 = time.perf_counter()
         results: list[MemoryItem] = []
 
-        if not query_embedding:
-            latency = (time.perf_counter() - t0) * 1000
-            return ChannelResult(items=[], channel="system1",
-                                confidence=0.0, latency_ms=latency)
+        dense_scored: list[tuple[Anchor, float]] = []
+        if query_embedding:
+            # Score all anchors by embedding similarity
+            scored = []
+            for anchor in self.graph.anchors.values():
+                if not anchor.is_retrievable or not anchor.embedding:
+                    continue
+                dot = sum(a * b for a, b in zip(query_embedding, anchor.embedding))
+                na = math.sqrt(sum(x**2 for x in query_embedding))
+                nb = math.sqrt(sum(x**2 for x in anchor.embedding))
+                sim = max(0.0, dot / (na * nb + 1e-8))
+                score = sim * anchor.retention_score
+                if score > 0.05:
+                    scored.append((anchor, score))
+            scored.sort(key=lambda x: -x[1])
+            dense_scored = scored[:max_items * 3]
 
-        # Score all anchors by embedding similarity
-        scored = []
-        for anchor in self.graph.anchors.values():
-            if not anchor.is_retrievable or not anchor.embedding:
-                continue
-            dot = sum(a * b for a, b in zip(query_embedding, anchor.embedding))
-            na = math.sqrt(sum(x**2 for x in query_embedding))
-            nb = math.sqrt(sum(x**2 for x in anchor.embedding))
-            sim = max(0.0, dot / (na * nb + 1e-8))
+        # BM25 sparse channel
+        sparse_scored: list[tuple[str, float]] = []
+        if self._bm25 is not None and self._bm25.size > 0 and query:
+            sparse_scored = self._bm25.search(query, top_k=max_items * 3)
 
-            # Apply retention weighting
-            score = sim * anchor.retention_score
-            if score > 0.05:
-                scored.append((anchor, score))
-
-        scored.sort(key=lambda x: -x[1])
-
-        for anchor, score in scored[:max_items]:
-            results.append(MemoryItem(
-                anchor=anchor,
-                relevance_score=score,
-                memory_type=MemoryType.SEMANTIC,
-                compression_level=0,
-                compressed_text=anchor.text[:120],
-            ))
+        # Fuse: Reciprocal Rank Fusion (dense + sparse)
+        if sparse_scored and dense_scored:
+            from .bm25 import reciprocal_rank_fusion
+            # Build ranked lists for RRF
+            dense_ranked = [(a.id, s) for a, s in dense_scored]
+            rrf_scores = reciprocal_rank_fusion([dense_ranked, sparse_scored])
+            # Map back to anchors (RRF returns doc_id, rrf_score)
+            seen: set[str] = set()
+            for doc_id, rrf_score in rrf_scores:
+                if doc_id in seen:
+                    continue
+                seen.add(doc_id)
+                anchor = self.graph.anchors.get(doc_id)
+                if anchor and anchor.is_retrievable:
+                    results.append(MemoryItem(
+                        anchor=anchor,
+                        relevance_score=min(1.0, rrf_score * 15),  # scale RRF to [0,1]
+                        memory_type=MemoryType.SEMANTIC,
+                        compression_level=0,
+                        compressed_text=anchor.text[:120],
+                    ))
+                if len(results) >= max_items:
+                    break
+        elif dense_scored:
+            for anchor, score in dense_scored[:max_items]:
+                results.append(MemoryItem(
+                    anchor=anchor,
+                    relevance_score=score,
+                    memory_type=MemoryType.SEMANTIC,
+                    compression_level=0,
+                    compressed_text=anchor.text[:120],
+                ))
+        elif sparse_scored:
+            for doc_id, bm25_score in sparse_scored[:max_items]:
+                anchor = self.graph.anchors.get(doc_id)
+                if anchor and anchor.is_retrievable:
+                    results.append(MemoryItem(
+                        anchor=anchor,
+                        relevance_score=min(1.0, bm25_score * 0.3),
+                        memory_type=MemoryType.SEMANTIC,
+                        compression_level=0,
+                        compressed_text=anchor.text[:120],
+                    ))
 
         latency = (time.perf_counter() - t0) * 1000
 
-        # Compute confidence: average top-3 semantic similarity
-        top_sims = [s for _, s in scored[:3]]
+        # Compute confidence: average top-3 similarity
+        top_sims = [s for _, s in dense_scored[:3]]
         avg_sim = sum(top_sims) / max(1, len(top_sims))
-        confidence = min(1.0, avg_sim * 1.5)  # scale up so 0.5 sim → 0.75 confidence
+        confidence = min(1.0, avg_sim * 1.5)
 
         return ChannelResult(
             items=results, channel="system1",
             confidence=confidence, latency_ms=latency,
-            metadata={"top_sim": top_sims[0] if top_sims else 0.0},
+            metadata={
+                "top_sim": top_sims[0] if top_sims else 0.0,
+                "bm25_hits": len(sparse_scored),
+            },
         )
 
     # ── Main Entry Point ────────────────────────────────────

@@ -60,6 +60,7 @@ from .runtime import MemoryRuntime, ManagerStats
 from .retrieval_pipeline import RetrievalPipeline
 from .autobiography import AutobiographicalMemory, SelfNarrative
 from .math_utils import cosine_sim, safe_div, clamp, sigmoid
+from .bm25 import BM25Index, reciprocal_rank_fusion
 from .compression import (
     CompressionLevel,
     SummaryAnchor,

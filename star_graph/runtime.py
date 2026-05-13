@@ -111,6 +111,7 @@ class MemoryRuntime:
         self._timespine: TimeSpine | None = None
         self._cascade: CascadeRecall | None = None
         self._hublayer: HubLayer | None = None
+        self._bm25 = None  # BM25 keyword index — lazy init
 
         # Raw chunk buffer — uncompressed short-term memory tier (L0)
         self._raw_buffer: RawBuffer | None = None
@@ -206,6 +207,7 @@ class MemoryRuntime:
             self._dual_channel = DualChannelRetriever(
                 self.graph,
                 s1_confidence_threshold=s1_threshold,
+                bm25_index=self._bm25,  # shared BM25 index for sparse+dense fusion
             )
         return self._dual_channel
 
@@ -299,6 +301,16 @@ class MemoryRuntime:
         return self._timespine
 
     @property
+    def bm25(self):
+        if self._bm25 is None:
+            from .bm25 import BM25Index
+            self._bm25 = BM25Index()
+            # Populate from existing anchors
+            for aid, a in self.graph.anchors.items():
+                self._bm25.add(aid, a.text)
+        return self._bm25
+
+    @property
     def cascade(self) -> CascadeRecall:
         if self._cascade is None:
             self._cascade = CascadeRecall(self.graph)
@@ -361,6 +373,10 @@ class MemoryRuntime:
             topic=(tags[0] if tags else ""),
         )
 
+        # Index in BM25 keyword index for sparse retrieval channel
+        if self._bm25 is not None:
+            self._bm25.add(anchor.id, text)
+
         # Dual-write: also store raw uncompressed chunk in L0 buffer
         self.raw_buffer.add(
             text=text, session_id=source_session,
@@ -408,6 +424,8 @@ class MemoryRuntime:
 
         self.graph.remove_anchor(anchor_id)
         self.timespine.remove_anchor(anchor_id)
+        if self._bm25 is not None:
+            self._bm25.remove(anchor_id)
         return anchor
 
     # ── Working Memory (short-term buffer) ───────────────────

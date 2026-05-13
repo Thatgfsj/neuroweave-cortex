@@ -676,7 +676,8 @@ class HybridFusionRetriever(Retriever):
     def __init__(self, graph: StarGraph,
                  alpha: float = 0.50, beta: float = 0.12,
                  gamma: float = 0.18, delta: float = 0.08,
-                 epsilon: float = 0.12, spread_steps: int = 2):
+                 epsilon: float = 0.12, spread_steps: int = 2,
+                 bm25_index=None):
         super().__init__(graph)
         self.alpha = alpha    # semantic weight
         self.beta = beta      # temporal weight
@@ -684,6 +685,7 @@ class HybridFusionRetriever(Retriever):
         self.delta = delta    # confidence weight
         self.epsilon = epsilon  # lexical overlap weight
         self.spread_steps = spread_steps
+        self._bm25 = bm25_index
 
     @property
     def name(self) -> str:
@@ -733,14 +735,21 @@ class HybridFusionRetriever(Retriever):
             if aid in scores:
                 scores[aid][1].reasoning_path = [seed_ids[0], aid] if seed_ids else []
 
-        # 5. Lexical overlap: distinctive query words in anchor text
-        query_words = set(query.lower().split())
-        for aid, (_, explain) in scores.items():
-            anchor = self.graph.anchors.get(aid)
-            if anchor:
-                text_words = set(anchor.text.lower().split())
-                overlap = len(query_words & text_words)
-                explain.lexical_overlap = min(1.0, overlap / max(1, len(query_words)) * 2.0)
+        # 5. Lexical / BM25: keyword relevance (upgraded from simple word overlap)
+        if self._bm25 is not None and self._bm25.size > 0 and query:
+            bm25_results = self._bm25.search(query, top_k=len(scores))
+            max_bm25 = max((s for _, s in bm25_results), default=1.0)
+            bm25_map = {doc_id: score / max(0.01, max_bm25) for doc_id, score in bm25_results}
+            for aid, (_, explain) in scores.items():
+                explain.lexical_overlap = bm25_map.get(aid, 0.0)
+        else:
+            query_words = set(query.lower().split())
+            for aid, (_, explain) in scores.items():
+                anchor = self.graph.anchors.get(aid)
+                if anchor:
+                    text_words = set(anchor.text.lower().split())
+                    overlap = len(query_words & text_words)
+                    explain.lexical_overlap = min(1.0, overlap / max(1, len(query_words)) * 2.0)
 
         # 6. Fuse all signals
         for aid, (_, explain) in scores.items():
