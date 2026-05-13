@@ -107,40 +107,31 @@ class EmbeddingProvider:
     def derive_phase(self, text: str, embedding: list[float] | None = None,
                      importance: float = 0.5, emotional_valence: float = 0.0,
                      timestamp: float | None = None) -> float:
-        """Derive theta phase from actual semantically-meaningful factors.
+        """Derive theta phase from cognitively-meaningful factors.
 
-        Phase = f(timestamp, importance, emotional_valence, semantic_direction)
+        Phase = f(timestamp, importance, emotional_valence)
 
-        This is NOT random. Phase encodes:
-        - When the memory was formed (temporal position in cycle)
-        - How important it is (important memories phase-align)
-        - Emotional charge (emotional memories are phase-shifted)
-        - Semantic direction (which part of the embedding sphere)
+        Phase encodes:
+        - When the memory was formed (temporal position in diurnal cycle)
+        - How important it is (important memories phase-align toward 0)
+        - Emotional charge (emotional memories are phase-shifted by valence)
         """
         if timestamp is None:
             timestamp = time.time()
 
-        # Temporal component: recent=small phase, old=large phase
-        # Maps seconds to a 24-hour theta cycle
+        # Temporal component: position within the 24-hour diurnal cycle
         seconds_in_day = timestamp % 86400
         temporal_phase = (seconds_in_day / 86400) * 2 * math.pi
 
         # Importance component: important memories → phase = 0 (aligned)
-        # Less important → phase spreads out
+        # Less important → phase spreads out (harder to resonate)
         importance_shift = (1.0 - importance) * math.pi * 0.5
 
-        # Emotional component: strong emotion → phase offset
-        # Positive emotions → one direction, negative → opposite
-        emotion_shift = emotional_valence * math.pi * 0.25
+        # Emotional component: emotional charge shifts phase
+        # Positive valence → forward, negative → backward
+        emotion_shift = emotional_valence * math.pi * 0.35
 
-        # Semantic direction from embedding (if available)
-        if embedding and len(embedding) >= 2:
-            angle = math.atan2(embedding[1], embedding[0])
-            semantic_shift = angle * 0.3
-        else:
-            semantic_shift = 0.0
-
-        phase = (temporal_phase + importance_shift + emotion_shift + semantic_shift) % (2 * math.pi)
+        phase = (temporal_phase + importance_shift + emotion_shift) % (2 * math.pi)
         return phase
 
     def derive_frequency(self, importance: float = 0.5, emotional_valence: float = 0.0,
@@ -160,36 +151,54 @@ class EmbeddingProvider:
 
     def derive_driving_phasor(self, query: str,
                                embedding: list[float] | None = None) -> tuple[float, float]:
-        """Derive driving frequency and phase from a query.
+        """Derive driving frequency and phase from query features.
 
-        This replaces the old hash-based approach. Now uses embedding statistics
-        to derive meaningful oscillatory parameters.
+        Uses a hybrid of cognitive and embedding signals:
+        - Phase: temporal context + query specificity + embedding direction (if available)
+        - Frequency: query complexity + embedding spectral centroid (if available)
 
-        Returns (magnitude, phase) as a complex phasor.
+        Embedding-derived signals are valid for QUERIES (not anchors) since
+        the query embedding captures semantic intent direction.
+
+        Returns (frequency, phase) as oscillatory parameters.
         """
-        if embedding and len(embedding) >= 4:
-            arr = np.array(embedding)
-            # Magnitude from embedding variance (richer query → stronger signal)
-            var = float(np.var(arr))
-            mag = 0.4 + 0.6 * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
+        now = time.time()
 
-            # Phase from principal angular components
-            # Use pairs of dimensions as (x, y) to estimate "direction" in embedding space
-            angles = np.arctan2(arr[1::2], arr[::2])
-            phase = float(np.mean(angles)) % (2 * math.pi)
+        # Phase from temporal context (diurnal cycle position)
+        seconds_in_day = now % 86400
+        temporal_phase = (seconds_in_day / 86400) * 2 * math.pi
 
-            # Frequency from spectral centroid of embedding
-            spectrum = np.abs(arr)
-            if np.sum(spectrum) > 1e-8:
-                centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
-                freq = 0.3 + 0.7 * (centroid / len(spectrum))
-            else:
-                freq = 0.5
+        # Phase shift from query specificity
+        words = query.lower().split()
+        query_words = [w for w in words if len(w) > 2]
+        specificity = min(1.0, len(query_words) / 15)
+        specificity_shift = (1.0 - specificity) * math.pi * 0.3
+
+        # Phase from embedding direction when available (captures semantic intent)
+        if embedding and len(embedding) >= 2:
+            semantic_angle = math.atan2(embedding[1], embedding[0])
+            semantic_shift = semantic_angle * 0.3
         else:
-            # Encode query, then derive
-            emb = self.encode(query)
-            return self.derive_driving_phasor(query, emb)
+            semantic_shift = 0.0
 
+        # Emotional keywords shift phase slightly
+        emotional_keywords = {
+            'urgent', 'critical', 'important', 'happy', 'sad', 'angry', 'worried',
+            'excited', 'frustrated', 'grateful', 'anxious', 'confident',
+        }
+        emo_hits = sum(1 for w in query_words if w in emotional_keywords)
+        emotion_shift = min(0.2, emo_hits * 0.08) * math.pi
+
+        phase = (temporal_phase + specificity_shift + semantic_shift + emotion_shift) % (2 * math.pi)
+
+        # Frequency from query complexity
+        base_freq = 0.35
+        complexity_boost = min(0.4, len(query_words) * 0.03)
+        question_words = {'what', 'why', 'how', 'which', 'when', 'where', 'who'}
+        question_boost = 0.15 if any(w in question_words for w in query_words) else 0.0
+        emo_freq_boost = min(0.15, emo_hits * 0.04)
+
+        freq = min(1.0, base_freq + complexity_boost + question_boost + emo_freq_boost)
         return (freq, phase)
 
 

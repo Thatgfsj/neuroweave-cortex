@@ -58,6 +58,7 @@ from .brain_sphere import BrainSphere, HubCenter
 from .manager import MemoryManager
 from .runtime import MemoryRuntime, ManagerStats
 from .retrieval_pipeline import RetrievalPipeline
+from .autobiography import AutobiographicalMemory, SelfNarrative
 from .compression import (
     CompressionLevel,
     SummaryAnchor,

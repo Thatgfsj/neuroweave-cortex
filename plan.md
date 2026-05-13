@@ -264,6 +264,11 @@ Phase 4 (P3): 代码质量逐项修复（10-20）
 - [x] Cortex independent sleep (per-cortex consolidate() before global cross-cortex pass)
 - [x] Dual-Channel auto-trigger (structural keyword detection + low-confidence fallback)
 
+### P2 (cognitive architecture fidelity)
+- [x] Autobiographical memory layer (SelfNarrative + AutobiographicalMemory)
+- [x] State/ThermalState unification (_STATE_THERMAL_MAP + synchronized transitions)
+- [x] Oscillation phase source correction (temporal/emotional context, not embedding stats)
+
 ### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
 - [x] Ghost intensity + NegativeGhost contradiction tracking

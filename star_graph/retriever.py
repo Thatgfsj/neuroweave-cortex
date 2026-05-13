@@ -357,9 +357,10 @@ class OscillationResonanceRetriever(Retriever):
         return "OscillationResonance"
 
     def _query_phase(self, embedding: list[float]) -> float:
-        arr = np.array(embedding)
-        angles = np.arctan2(arr[1::2], arr[::2])
-        return float(np.mean(angles)) % (2 * math.pi)
+        """Derive query phase from embedding direction (valid for query-side driving)."""
+        if embedding and len(embedding) >= 2:
+            return math.atan2(embedding[1], embedding[0]) % (2 * math.pi)
+        return 0.0
 
     def _phase_coherence(self, query_phase: float, anchor: Anchor) -> float:
         diff = abs(query_phase - anchor.oscillator.phase_offset)
@@ -374,23 +375,14 @@ class OscillationResonanceRetriever(Retriever):
 
     def _derive_driving_phasor(self, query: str,
                                 embedding: list[float] | None = None) -> tuple[complex, float]:
-        if embedding and len(embedding) >= 4:
-            arr = np.array(embedding)
-            var = float(np.var(arr))
-            mag = 0.4 + 0.6 * min(1.0, var / (float(np.mean(np.abs(arr))) + 1e-8))
-            angles = np.arctan2(arr[1::2], arr[::2])
-            phase = float(np.mean(angles)) % (2 * math.pi)
-            spectrum = np.abs(arr)
-            if np.sum(spectrum) > 1e-8:
-                centroid = np.sum(np.arange(len(spectrum)) * spectrum) / np.sum(spectrum)
-                freq = 0.3 + 0.7 * (centroid / len(spectrum))
-            else:
-                freq = 0.5
-        else:
-            from .embedding import get_embedder
-            embedder = get_embedder()
-            emb = embedder.encode(query)
-            return self._derive_driving_phasor(query, emb)
+        """Derive driving phasor from query — delegates to embedder for cognitive features."""
+        from .embedding import get_embedder
+        embedder = get_embedder()
+        freq, phase = embedder.derive_driving_phasor(query, embedding)
+
+        # Convert to complex phasor with magnitude based on query strength
+        words = [w for w in query.lower().split() if len(w) > 2]
+        mag = 0.4 + 0.6 * min(1.0, len(words) / 12)
 
         phasor = mag * complex(math.cos(phase), math.sin(phase))
         return (phasor, freq)
@@ -453,8 +445,8 @@ class OscillationResonanceRetriever(Retriever):
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
-        query_phase = self._query_phase(embedding)
         query_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
+        query_phase = math.atan2(query_phasor.imag, query_phasor.real) % (2 * math.pi)
 
         # Score every anchor: (1-w)*semantic_sim + w*phase_coherence, weighted by retention
         scored: list[tuple[float, Anchor, dict[str, float]]] = []

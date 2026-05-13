@@ -139,6 +139,9 @@ class MemoryRuntime:
         self._multimodal_provider: MultimodalEmbeddingProvider | None = None
         self._cross_modal_retriever: CrossModalRetriever | None = None
 
+        # Autobiographical memory — agent's subjective self-model
+        self._autobiography = None
+
         # Streaming — continuous memory ingestion buffer
         self._streaming_buffer = None
 
@@ -226,6 +229,14 @@ class MemoryRuntime:
         if self._survival_fn is None:
             self._survival_fn = SurvivalRegistry.from_config(self.cfg)
         return self._survival_fn
+
+    @property
+    def autobiography(self):
+        """Lazy-init autobiographical memory — agent's subjective self-model."""
+        if self._autobiography is None:
+            from .autobiography import AutobiographicalMemory
+            self._autobiography = AutobiographicalMemory()
+        return self._autobiography
 
     @property
     def streaming_buffer(self):
@@ -565,6 +576,11 @@ class MemoryRuntime:
         # 4. Decay ghosts
         ghost_purged = self.ghosts.decay_all()
 
+        # 5. Decay autobiographical narratives
+        self_narratives_purged = 0
+        if self._autobiography:
+            self_narratives_purged = self._autobiography.degrade_all()
+
         self.sleep_cycles += 1
         return {
             "cortex_reports": cortex_reports,
@@ -572,6 +588,7 @@ class MemoryRuntime:
             "evolution": evo,
             "ghost_stats": self.ghosts.stats,
             "ghosts_purged": ghost_purged,
+            "self_narratives_purged": self_narratives_purged,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
@@ -819,6 +836,48 @@ class MemoryRuntime:
             return True
         return False
 
+    # ── Autobiographical memory (self-model) ───────────────
+
+    def remember_self(self, episode_summary: str = "",
+                      self_belief: str = "",
+                      emotional_tone: float = 0.0,
+                      source_session: str = "",
+                      source_anchor_ids: list[str] | None = None,
+                      tags: list[str] | None = None):
+        """Record a first-person narrative — the agent's own experience.
+
+        This is NOT a fact about the user/world (use remember() for that).
+        This is "I discussed X," "I believe Y about the user," "my tone was Z."
+        """
+        return self.autobiography.form_from_interaction(
+            episode_summary=episode_summary,
+            self_belief=self_belief,
+            emotional_tone=emotional_tone,
+            source_session=source_session,
+            source_anchor_ids=source_anchor_ids,
+            tags=tags,
+        )
+
+    def recall_self(self, query: str = "", *,
+                    top_k: int = 10,
+                    min_stability: float = 0.05):
+        """Recall what the agent knows about itself — 'what do I know about myself?' """
+        return self.autobiography.recall_self(
+            query=query, top_k=top_k, min_stability=min_stability,
+        )
+
+    def get_self_beliefs(self, min_stability: float = 0.2) -> list[dict]:
+        """Get the agent's stable self-beliefs — its current self-model."""
+        return self.autobiography.get_beliefs(min_stability=min_stability)
+
+    def update_self_belief(self, belief_substring: str, correction: str = ""):
+        """Update or correct a self-belief when the agent's understanding changes."""
+        return self.autobiography.contradict_belief(belief_substring, correction)
+
+    def self_emotional_profile(self, session_id: str = "") -> dict:
+        """Get the agent's emotional profile across interactions."""
+        return self.autobiography.get_emotional_profile(session_id)
+
     # ── Health & reporting ────────────────────────────────────
 
     @property
@@ -858,6 +917,7 @@ class MemoryRuntime:
             f"  Anchors: {s.anchors}    Edges: {s.edges}    Ghosts: {s.ghosts}",
             f"  Cortices: {s.cortices}    Hubs: {s.hubs}    Clusters: {s.clusters}",
             f"  Schemas: {s.schemas}    Abstracts: {s.abstracts}    Working: {s.working_memory}",
+            f"  Self-narratives: {len(self._autobiography._narratives) if self._autobiography else 0}",
             f"  Sleep cycles: {s.sleep_cycles}    Evolutions: {s.total_evolutions}",
             f"  Uptime: {s.uptime_seconds:.0f}s",
             f"",

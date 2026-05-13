@@ -65,14 +65,22 @@ def test_oscillation_retriever_trace_explains_phase_and_activation():
         [1.0, 0.0, 0.0, 0.0],
         tags=["Alice", "Hawaii"],
     )
-    anchor.oscillator.natural_frequency = 0.3
-    anchor.oscillator.phase_offset = 0.0
+
+    # Derive query driving phasor, then align anchor phase to it for resonance
+    from star_graph.embedding import get_embedder
+    embedder = get_embedder()
+    query_emb = [1.0, 0.0, 0.0, 0.0]
+    driving_freq, driving_phase = embedder.derive_driving_phasor(
+        "When did Alice visit Hawaii?", query_emb)
+
+    anchor.oscillator.natural_frequency = driving_freq
+    anchor.oscillator.phase_offset = driving_phase
     anchor.oscillator.coupling_strength = 1.0
     graph.add_anchor(anchor)
 
     result = OscillationResonanceRetriever(graph, phase_weight=0.5).retrieve(
         "When did Alice visit Hawaii?",
-        embedding=[1.0, 0.0, 0.0, 0.0],
+        embedding=query_emb,
         top_k=1,
     )
 

@@ -83,6 +83,17 @@ class MemoryState(enum.Enum):
     REACTIVATED = "reactivated"    # Ghost revived — lower stability, elevated surprise
 
 
+# Explicit MemoryState → ThermalState mapping.
+# Updated during transition() to avoid dual-state-machine drift.
+_STATE_THERMAL_MAP = {
+    MemoryState.ACTIVE: ThermalState.HOT,
+    MemoryState.REHEARSING: ThermalState.HOT,
+    MemoryState.CONSOLIDATING: ThermalState.WARM,
+    MemoryState.DORMANT: ThermalState.WARM,
+    MemoryState.GHOST: ThermalState.COLD,
+    MemoryState.REACTIVATED: ThermalState.HOT,
+}
+
 # State transition rules: (current, event) → next
 # Events: 'create', 'replay', 'consolidate', 'retrieve', 'prune', 'revive', 'stabilize'
 _TRANSITIONS = {
@@ -222,6 +233,7 @@ class Anchor:
     # v0.4: state machine
     state: MemoryState = MemoryState.ACTIVE
     state_history: list[tuple[MemoryState, float]] = field(default_factory=list)
+    _thermal_state: ThermalState | None = None  # set during transition(), avoids dual-state drift
     # v0.6: cortex integration
     cortex_path: str = ""          # hierarchical path e.g. "dev.python.gui"
     segment_id: str = ""           # which Segment this node belongs to
@@ -320,10 +332,14 @@ class Anchor:
         return self.state
 
     def _on_enter_state(self, state: MemoryState) -> None:
-        """State-entry side effects."""
+        """State-entry side effects, including thermal state synchronization."""
         from .config import Config
         c = Config.get().anchor.state_entry
         now = time.time()
+
+        # Synchronize thermal state from MemoryState — single source of truth
+        self._thermal_state = _STATE_THERMAL_MAP.get(state, ThermalState.WARM)
+
         if state == MemoryState.REHEARSING:
             self.replay_count += 1
             self.last_activated_at = now
@@ -628,47 +644,43 @@ class Anchor:
 
     @property
     def thermal_state(self) -> ThermalState:
-        """Derived thermal level governing storage tier and retrieval cost.
+        """Thermal level governing storage tier and retrieval cost.
 
-        HOT  — recent access (< 24h idle) OR high retention (> 0.4) OR high frequency
-        WARM — retention > 0.15, not recently accessed but still relevant
-        COLD — retention <= 0.15, or state GHOST with some reactivation probability
-        DEAD — state GHOST with near-zero reactivation probability (metadata only)
+        Primary: derived from MemoryState via _STATE_THERMAL_MAP (set during transition()).
+        Fallback: computed from retention_score + recency + frequency for edge cases.
 
-        The state is derived from retention_score + recency + frequency,
-        not stored. This avoids dual-state-machine sync issues.
+        HOT  — ACTIVE, REHEARSING, REACTIVATED
+        WARM — CONSOLIDATING, DORMANT
+        COLD — GHOST with partial recall
+        DEAD — GHOST with near-zero reactivation probability
         """
-        r = self.retention_score
-        v = self.vector
-        hours_idle = (time.time() - self.last_activated_at) / 3600
+        # Use synchronized thermal state from the state machine if available
+        if self._thermal_state is not None and self.state != MemoryState.GHOST:
+            return self._thermal_state
 
+        # GHOST requires nuanced handling: check reactivation probability
         if self.state == MemoryState.GHOST:
             react_prob = getattr(self, '_ghost_reactivation_prob', 0.0)
             if react_prob <= 0.05:
                 return ThermalState.DEAD
             return ThermalState.COLD
 
-        # Recently active memories are HOT regardless of computed retention
+        # Fallback: compute from retention for anchors created before _thermal_state sync
+        r = self.retention_score
+        v = self.vector
+        hours_idle = (time.time() - self.last_activated_at) / 3600
+
         is_recent = hours_idle < 24
         is_high_plasticity = self.state in (MemoryState.ACTIVE, MemoryState.REHEARSING, MemoryState.REACTIVATED)
 
-        # Only treat as HOT if genuinely recent AND in a high-plasticity state
         if is_high_plasticity and is_recent:
             return ThermalState.HOT
-
-        # High retention or frequency → HOT
         if r > 0.4 or v.frequency > 0.1:
             return ThermalState.HOT
-
-        # Medium retention → WARM
         if r > 0.15:
             return ThermalState.WARM
-
-        # Low retention but not quite dead → COLD
         if r > 0.03:
             return ThermalState.COLD
-
-        # Near-zero retention → DEAD (offload to metadata)
         return ThermalState.DEAD
 
     @property

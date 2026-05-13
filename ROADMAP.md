@@ -42,11 +42,11 @@ P0 + P1 fixes from code audit:
 - [x] Cortex independent sleep (per-cortex consolidation cycles)
 - [x] Dual-Channel auto-trigger in recall() (structural query detection + low-confidence fallback)
 
-## v1.0.8 (cognitive fidelity)
+## v1.0.8 (cognitive fidelity — in progress)
 
-- [ ] Autobiographical memory layer (SelfNarrative — "what I know about myself")
-- [ ] State / ThermalState unified transition matrix
-- [ ] Oscillation phase derivation from temporal/emotional context (not embedding stats)
+- [x] Autobiographical memory layer (SelfNarrative — "what I know about myself")
+- [x] State / ThermalState unified transition matrix
+- [x] Oscillation phase derivation from temporal/emotional context (not embedding stats)
 - [ ] Cosine similarity deduplication (single `math_utils.py` implementation)
 - [ ] Sleep phase naming standardization (N1_Replay → N6_IndexRebuild)
 
