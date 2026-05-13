@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from .anchor import (
-    Anchor, AnchorVector, AnchorPrediction, Oscillator, GhostAnchor, MemoryState,
+    Anchor, AnchorVector, AnchorPrediction, Oscillator, MemoryState,
 )
 from .graph import StarGraph, Edge, Schema
 from .storage_backend import StorageBackend
@@ -59,15 +59,6 @@ CREATE TABLE IF NOT EXISTS edges (
     PRIMARY KEY (source, target)
 );
 
-CREATE TABLE IF NOT EXISTS ghosts (
-    id TEXT PRIMARY KEY,
-    residue_blob BLOB,
-    original_tags_json TEXT NOT NULL DEFAULT '[]',
-    pruned_at REAL NOT NULL,
-    revival_count INTEGER NOT NULL DEFAULT 0,
-    original_importance REAL NOT NULL DEFAULT 0.5
-);
-
 CREATE TABLE IF NOT EXISTS schemas (
     id TEXT PRIMARY KEY,
     template TEXT NOT NULL,
@@ -85,7 +76,6 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
-CREATE INDEX IF NOT EXISTS idx_ghosts_pruned ON ghosts(pruned_at);
 CREATE INDEX IF NOT EXISTS idx_schemas_confidence ON schemas(confidence DESC);
 """
 
@@ -166,16 +156,6 @@ class SQLiteStorage(StorageBackend):
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (e.source, e.target, e.weight, e.edge_type,
                      e.co_activation_count, e.created_at, e.last_activated_at),
-                )
-
-            for g in graph.ghosts.values():
-                c.execute(
-                    """INSERT INTO ghosts (id, residue_blob, original_tags_json,
-                       pruned_at, revival_count, original_importance)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (g.id, _embedding_to_blob(g.residue),
-                     json.dumps(g.original_tags), g.pruned_at,
-                     g.revival_count, g.original_importance),
                 )
 
             for s in graph.schemas.values():
@@ -269,17 +249,6 @@ class SQLiteStorage(StorageBackend):
             graph.edges[key] = edge
             graph._adjacency[src].add(tgt)
             graph._adjacency[tgt].add(src)
-
-        for row in c.execute("SELECT * FROM ghosts"):
-            gid, residue_blob, tags_json, pruned_at, revival_count, orig_imp = row
-            ghost = GhostAnchor(
-                id=gid,
-                residue=_blob_to_embedding(residue_blob) or [],
-                original_tags=json.loads(tags_json),
-                pruned_at=pruned_at, revival_count=revival_count,
-                original_importance=orig_imp,
-            )
-            graph.ghosts[gid] = ghost
 
         for row in c.execute("SELECT * FROM schemas"):
             sid, template, slots_json, inst_json, conf, cat, tags_json = row

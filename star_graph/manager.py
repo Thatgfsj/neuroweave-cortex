@@ -1440,7 +1440,7 @@ class MemoryManager:
 
     @property
     def stats(self) -> ManagerStats:
-        ghost_count = len(self.ghosts.ghosts) if self._ghosts else len(self.graph.ghosts)
+        ghost_count = len(self.ghosts.ghosts) if self._ghosts else len(self.graph._ghost_subsystem.ghosts)
         abstract_count = len(self._abstraction.abstracts) if self._abstraction else len(getattr(self.graph, 'abstracts', {}))
         cortex_count = len(self._router.cortices) if self._router else 0
         hub_count = len(self._hublayer.hubs) if self._hublayer else 0

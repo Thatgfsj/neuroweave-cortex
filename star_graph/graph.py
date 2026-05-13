@@ -17,7 +17,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .anchor import Anchor, AnchorVector, GhostAnchor
+from .anchor import Anchor, AnchorVector
 from .config import Config
 
 
@@ -486,14 +486,13 @@ class StarGraph:
         self.anchors: dict[str, Anchor] = {}
         self.edges: dict[tuple[str, str], Edge] = {}
         self._adjacency: dict[str, set[str]] = defaultdict(set)
-        # v0.2 additions
-        self.ghosts: dict[str, GhostAnchor] = {}
         self.cortical_index: list[tuple[list[float], str]] = []  # (embedding, anchor_id)
         self.schemas: dict[str, Schema] = {}
         # v0.4: ANN index for sub-linear retrieval
         self._ann_index = None  # lazy init on first use
         self.abstracts: dict[str, any] = {}  # AbstractNode dict, lazy import
-        self._ghost_subsystem = None  # GhostSubsystem, lazy init
+        from .ghost import GhostSubsystem
+        self._ghost_subsystem = GhostSubsystem()  # always initialized
         self.reflections: dict[str, ReflectionNode] = {}  # v0.5: meta-cognitive insights
 
     def _key(self, a: str, b: str) -> tuple[str, str]:
@@ -802,22 +801,22 @@ class StarGraph:
 
     # ── Ghost operations ─────────────────────────────────
 
-    def add_ghost(self, anchor: Anchor) -> None:
-        """Create a ghost from an anchor being pruned."""
-        self.ghosts[anchor.id] = GhostAnchor.from_anchor(anchor)
-
     def check_ghosts(self, embedding: list[float] | None,
                      revival_threshold: float | None = None) -> Optional[Anchor]:
+        """Check if new content resonates with any ghosts (savings effect).
+
+        Delegates to GhostSubsystem for resonance detection and revival.
+        """
+        if not embedding or not self._ghost_subsystem:
+            return None
         if revival_threshold is None:
             revival_threshold = Config.get().graph.ghost_revival_threshold
-        """Check if new content resonates with any ghosts (savings effect)."""
-        if not embedding:
-            return None
-        for ghost_id, ghost in list(self.ghosts.items()):
-            resonance = ghost.resonance(embedding)
-            if resonance > revival_threshold:
-                del self.ghosts[ghost_id]
-                return ghost.revive("", embedding)
+        resonances = self._ghost_subsystem.check_resonance(embedding, threshold=revival_threshold)
+        if resonances:
+            ghost, _ = resonances[0]
+            return self._ghost_subsystem.try_revive(
+                ghost.id, ghost.semantic_shadow or "", embedding,
+            )
         return None
 
     # ── Analysis ─────────────────────────────────────────
@@ -833,7 +832,7 @@ class StarGraph:
         return {
             "anchors": len(self.anchors),
             "edges": len(self.edges),
-            "ghosts": len(self.ghosts),
+            "ghosts": len(self._ghost_subsystem.ghosts) if self._ghost_subsystem else 0,
             "schemas": len(self.schemas),
             "cortical_index": len(self.cortical_index),
             "avg_retention": sum(a.retention_score for a in self.anchors.values())

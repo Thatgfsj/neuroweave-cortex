@@ -391,16 +391,6 @@ class SnapshotManager:
                 "last_activated_at": e.last_activated_at,
             })
 
-        ghosts = []
-        for g in graph.ghosts.values():
-            ghosts.append({
-                "id": g.id, "residue": g.residue,
-                "original_tags": g.original_tags,
-                "pruned_at": g.pruned_at,
-                "revival_count": g.revival_count,
-                "original_importance": g.original_importance,
-            })
-
         schemas = []
         for s in graph.schemas.values():
             schemas.append({
@@ -415,7 +405,6 @@ class SnapshotManager:
             "snapshot_at": time.time(),
             "anchors": anchors,
             "edges": edges,
-            "ghosts": ghosts,
             "schemas": schemas,
         }
 
@@ -423,7 +412,7 @@ class SnapshotManager:
         """Deserialize a JSON dict back into a StarGraph."""
         from .graph import StarGraph
         from .anchor import (
-            Anchor, AnchorVector, AnchorPrediction, Oscillator, GhostAnchor, MemoryState,
+            Anchor, AnchorVector, AnchorPrediction, Oscillator, MemoryState,
         )
 
         graph = StarGraph()
@@ -483,16 +472,6 @@ class SnapshotManager:
             graph.edges[key] = edge
             graph._adjacency[edge.source].add(edge.target)
             graph._adjacency[edge.target].add(edge.source)
-
-        for g_data in data.get("ghosts", []):
-            ghost = GhostAnchor(
-                id=g_data["id"], residue=g_data.get("residue", []),
-                original_tags=g_data.get("original_tags", []),
-                pruned_at=g_data.get("pruned_at", time.time()),
-                revival_count=g_data.get("revival_count", 0),
-                original_importance=g_data.get("original_importance", 0.5),
-            )
-            graph.ghosts[ghost.id] = ghost
 
         for s_data in data.get("schemas", []):
             from .graph import Schema

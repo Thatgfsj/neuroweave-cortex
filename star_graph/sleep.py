@@ -19,7 +19,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
 
-from .anchor import Anchor, AnchorVector, GhostAnchor, MemoryState
+from .anchor import Anchor, AnchorVector, MemoryState
 from .graph import StarGraph, Edge, Constellation, Schema
 from .config import Config
 from .compression import CompressionLevel
@@ -1001,27 +1001,14 @@ class SleepCycle:
                         residual_edges[neighbor] = edge.weight * self.cfg.sleep.prune.residual_edge_factor
 
                 # Create rich ghost via ghost subsystem
-                if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
-                    self.graph._ghost_subsystem.create(anchor, residual_edges)
-                else:
-                    self.graph.add_ghost(anchor)
+                self.graph._ghost_subsystem.create(anchor, residual_edges)
 
                 anchor.transition('prune')
                 self.graph.remove_anchor(aid)
                 self._ghost_count += 1
 
         # Decay ghosts via subsystem
-        if hasattr(self.graph, '_ghost_subsystem') and self.graph._ghost_subsystem:
-            stale_count = self.graph._ghost_subsystem.decay_all()
-        else:
-            now = time.time()
-            stale_ghosts = []
-            for gid, ghost in self.graph.ghosts.items():
-                if isinstance(ghost, GhostAnchor) and (now - ghost.pruned_at) > self.cfg.sleep.prune.ghost_stale_days * 86400 and ghost.revival_count == 0:
-                    stale_ghosts.append(gid)
-            for gid in stale_ghosts:
-                del self.graph.ghosts[gid]
-            stale_count = len(stale_ghosts)
+        stale_count = self.graph._ghost_subsystem.decay_all()
 
         if candidates:
             self.log.append(f"Adaptive Prune: removed {len(candidates)} anchors "

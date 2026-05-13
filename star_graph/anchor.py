@@ -332,7 +332,7 @@ class Anchor:
         elif state == MemoryState.DORMANT:
             self.vector.stability = max(self.vector.stability, c.dormant_min_stability)
         elif state == MemoryState.GHOST:
-            pass  # GhostAnchor handles this
+            pass  # GhostNode handles this
         elif state == MemoryState.REACTIVATED:
             self.vector.stability = c.reactivated_stability
             self.vector.surprise = c.reactivated_surprise
@@ -770,57 +770,3 @@ class Anchor:
         self.vector.confidence = min(1.0, self.vector.confidence + 0.05)
 
 
-@dataclass
-class GhostAnchor:
-    """A pruned anchor's residual trace — enables the savings effect.
-
-    When an anchor enters GHOST state, it leaves this residual. If similar
-    content appears later, the ghost resonates and enables faster relearning.
-    """
-
-    id: str
-    residue: list[float]
-    original_tags: list[str]
-    pruned_at: float
-    revival_count: int = 0
-    original_importance: float = 0.5
-
-    @classmethod
-    def from_anchor(cls, anchor: Anchor) -> GhostAnchor:
-        residue = anchor.embedding[:16] if anchor.embedding else []
-        anchor.transition('prune')  # ACTIVE/DORMANT → GHOST
-        return cls(
-            id=anchor.id,
-            residue=residue,
-            original_tags=list(anchor.tags),
-            pruned_at=time.time(),
-            original_importance=anchor.vector.importance,
-        )
-
-    def resonance(self, new_embedding: list[float] | None) -> float:
-        if not self.residue or not new_embedding:
-            return 0.0
-        residue = self.residue[:min(len(self.residue), len(new_embedding))]
-        new = new_embedding[:len(residue)]
-        dot = sum(r * n for r, n in zip(residue, new))
-        nr = math.sqrt(sum(r**2 for r in residue))
-        nn = math.sqrt(sum(n**2 for n in new))
-        return dot / (nr * nn + 1e-8)
-
-    def revive(self, new_text: str, new_embedding: list[float] | None = None) -> Anchor:
-        self.revival_count += 1
-        anchor = Anchor(
-            id=self.id,
-            text=new_text[:280],
-            vector=AnchorVector(
-                importance=self.original_importance * 0.6 + 0.1 * self.revival_count,
-                frequency=0.1,
-                recency=1.0,
-                stability=0.2,
-                surprise=0.8,
-            ),
-            embedding=new_embedding,
-            state=MemoryState.REACTIVATED,
-        )
-        anchor.transition('revive')  # Will try GHOST→REACTIVATED
-        return anchor

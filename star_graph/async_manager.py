@@ -384,7 +384,7 @@ class AsyncMemoryManager:
         return {
             "anchors": len(self.manager.graph.anchors),
             "edges": len(self.manager.graph.edges),
-            "ghosts": len(self.manager.graph.ghosts),
+            "ghosts": len(self.manager.graph._ghost_subsystem.ghosts),
             "working_memory": self.manager.working_memory.size,
             "exact_cache": self.manager.exact_cache.stats,
             "sleep_cycles": self.manager.sleep_cycles,

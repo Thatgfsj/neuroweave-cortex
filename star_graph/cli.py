@@ -132,7 +132,7 @@ def stats_cmd() -> None:
             print(f"  [{schema.confidence:.2f}] {schema.template[:80]}...")
             print(f"    instances: {len(schema.instance_ids)}")
 
-    if args.ghosts and graph.ghosts:
+    if args.ghosts and graph._ghost_subsystem:
         print("\n── Ghosts ──")
-        for ghost in graph.ghosts.values():
-            print(f"  {ghost.id[:16]}...  revivals: {ghost.revival_count}")
+        for ghost_id, ghost in graph._ghost_subsystem.ghosts.items():
+            print(f"  {ghost_id[:16]}...  revivals: {ghost.revival_count}")

@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator, GhostAnchor
+from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator
 from .graph import StarGraph, Edge, Schema
 from .storage_backend import StorageBackend
 
@@ -70,17 +70,6 @@ class JSONStorage(StorageBackend):
                     "last_activated_at": e.last_activated_at,
                 }
                 for e in graph.edges.values()
-            ],
-            "ghosts": [
-                {
-                    "id": g.id,
-                    "residue": g.residue,
-                    "original_tags": g.original_tags,
-                    "pruned_at": g.pruned_at,
-                    "revival_count": g.revival_count,
-                    "original_importance": g.original_importance,
-                }
-                for g in graph.ghosts.values()
             ],
             "schemas": [
                 {
@@ -155,17 +144,6 @@ class JSONStorage(StorageBackend):
             graph.edges[key] = edge
             graph._adjacency[edge.source].add(edge.target)
             graph._adjacency[edge.target].add(edge.source)
-
-        for g_data in data.get("ghosts", []):
-            ghost = GhostAnchor(
-                id=g_data["id"],
-                residue=g_data.get("residue", []),
-                original_tags=g_data.get("original_tags", []),
-                pruned_at=g_data.get("pruned_at", time.time()),
-                revival_count=g_data.get("revival_count", 0),
-                original_importance=g_data.get("original_importance", 0.5),
-            )
-            graph.ghosts[ghost.id] = ghost
 
         for s_data in data.get("schemas", []):
             schema = Schema(

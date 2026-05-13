@@ -49,7 +49,7 @@ class CognitiveMetrics:
             "timestamp": now,
             "anchors": len(anchors),
             "edges": len(self.graph.edges),
-            "ghosts": len(self.graph.ghosts),
+            "ghosts": len(self.graph._ghost_subsystem.ghosts),
             "schemas": len(self.graph.schemas),
             "abstracts": len(getattr(self.graph, 'abstracts', {})),
             "memory_stability": stability,
@@ -99,7 +99,7 @@ class CognitiveMetrics:
         Ratio: (schemas + abstracts) / total_anchors
         Higher = more abstraction, less redundancy.
         """
-        total = len(self.graph.anchors) + len(self.graph.ghosts)
+        total = len(self.graph.anchors) + len(self.graph._ghost_subsystem.ghosts)
         if total == 0:
             return 0.0
         abstracts = len(getattr(self.graph, 'abstracts', {}))
@@ -136,7 +136,7 @@ class CognitiveMetrics:
 
         High = ghosts that revive are relevant to the triggering context.
         """
-        ghosts = list(self.graph.ghosts.values())
+        ghosts = list(self.graph._ghost_subsystem.ghosts.values())
         if not ghosts:
             return 1.0  # no ghosts = nothing to measure
         revived = [g for g in ghosts if getattr(g, 'revival_count', 0) > 0]

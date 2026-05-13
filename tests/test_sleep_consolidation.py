@@ -124,13 +124,13 @@ class TestSleepCycle:
         weak.vector.frequency = 0.0
         graph.add_anchor(weak)
 
-        assert len(graph.ghosts) == 0
+        assert len(graph._ghost_subsystem.ghosts) == 0
         cycle = SleepCycle(graph)
         result = cycle.run(retention_threshold=0.3)
 
         if result["pruned_anchors"] > 0:
             assert result["ghosts_created"] > 0
-            assert len(graph.ghosts) > 0
+            assert len(graph._ghost_subsystem.ghosts) > 0
 
     def test_schema_extraction(self):
         """Multiple anchors with same tag should form schemas."""

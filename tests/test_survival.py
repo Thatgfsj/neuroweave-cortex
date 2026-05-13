@@ -15,7 +15,7 @@ from star_graph.survival import (
     SurvivalState,
     derive_strength,
 )
-from star_graph.anchor import Anchor, GhostAnchor, MemoryState
+from star_graph.anchor import Anchor, MemoryState
 
 
 # ═══════════════════════════════════════════════════════════════
