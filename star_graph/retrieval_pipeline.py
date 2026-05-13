@@ -17,6 +17,7 @@ from .anchor import Anchor
 from .router import RouteResult
 from .dual_channel import DualChannelOutput
 from .multimodal import CrossModalResult
+from .math_utils import cosine_sim as _cosine_sim
 
 
 class RetrievalPipeline:
@@ -552,9 +553,3 @@ class RetrievalPipeline:
             top_k=max_items,
         )
 
-
-def _cosine_sim(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x**2 for x in a))
-    nb = math.sqrt(sum(x**2 for x in b))
-    return dot / (na * nb + 1e-8)

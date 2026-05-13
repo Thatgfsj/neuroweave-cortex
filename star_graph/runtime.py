@@ -17,6 +17,7 @@ from typing import Optional
 from .anchor import Anchor, MemoryState
 from .graph import StarGraph, Edge
 from .config import Config
+from .math_utils import cosine_sim as _cosine_sim
 from .working_memory import WorkingMemory, WorkingMemoryEntry
 from .cortex import MemoryCortex, CortexConfig
 from .router import CortexRouter
@@ -1099,8 +1100,3 @@ class MemoryRuntime:
         return re.sub(r'\s+', ' ', text.lower().strip())[:100]
 
 
-def _cosine_sim(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x**2 for x in a))
-    nb = math.sqrt(sum(x**2 for x in b))
-    return dot / (na * nb + 1e-8)

@@ -71,7 +71,22 @@ class _DotDict:
         return self._data.items()
 
     def get(self, name: str, default: Any = None) -> Any:
-        return self._data.get(name, default)
+        """Get a config value by dotted path. Supports 'sleep.swr.tau' traversal.
+
+        If name contains no dots, behaves like dict.get(name, default).
+        If a dotted path is given, walks nested _DotDict objects.
+        Returns default if any key in the path is missing.
+        """
+        if '.' not in name:
+            return self._data.get(name, default)
+
+        parts = name.split(".")
+        current = self
+        for part in parts:
+            if not isinstance(current, _DotDict) or part not in current._data:
+                return default
+            current = current._data[part]
+        return current
 
     def to_dict(self) -> dict:
         result = {}
@@ -183,6 +198,21 @@ class Config:
                     self._sections[name].merge(section)
                 else:
                     self._sections[name] = section
+
+    def get_path(self, dotted_path: str, default: Any = None) -> Any:
+        """Get a config value by dotted path: cfg.get_path('exact_cache.auto_harvest', True).
+
+        Splits on '.', looks up the section, then walks nested _DotDict keys.
+        Returns default if any segment is missing.
+        """
+        parts = dotted_path.split(".")
+        if len(parts) < 2:
+            return default
+        section_name = parts[0]
+        section = self._sections.get(section_name)
+        if section is None:
+            return default
+        return section.get(".".join(parts[1:]), default)
 
     def override(self, dotted_path: str, value: Any) -> None:
         """Set a single config value by dotted path. E.g., 'sleep.swr.tau=30.0'."""

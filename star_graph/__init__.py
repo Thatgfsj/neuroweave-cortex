@@ -59,6 +59,7 @@ from .manager import MemoryManager
 from .runtime import MemoryRuntime, ManagerStats
 from .retrieval_pipeline import RetrievalPipeline
 from .autobiography import AutobiographicalMemory, SelfNarrative
+from .math_utils import cosine_sim, safe_div, clamp, sigmoid
 from .compression import (
     CompressionLevel,
     SummaryAnchor,

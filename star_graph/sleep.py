@@ -414,7 +414,7 @@ class SleepCycle:
         if recent_anchors:
             self._swr_replay(recent_anchors, similarity_threshold)
         report.phases.append(PhaseMetrics(
-            phase="N1 Replay Indexing",
+            phase="N1_Replay",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=len(recent_anchors) if recent_anchors else 0,
             details={"method": "priority-weighted sampling"},
@@ -426,7 +426,7 @@ class SleepCycle:
         merged = self._merge_similar(similarity_threshold)
         bridges = self._bridge_distant()
         report.phases.append(PhaseMetrics(
-            phase="N2 Weak Merge",
+            phase="N2_Merge",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=merged + bridges,
             details={"merged": merged, "bridges": bridges},
@@ -446,7 +446,7 @@ class SleepCycle:
         )
         cortical_count = sum(1 for a in self.graph.anchors.values() if a.is_cortical)
         report.phases.append(PhaseMetrics(
-            phase="N3 Compression",
+            phase="N3_Compression",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=schemas,
             details={"schemas": schemas, "abstractions": abstraction_count,
@@ -465,7 +465,7 @@ class SleepCycle:
             if abs(a.vector.emotional_valence) < 0.1 and a.vector.stability > 0.5
         )
         report.phases.append(PhaseMetrics(
-            phase="REM Emotional Decoupling",
+            phase="REM_Emotion",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=emotion_count,
         ))
@@ -477,7 +477,7 @@ class SleepCycle:
         ghosts_created = self._ghost_count
         pruned_edges = self._prune_edges(edge_prune_threshold)
         report.phases.append(PhaseMetrics(
-            phase="Wake-prep Schema Synthesis",
+            phase="N4_Prune",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=len(pruned_anchors) + len(pruned_edges),
             details={"pruned_anchors": len(pruned_anchors),
@@ -492,7 +492,7 @@ class SleepCycle:
         t0 = time.time()
         compression_stats = self._compress_clusters()
         report.phases.append(PhaseMetrics(
-            phase="Phase 5b Compression",
+            phase="N3b_ClusterCompression",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=compression_stats.get("compressed_anchors", 0),
             details=compression_stats,
@@ -502,7 +502,7 @@ class SleepCycle:
         t0 = time.time()
         fact_stats = self._extract_atom_facts()
         report.phases.append(PhaseMetrics(
-            phase="Phase 5c Atom Facts",
+            phase="N3c_AtomFacts",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=fact_stats.get("facts_extracted", 0),
             details=fact_stats,
@@ -514,7 +514,7 @@ class SleepCycle:
         if hublayer and cortices:
             hub_connections = self._connect_cross_cortex_hubs(hublayer, cortices)
         report.phases.append(PhaseMetrics(
-            phase="Phase 6 Hub Connection",
+            phase="N5_HubConnect",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=hub_connections,
             details={"cross_cortex_links": hub_connections},
@@ -524,7 +524,7 @@ class SleepCycle:
         t0 = time.time()
         thermal_stats = self._apply_thermal_forgetting()
         report.phases.append(PhaseMetrics(
-            phase="Phase 7 Forgetting/Degradation",
+            phase="N6_Forgetting",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=sum(thermal_stats.values()),
             details=thermal_stats,
@@ -537,7 +537,7 @@ class SleepCycle:
         if brain and cortices:
             brain.refresh_cache(cortices)
         report.phases.append(PhaseMetrics(
-            phase="Phase 8 Index Rebuild",
+            phase="N7_IndexRebuild",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=0,
             details={"brain_cache_refreshed": brain is not None},

@@ -269,6 +269,11 @@ Phase 4 (P3): 代码质量逐项修复（10-20）
 - [x] State/ThermalState unification (_STATE_THERMAL_MAP + synchronized transitions)
 - [x] Oscillation phase source correction (temporal/emotional context, not embedding stats)
 
+### P3 (code quality — partial)
+- [x] Config dot-path access: _DotDict.get('a.b.c', default) + Config.get_path()
+- [x] Sleep phase naming standardized (N1_Replay → N7_IndexRebuild)
+- [x] Cosine similarity dedup: math_utils.cosine_sim (runtime + retrieval_pipeline migrated)
+
 ### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
 - [x] Ghost intensity + NegativeGhost contradiction tracking
