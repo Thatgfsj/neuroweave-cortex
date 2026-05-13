@@ -463,18 +463,10 @@ class MemoryManager:
             query=query, context=context, max_items=max_items)
         graph_ms = (time.time() - t0) * 1000
 
-        # Merge: exact cache hits first, then graph items, then raw chunks
+        # Merge: exact cache → raw buffer (recent, uncompressed) → graph (compressed)
         merged_items = list(exact_results)
         seen_texts = {self._normalize_text(item.compressed_text) for item in merged_items
                       if hasattr(item, 'compressed_text') and item.compressed_text}
-
-        for item in graph_result.get("items", []):
-            text = getattr(item, 'compressed_text', '') or ''
-            norm_text = self._normalize_text(text)
-            if norm_text and norm_text in seen_texts:
-                continue
-            seen_texts.add(norm_text)
-            merged_items.append(item)
 
         for chunk, score in raw_results:
             norm_text = self._normalize_text(chunk.text[:120])
@@ -488,6 +480,14 @@ class MemoryManager:
                 compression_level=0,
                 compressed_text=chunk.text[:200],
             ))
+
+        for item in graph_result.get("items", []):
+            text = getattr(item, 'compressed_text', '') or ''
+            norm_text = self._normalize_text(text)
+            if norm_text and norm_text in seen_texts:
+                continue
+            seen_texts.add(norm_text)
+            merged_items.append(item)
 
         merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
         merged_items = merged_items[:max_items]
