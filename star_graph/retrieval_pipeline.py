@@ -188,6 +188,21 @@ class RetrievalPipeline:
             seen_texts.add(norm_text)
             merged_items.append(item)
 
+        # ── Domain-based re-ranking (#48) ──
+        dr_enabled = True
+        dr_cfg = getattr(self._rt.cfg, 'domain_router', None)
+        if dr_cfg:
+            dr_enabled = getattr(dr_cfg, 'enabled', True)
+        if dr_enabled and query:
+            try:
+                domain_ids, domain_path = self._rt.domain_router.get_candidate_scope(query)
+                if domain_ids:
+                    for item in merged_items:
+                        if item.anchor and item.anchor.id in domain_ids:
+                            item.relevance_score = min(1.0, item.relevance_score + 0.08)
+            except Exception:
+                pass
+
         merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
         merged_items = merged_items[:max_items]
 

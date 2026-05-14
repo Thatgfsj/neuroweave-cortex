@@ -10,7 +10,7 @@ Architecture:
   Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -128,6 +128,12 @@ from .cognitive_cache import (
 from .compiler import CognitiveCompiler, WorldviewNode, UserProfile
 from .reflection_loop import SelfReflectionLoop, SelfCorrectionReport
 from .topology import topology_rank, graph_first_recall, EDGE_TYPE_RICHNESS_WEIGHTS
+from .domain_router import DomainRouter, DomainNode, DEFAULT_DOMAIN_TREE
+from .write_gate import MemoryWriteGate, GateDecision, GateResult
+from .edge_budget import EdgeBudgetManager, EDGE_TYPE_RETENTION_PRIORITY
+from .four_layer import (
+    FourLayerCompressor, CompressLayer, LayerConfig, CompressedMemory,
+)
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

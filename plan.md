@@ -1,6 +1,6 @@
 # Star Graph Memory — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.2.0** | 373 tests passing | 57 commits
+> Last updated: 2026-05-15 | **v1.3.0** | 467 tests passing | 58 commits
 
 ---
 
@@ -8,16 +8,16 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.2.0 |
-| **Production modules** | 64 Python files in `star_graph/` |
-| **Production code** | ~27,000 lines |
-| **Test files** | 19 files in `tests/` |
-| **Test code** | ~5,500 lines |
-| **Total tests** | **373** (all passing) |
-| **Total commits** | 57 |
+| **Version** | 1.3.0 |
+| **Production modules** | 68 Python files in `star_graph/` |
+| **Production code** | ~29,000 lines |
+| **Test files** | 23 files in `tests/` |
+| **Test code** | ~6,500 lines |
+| **Total tests** | **467** (all passing) |
+| **Total commits** | 58 |
 | **License** | MIT |
 
-### Module Inventory (58 modules)
+### Module Inventory (62 modules)
 
 ```
 star_graph/
@@ -62,6 +62,10 @@ star_graph/
 ├── compiler.py              # CognitiveCompiler: 1000→20→5→1 worldview emergence pipeline
 ├── reflection_loop.py       # SelfReflectionLoop: auto contradiction detection + correction
 ├── topology.py              # Graph topology ranking: centrality + edge-type-based scoring
+├── domain_router.py          # DomainRouter: hierarchical domain→subdomain→cluster pre-filter
+├── edge_budget.py            # EdgeBudgetManager: max 32 edges/node with smart retention scoring
+├── write_gate.py             # MemoryWriteGate: 5-stage pre-write quality filter (noise/dup/importance)
+├── four_layer.py             # FourLayerCompressor: message→event→semantic→personality compression
 │
 ├── ── Sleep & Consolidation ──
 ├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
@@ -108,6 +112,10 @@ star_graph/
     ├── test_cognitive_compiler.py   # Cognitive compiler worldview pipeline (14 tests)
     ├── test_reflection_loop.py      # Self-reflection loop contradiction detection (9 tests)
     ├── test_topology.py             # Graph-first retrieval topology ranking (14 tests)
+    ├── test_domain_router.py        # Domain routing topic hierarchy (24 tests)
+    ├── test_edge_budget.py          # Edge budget smart eviction (17 tests)
+    ├── test_write_gate.py           # Write gate pre-write quality filter (28 tests)
+    ├── test_four_layer.py           # Four-layer memory compression (25 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -141,6 +149,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | v1.0.9 | 2026-05-14 | Global anchor hard cap, auto-sleep daemon, cold ghost cleanup, cortex auto-consolidation |
 | **v1.1.0** | **2026-05-15** | **Hippocampus buffer, edge sparsification, file sharding, sleep rebuild (fuse/rewire/abstract), cortex hierarchy, abstractive memory engine, dynamic neural rewiring, success-rate RL, temporal slice projection — 276 tests** |
 | **v1.2.0** | **2026-05-15** | **Memory tiering, decay+reinforcement loop, FROZEN thermal tier, edge traversal weights, spreading activation, cognitive cache, cognitive compiler (worldview emergence), self-reflection loop, graph-first retrieval — 373 tests** |
+| **v1.3.0** | **2026-05-15** | **Domain router (hierarchical topic tree), edge budget (smart eviction, max 32), write gate (5-stage quality filter), four-layer compression (M→E→S→P) — 467 tests** |
 
 ---
 
@@ -873,3 +882,60 @@ Implementation:
 | **10** | **P0** | #40 Memory Tiering, #41 Decay+Reinforcement, #42 Edge Type Deepening |
 | **11** | **P1** | #43 Spreading Activation, #44 Cognitive Cache |
 | **12** | **P2** | #45 Cognitive Compiler, #46 Self-Reflection, #47 Graph-First Retrieval |
+| **13** | **S** | #48 Domain Router, #49 Edge Budget, #50 Write Gate, #51 Four-Layer Compression |
+
+---
+
+### Phase 13 — Graph Quality & Anti-Degeneration (S-Level, v1.3.0) ✅ COMPLETE
+
+- [x] #48 Domain Router (hierarchical topic tree pre-filtering)
+- [x] #49 Edge Budget Hardening (max 32 edges/node, smart eviction)
+- [x] #50 Memory Write Gate (5-stage pre-write quality filter)
+- [x] #51 Four-Layer Compression (message→event→semantic→personality)
+
+#### #48 Domain Router
+
+Implementation:
+- `DomainRouter` class with `DEFAULT_DOMAIN_TREE`: 6 root domains (开发, AI, 运维, 数据库, 金融, 工具效率)
+- Subdomain→Cluster tree with keyword-based routing
+- `index_anchor()` assigns each anchor to best-matching domain
+- `route(query)` → `{matched_domains, anchor_ids, depth, path}` for retrieval pre-filtering
+- `get_candidate_scope()` narrows ANN search to domain subtree
+- Wired into `retrieval_pipeline.py` recall() for domain-based score boosting
+
+#### #49 Edge Budget Hardening
+
+Implementation:
+- `EdgeBudgetManager(max_edges=32)`: enforces per-node edge cap
+- `EDGE_TYPE_RETENTION_PRIORITY`: causes(10) > fixes(9) > depends_on(8) > ... > contradicts(1)
+- Retention formula: `type_score × 0.4 + weight × 0.3 + recency × 0.15 + activity × 0.15`
+- `enforce(graph, node_id)`: scores and evicts weakest edges when over budget
+- `enforce_all(graph)`: budget enforcement across all nodes (called during sleep)
+- Wired into `runtime.connect()` and `runtime.remember()` auto-connect
+- Config section: `edge_budget.max_edges` (default 32)
+
+#### #50 Memory Write Gate
+
+Implementation:
+- `MemoryWriteGate` with 5-stage pipeline: empty check → noise patterns → emotional noise → importance → duplicate check → debounce
+- `GateDecision` enum: ACCEPT, REJECT, MERGE, DEFER
+- Noise patterns: regex for reactions (ok/嗯/ha+), emoji-only, greetings, bot commands
+- Emotional noise: high emotion + short text → likely venting
+- Importance: length bonus, tag signals, substantive content signals
+- Duplicate check: ANN → cosine similarity → duplicate/merge threshold
+- Debounce: MD5 hash cache prevents rapid re-writes
+- Wired into `runtime.remember()` as pre-write stage (opt-in via config)
+- Config section: `write_gate.enabled` (default false)
+
+#### #51 Four-Layer Compression
+
+Implementation:
+- `FourLayerCompressor` with 4 layers: MESSAGE (TTL 2h) → EVENT (TTL 7d) → SEMANTIC (TTL 90d) → PERSONALITY (∞)
+- `LayerConfig`: max_items, ttl_hours, compression_ratio, promote_stability
+- `CompressedMemory` dataclass: id, text, layer, embedding, source_ids, stability, importance, tags
+- `ingest_message()`: ingest into Layer 0, auto-compress if full
+- `compress_layer0()` → `compress_layer1()` → `compress_layer2()`: BFS cluster synthesis at each level
+- `decay_all()`: TTL-based decay across all layers
+- `get_for_retrieval()`: searches all layers, personality-first priority
+- Wired into `runtime.remember()` (ingest) and `runtime.sleep()` (compress + decay)
+- Config section: `four_layer.enabled` (default false)

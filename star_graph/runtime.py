@@ -46,6 +46,10 @@ from .cost_estimator import SleepCostEstimator, CostEstimate
 from .snapshot import SnapshotManager, SnapshotMeta
 from .tracing import MemoryTracer, get_tracer
 from .survival import SurvivalFunction, SurvivalRegistry
+from .domain_router import DomainRouter
+from .write_gate import MemoryWriteGate, GateDecision
+from .edge_budget import EdgeBudgetManager
+from .four_layer import FourLayerCompressor
 from .multimodal import (
     MultimodalEmbeddingProvider, MultimodalAnchor, CrossModalRetriever, CrossModalResult,
 )
@@ -142,6 +146,18 @@ class MemoryRuntime:
 
         # Micro-sleep scheduler — incremental non-blocking consolidation
         self._micro_sleep = None
+
+        # Domain router — hierarchical topic pre-filter (#48)
+        self._domain_router: DomainRouter | None = None
+
+        # Write gate — pre-write quality filter (#50)
+        self._write_gate: MemoryWriteGate | None = None
+
+        # Edge budget — smart edge cap enforcement (#49)
+        self._edge_budget: EdgeBudgetManager | None = None
+
+        # Four-layer compressor — message→event→semantic→personality (#51)
+        self._four_layer: FourLayerCompressor | None = None
 
         # Snapshot manager — versioned state snapshots with WAL
         self._snapshot_mgr: SnapshotManager | None = None
@@ -394,6 +410,36 @@ class MemoryRuntime:
         return self._reflection_loop
 
     @property
+    def domain_router(self) -> DomainRouter:
+        """Lazy-init hierarchical domain router for retrieval pre-filtering."""
+        if self._domain_router is None:
+            self._domain_router = DomainRouter()
+        return self._domain_router
+
+    @property
+    def write_gate(self) -> MemoryWriteGate:
+        """Lazy-init pre-write quality filter."""
+        if self._write_gate is None:
+            self._write_gate = MemoryWriteGate()
+        return self._write_gate
+
+    @property
+    def edge_budget(self) -> EdgeBudgetManager:
+        """Lazy-init edge budget manager for super-node prevention."""
+        if self._edge_budget is None:
+            eb_cfg = getattr(self.cfg, 'edge_budget', None)
+            max_edges = getattr(eb_cfg, 'max_edges', 32) if eb_cfg else 32
+            self._edge_budget = EdgeBudgetManager(max_edges=max_edges)
+        return self._edge_budget
+
+    @property
+    def four_layer(self) -> FourLayerCompressor:
+        """Lazy-init four-layer memory compression engine."""
+        if self._four_layer is None:
+            self._four_layer = FourLayerCompressor()
+        return self._four_layer
+
+    @property
     def hublayer(self) -> HubLayer:
         if self._hublayer is None:
             hub_cfg = getattr(self.cfg, 'hub', None)
@@ -419,10 +465,39 @@ class MemoryRuntime:
                  connect_to: list[str] | None = None,
                  edge_type: str = "topical",
                  anchor_id: str | None = None,
-                 **vec_kw) -> Anchor:
-        """Store a new memory. Returns the anchor."""
+                 skip_gate: bool = False,
+                 **vec_kw) -> Anchor | None:
+        """Store a new memory. Returns the anchor, or None if rejected by write gate."""
         embedder = self._get_embedder()
         embedding = embedder.encode(text)
+
+        # ── Stage 0: Write Gate pre-filter (#50) ──
+        wg_enabled = False
+        wg_cfg = getattr(self.cfg, 'write_gate', None)
+        if wg_cfg:
+            wg_enabled = getattr(wg_cfg, 'enabled', True)
+        if wg_enabled and not skip_gate:
+            gate_result = self.write_gate.evaluate(
+                text=text,
+                embedding=embedding,
+                tags=tags,
+                importance=importance,
+                emotional_valence=emotional_valence,
+                graph=self.graph,
+            )
+            if gate_result.decision == GateDecision.REJECT:
+                return None
+            if gate_result.decision == GateDecision.MERGE and gate_result.merge_target_id:
+                self.update(gate_result.merge_target_id, text=text, tags=tags)
+                return self.graph.anchors.get(gate_result.merge_target_id)
+            if gate_result.decision == GateDecision.DEFER:
+                # Only store in hippocampus; skip graph insertion
+                self.hippocampus.ingest(
+                    text=text, tags=tags or [], importance=importance,
+                    emotional_valence=emotional_valence,
+                    source_session=source_session, embedding=embedding,
+                )
+                return None
 
         if anchor_id:
             anchor = Anchor(
@@ -487,6 +562,27 @@ class MemoryRuntime:
         if self._bm25 is not None:
             self._bm25.add(anchor.id, text)
 
+        # Index in domain router for hierarchical retrieval pre-filtering (#48)
+        dr_enabled = True
+        dr_cfg = getattr(self.cfg, 'domain_router', None)
+        if dr_cfg:
+            dr_enabled = getattr(dr_cfg, 'enabled', True)
+        if dr_enabled:
+            self.domain_router.index_anchor(anchor.id, text=text, tags=tags)
+
+        # Ingest into four-layer compression pipeline (#51)
+        fl_enabled = True
+        fl_cfg = getattr(self.cfg, 'four_layer', None)
+        if fl_cfg:
+            fl_enabled = getattr(fl_cfg, 'enabled', True)
+        if fl_enabled:
+            self.four_layer.ingest_message(
+                text=text,
+                embedding=embedding,
+                importance=importance,
+                tags=tags or [],
+            )
+
         # Auto-sleep check: trigger micro/full consolidation on thresholds
         self._check_auto_sleep()
 
@@ -513,10 +609,14 @@ class MemoryRuntime:
                     sim = 0.5
                     if target_emb and embedding:
                         sim = _cosine_sim(embedding, target_emb)
-                    self.graph.add_edge(
+                    edge = self.graph.add_edge(
                         anchor.id, target_id,
                         weight=sim, edge_type=edge_type,
                     )
+                    # Enforce edge budget after each edge addition (#49)
+                    if edge:
+                        self.edge_budget.enforce(self.graph, anchor.id)
+                        self.edge_budget.enforce(self.graph, target_id)
 
         return anchor
 
@@ -796,6 +896,24 @@ class MemoryRuntime:
         except Exception:
             pass
 
+        # 6e. Edge budget: enforce across all nodes (#49)
+        eb_result = {"over_budget_nodes": 0, "total_evicted": 0}
+        try:
+            eb_result = self.edge_budget.enforce_all(self.graph)
+        except Exception:
+            pass
+
+        # 6f. Four-layer compression: message→event→semantic→personality (#51)
+        fl_result = {"layer0_compressed": 0, "layer1_compressed": 0,
+                     "layer2_compressed": 0, "decayed": 0}
+        try:
+            fl_result["layer0_compressed"] = self.four_layer.compress_layer0()
+            fl_result["layer1_compressed"] = self.four_layer.compress_layer1()
+            fl_result["layer2_compressed"] = self.four_layer.compress_layer2()
+            fl_result["decayed"] = self.four_layer.decay_all()
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -826,6 +944,8 @@ class MemoryRuntime:
                 "reports": reflection_reports[:5],
             },
             "reflection_stats": self.reflection_loop.stats,
+            "edge_budget": eb_result,
+            "four_layer": fl_result,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
@@ -1306,14 +1426,18 @@ class MemoryRuntime:
 
     def connect(self, source_id: str, target_id: str,
                 weight: float = 0.5, edge_type: str = "topical") -> Edge | None:
-        """Explicitly connect two memories."""
+        """Explicitly connect two memories. Edge budget enforced post-connection."""
         if source_id not in self.graph.anchors or target_id not in self.graph.anchors:
             return None
         src_emb = self.graph.anchors[source_id].embedding
         tgt_emb = self.graph.anchors[target_id].embedding
         if src_emb and tgt_emb and weight == 0.5:
             weight = _cosine_sim(src_emb, tgt_emb)
-        return self.graph.add_edge(source_id, target_id, weight=weight, edge_type=edge_type)
+        edge = self.graph.add_edge(source_id, target_id, weight=weight, edge_type=edge_type)
+        if edge:
+            self.edge_budget.enforce(self.graph, source_id)
+            self.edge_budget.enforce(self.graph, target_id)
+        return edge
 
     def reinforce(self, source_id: str, target_id: str) -> bool:
         edge_key = self.graph._key(source_id, target_id)
