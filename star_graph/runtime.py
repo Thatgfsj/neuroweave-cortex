@@ -50,6 +50,8 @@ from .domain_router import DomainRouter
 from .write_gate import MemoryWriteGate, GateDecision
 from .edge_budget import EdgeBudgetManager
 from .four_layer import FourLayerCompressor
+from .thermal_store import ThermalStore
+from .edge_decay import EdgeDecayManager
 from .multimodal import (
     MultimodalEmbeddingProvider, MultimodalAnchor, CrossModalRetriever, CrossModalResult,
 )
@@ -158,6 +160,12 @@ class MemoryRuntime:
 
         # Four-layer compressor — message→event→semantic→personality (#51)
         self._four_layer: FourLayerCompressor | None = None
+
+        # Thermal store — 3-tier hot/cold/archive auto management (#53)
+        self._thermal_store: ThermalStore | None = None
+
+        # Edge decay manager — continuous time-based edge decay (#54)
+        self._edge_decay_mgr: EdgeDecayManager | None = None
 
         # Snapshot manager — versioned state snapshots with WAL
         self._snapshot_mgr: SnapshotManager | None = None
@@ -438,6 +446,31 @@ class MemoryRuntime:
         if self._four_layer is None:
             self._four_layer = FourLayerCompressor()
         return self._four_layer
+
+    @property
+    def thermal_store(self) -> ThermalStore:
+        """Lazy-init 3-tier hot/cold/archive storage manager."""
+        if self._thermal_store is None:
+            ts_cfg = getattr(self.cfg, 'thermal_store', None)
+            storage_dir = os.path.dirname(self.storage_path) if self.storage_path else "memory"
+            self._thermal_store = ThermalStore(storage_dir=storage_dir)
+            if ts_cfg:
+                self._thermal_store.hot_to_cold_hours = getattr(ts_cfg, 'hot_to_cold_hours', 72.0)
+                self._thermal_store.cold_to_archive_hours = getattr(ts_cfg, 'cold_to_archive_hours', 720.0)
+        return self._thermal_store
+
+    @property
+    def edge_decay_mgr(self) -> EdgeDecayManager:
+        """Lazy-init continuous edge time decay manager."""
+        if self._edge_decay_mgr is None:
+            ed_cfg = getattr(self.cfg, 'edge_decay', None)
+            multiplier = getattr(ed_cfg, 'base_multiplier', 1.0) if ed_cfg else 1.0
+            min_weight = getattr(ed_cfg, 'min_edge_weight', 0.02) if ed_cfg else 0.02
+            self._edge_decay_mgr = EdgeDecayManager(
+                base_decay_multiplier=multiplier,
+                min_edge_weight=min_weight,
+            )
+        return self._edge_decay_mgr
 
     @property
     def hublayer(self) -> HubLayer:
@@ -914,6 +947,21 @@ class MemoryRuntime:
         except Exception:
             pass
 
+        # 6g. Thermal store demotion scan — hot→cold→archive (#53)
+        ts_result = {"hot_to_cold": 0, "cold_to_archive": 0}
+        try:
+            ts_result = self.thermal_store.demote_scan(self.graph, now=current_time)
+            self.thermal_store.flush()
+        except Exception:
+            pass
+
+        # 6h. Edge time decay — continuous decay across all edges (#54)
+        ed_result = {"decayed": 0, "evicted": 0}
+        try:
+            ed_result = self.edge_decay_mgr.decay_all_edges(self.graph, now=current_time)
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -946,6 +994,8 @@ class MemoryRuntime:
             "reflection_stats": self.reflection_loop.stats,
             "edge_budget": eb_result,
             "four_layer": fl_result,
+            "thermal_store": ts_result,
+            "edge_decay": ed_result,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:

@@ -1,6 +1,6 @@
 # Star Graph Memory — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.3.0** | 467 tests passing | 58 commits
+> Last updated: 2026-05-15 | **v1.4.0** | 496 tests passing | 59 commits
 
 ---
 
@@ -8,16 +8,16 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.3.0 |
-| **Production modules** | 68 Python files in `star_graph/` |
-| **Production code** | ~29,000 lines |
-| **Test files** | 23 files in `tests/` |
-| **Test code** | ~6,500 lines |
-| **Total tests** | **467** (all passing) |
-| **Total commits** | 58 |
+| **Version** | 1.4.0 |
+| **Production modules** | 70 Python files in `star_graph/` |
+| **Production code** | ~30,000 lines |
+| **Test files** | 25 files in `tests/` |
+| **Test code** | ~6,800 lines |
+| **Total tests** | **496** (all passing) |
+| **Total commits** | 59 |
 | **License** | MIT |
 
-### Module Inventory (62 modules)
+### Module Inventory (64 modules)
 
 ```
 star_graph/
@@ -66,6 +66,8 @@ star_graph/
 ├── edge_budget.py            # EdgeBudgetManager: max 32 edges/node with smart retention scoring
 ├── write_gate.py             # MemoryWriteGate: 5-stage pre-write quality filter (noise/dup/importance)
 ├── four_layer.py             # FourLayerCompressor: message→event→semantic→personality compression
+├── thermal_store.py          # ThermalStore: 3-tier hot/cold/archive auto promotion + demotion
+├── edge_decay.py             # EdgeDecayManager: continuous time-based edge decay with adaptive rates
 │
 ├── ── Sleep & Consolidation ──
 ├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
@@ -116,6 +118,8 @@ star_graph/
     ├── test_edge_budget.py          # Edge budget smart eviction (17 tests)
     ├── test_write_gate.py           # Write gate pre-write quality filter (28 tests)
     ├── test_four_layer.py           # Four-layer memory compression (25 tests)
+    ├── test_thermal_store.py        # Thermal store 3-tier auto storage (11 tests)
+    ├── test_edge_decay.py           # Edge continuous time decay (17 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -150,6 +154,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | **v1.1.0** | **2026-05-15** | **Hippocampus buffer, edge sparsification, file sharding, sleep rebuild (fuse/rewire/abstract), cortex hierarchy, abstractive memory engine, dynamic neural rewiring, success-rate RL, temporal slice projection — 276 tests** |
 | **v1.2.0** | **2026-05-15** | **Memory tiering, decay+reinforcement loop, FROZEN thermal tier, edge traversal weights, spreading activation, cognitive cache, cognitive compiler (worldview emergence), self-reflection loop, graph-first retrieval — 373 tests** |
 | **v1.3.0** | **2026-05-15** | **Domain router (hierarchical topic tree), edge budget (smart eviction, max 32), write gate (5-stage quality filter), four-layer compression (M→E→S→P) — 467 tests** |
+| **v1.4.0** | **2026-05-15** | **Spreading activation primary retrieval, 3-tier thermal store (hot/cold/archive), continuous edge time decay — 496 tests** |
 
 ---
 
@@ -883,6 +888,7 @@ Implementation:
 | **11** | **P1** | #43 Spreading Activation, #44 Cognitive Cache |
 | **12** | **P2** | #45 Cognitive Compiler, #46 Self-Reflection, #47 Graph-First Retrieval |
 | **13** | **S** | #48 Domain Router, #49 Edge Budget, #50 Write Gate, #51 Four-Layer Compression |
+| **14** | **A** | #52 Spreading Activation Retrieval, #53 Thermal Store, #54 Edge Time Decay |
 
 ---
 
@@ -939,3 +945,41 @@ Implementation:
 - `get_for_retrieval()`: searches all layers, personality-first priority
 - Wired into `runtime.remember()` (ingest) and `runtime.sleep()` (compress + decay)
 - Config section: `four_layer.enabled` (default false)
+
+---
+
+### Phase 14 — Spreading Activation + Thermal Store + Edge Decay (A-Level, v1.4.0) ✅ COMPLETE
+
+- [x] #52 Spreading activation as primary retrieval path
+- [x] #53 Hot/Cold/Archive three-tier auto storage
+- [x] #54 Continuous edge time decay with adaptive rates
+
+#### #52 Spreading Activation Retrieval
+
+Implementation:
+- `_spreading_recall()` method added to `RetrievalPipeline`: uses `SpreadingActivation.activate()` as Path C
+- `recall_with_spreading()` method: spreading-first recall with configurable `spreading_weight`
+- Spreading results merged into main `recall()` path alongside dimensional descent
+- When spreading agrees with other paths, existing items get a +0.05 score boost
+- `recall_with_spreading()` combines topology score × `spreading_weight` + embedding score × (1 − weight)
+
+#### #53 Thermal Store (Hot/Cold/Archive)
+
+Implementation:
+- `ThermalStore` class with 3-tier management
+- `touch(anchor_id)`: records access → triggers promotion (archive→cold, cold→hot)
+- `demote_scan(graph)`: scans for idle anchors → hot→cold (72h), cold→archive (720h)
+- `thaw_anchor(anchor_id, graph)`: full cold/archive→hot reconstruction
+- `load_cold()` / `load_archive()`: transparent data access with auto-touch
+- Wired into `runtime.sleep()` as step 6g (demotion scan)
+
+#### #54 Edge Time Decay
+
+Implementation:
+- `EdgeDecayManager` class with per-edge decay rate by type
+- `apply_decay(edge)`: lazy decay on access — `weight *= exp(-rate × hours_idle)`
+- `reinforce(edge)`: strengthens weight + extends `valid_until` by type-specific hours
+- `is_viable(edge)`: checks expiration + min weight
+- `decay_all_edges(graph)`: bulk decay during sleep, evicts edges below `min_edge_weight`
+- Decay rate adapts to success rate: high-success edges decay at half speed
+- Wired into `runtime.sleep()` as step 6h (decay all edges)

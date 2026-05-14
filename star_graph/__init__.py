@@ -10,7 +10,7 @@ Architecture:
   Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -134,6 +134,8 @@ from .edge_budget import EdgeBudgetManager, EDGE_TYPE_RETENTION_PRIORITY
 from .four_layer import (
     FourLayerCompressor, CompressLayer, LayerConfig, CompressedMemory,
 )
+from .thermal_store import ThermalStore
+from .edge_decay import EdgeDecayManager
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

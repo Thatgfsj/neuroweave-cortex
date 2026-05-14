@@ -146,7 +146,13 @@ class RetrievalPipeline:
             query=query, context=context, max_items=max_items)
         graph_ms = (time.time() - t0) * 1000
 
-        # Merge: exact cache → cognitive cache → raw buffer → graph
+        # Path C: Spreading activation graph walk (#52)
+        t0 = time.time()
+        spreading_items = self._spreading_recall(
+            query_emb=query_emb, query=query, max_items=max_items)
+        spreading_ms = (time.time() - t0) * 1000
+
+        # Merge: exact cache → cognitive cache → raw buffer → graph → spreading
         merged_items = list(exact_results)
         seen_texts = {self._rt._normalize_text(item.compressed_text) for item in merged_items
                       if hasattr(item, 'compressed_text') and item.compressed_text}
@@ -184,6 +190,21 @@ class RetrievalPipeline:
             text = getattr(item, 'compressed_text', '') or ''
             norm_text = self._rt._normalize_text(text)
             if norm_text and norm_text in seen_texts:
+                continue
+            seen_texts.add(norm_text)
+            merged_items.append(item)
+
+        # Insert spreading activation results (#52)
+        for item in spreading_items:
+            text = getattr(item, 'compressed_text', '') or ''
+            norm_text = self._rt._normalize_text(text)
+            if norm_text and norm_text in seen_texts:
+                # Boost existing item when spreading agrees with other paths
+                for existing in merged_items:
+                    existing_text = getattr(existing, 'compressed_text', '') or ''
+                    if self._rt._normalize_text(existing_text) == norm_text:
+                        existing.relevance_score = min(1.0, existing.relevance_score + 0.05)
+                        break
                 continue
             seen_texts.add(norm_text)
             merged_items.append(item)
@@ -241,6 +262,7 @@ class RetrievalPipeline:
             "cache_ms": round(cache_ms, 3),
             "raw_ms": round(raw_ms, 3),
             "graph_ms": round(graph_ms, 3),
+            "spreading_ms": round(spreading_ms, 3),
             "total_ms": round(total_ms, 3),
         }, duration_ms=total_ms)
 
@@ -295,6 +317,105 @@ class RetrievalPipeline:
                 f"reason={trigger_reason}",
                 f"s1_confidence={dc_output.s1_confidence:.3f}",
                 f"s2_confidence={dc_output.s2_confidence:.3f}",
+            ],
+        )
+
+    def _spreading_recall(self, query_emb: list[float] | None = None,
+                          query: str = "", max_items: int = 10) -> list[MemoryItem]:
+        """Path C: Spreading activation graph walk (#52).
+
+        Finds seeds via ANN, then BFS-walks the graph with edge-type-weighted
+        traversal. Returns MemoryItem list for merging into the main recall path.
+        """
+        if query_emb is None and query:
+            embedder = self._rt._get_embedder()
+            query_emb = embedder.encode(query)
+        if query_emb is None:
+            return []
+
+        try:
+            activated = self._rt.spreading.activate(
+                query_embedding=query_emb, top_k=max_items)
+        except Exception:
+            return []
+
+        items: list[MemoryItem] = []
+        for node in activated:
+            anchor = node.anchor
+            if anchor is None or not anchor.is_retrievable:
+                continue
+            # Scale activation (0..~1.0 range) to relevance score (0..1.0)
+            score = min(1.0, node.accumulated_activation)
+            items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=score,
+                memory_type=MemoryType.SEMANTIC,
+                compression_level=node.activation_depth,
+                compressed_text=anchor.text[:200],
+            ))
+        return items
+
+    def recall_with_spreading(self, query: str = "",
+                              context: AgentContext | None = None,
+                              max_items: int = 10,
+                              spreading_weight: float = 0.6) -> MemoryContext:
+        """Spreading-first recall: graph walk as primary signal, embedding as refinement.
+
+        Uses the SpreadingActivation BFS walk as the primary retrieval mechanism,
+        with embedding similarity as a secondary re-ranking factor. This favours
+        structurally-connected memories over pure semantic similarity.
+        """
+        if context is None:
+            context = AgentContext(task_type="conversation")
+        t_start = time.time()
+        embedder = self._rt._get_embedder()
+        query_emb = embedder.encode(query) if query else None
+
+        # Run spreading activation as primary path
+        activated = self._rt.spreading.activate(
+            query_embedding=query_emb, top_k=max_items * 2)
+
+        # Convert to MemoryItem with combined topology+embedding score
+        items: list[MemoryItem] = []
+        for node in activated:
+            anchor = node.anchor
+            if anchor is None or not anchor.is_retrievable:
+                continue
+            topo_score = min(1.0, node.accumulated_activation)
+            emb_score = 0.0
+            if query_emb and anchor.embedding:
+                emb_score = _cosine_sim(query_emb, anchor.embedding)
+            combined = spreading_weight * topo_score + (1 - spreading_weight) * emb_score
+            items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=combined,
+                memory_type=MemoryType.SEMANTIC,
+                compression_level=node.activation_depth,
+                compressed_text=anchor.text[:200],
+            ))
+
+        items.sort(key=lambda i: -i.relevance_score)
+        items = items[:max_items]
+
+        total_ms = (time.time() - t_start) * 1000
+        self._rt.tracer.record("recall", attributes={
+            "query": query[:200],
+            "max_items": max_items,
+            "final_count": len(items),
+            "channel": "spreading_first",
+            "total_ms": round(total_ms, 3),
+        }, duration_ms=total_ms)
+
+        return MemoryContext(
+            items=items,
+            memory_summary=f"Spreading-First | activated {len(activated)} nodes, top {len(items)}",
+            active_patterns=[],
+            relevant_facts=[],
+            reasoning_traces=[
+                f"spreading_first",
+                f"weight={spreading_weight}",
+                f"activated={len(activated)}",
+                f"returned={len(items)}",
             ],
         )
 

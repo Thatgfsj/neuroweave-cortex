@@ -1,7 +1,7 @@
 # Star Graph Memory — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.3.0"
+version: "1.4.0"
 
 # ── Memory Tiering (STM/MTM/LTM/Core) ──
 tier:
@@ -438,3 +438,15 @@ four_layer:
     max_items: 20
     ttl_hours: 0
     compression_ratio: 0.0
+
+# ── Thermal Store (#53) ──
+thermal_store:
+  hot_to_cold_hours: 72.0            # idle hours before hot→cold demotion
+  cold_to_archive_hours: 720.0       # idle hours before cold→archive
+  promote_accesses: 2                # access count to trigger promotion
+  promote_window_hours: 24.0         # time window for access count tracking
+
+# ── Edge Decay (#54) ──
+edge_decay:
+  base_multiplier: 1.0               # global decay speed multiplier
+  min_edge_weight: 0.02              # edges below this are evicted
