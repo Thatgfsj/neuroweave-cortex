@@ -171,33 +171,48 @@ class AnchorVector:
     # v0.5: multiplicative decay fields
     success_feedback: float = 0.5  # 0..1  how often this memory led to good outcomes
     confidence: float = 0.5        # 0..1  how reliable/repeatable this memory is
-    novelty: float = 0.5           # 0..1  how new/unique this memory is (high = novel)
-    task_relevance: float = 0.5    # 0..1  relevance to current/active tasks
-    future_reusability: float = 0.5  # 0..1  estimated long-term value
     decay_rate: float = 0.01       # per-day natural decay coefficient
 
     def to_list(self) -> list[float]:
+        """Serialize to 10-element list (v1.0.8 compact format)."""
         return [
             self.importance, self.frequency, self.recency,
             self.emotional_valence, self.stability, self.surprise,
             self.hippocampal_dependency,
             self.success_feedback, self.confidence,
-            self.novelty, self.task_relevance, self.future_reusability,
             self.decay_rate,
         ]
 
     @classmethod
     def from_list(cls, values: list[float]) -> AnchorVector:
+        """Deserialize with backward compat for old 13-element vectors.
+
+        Old format (13): importance, frequency, recency, emotional_valence,
+            stability, surprise, hippocampal_dependency, success_feedback,
+            confidence, novelty, task_relevance, future_reusability, decay_rate.
+
+        New format (10): same minus novelty, task_relevance, future_reusability.
+        """
+        v = list(values)
+        # Pad with defaults if short
         defaults = [0.5, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0,
-                    0.5, 0.5, 0.5, 0.5, 0.5, 0.01]
-        merged = values + defaults[len(values):]
+                    0.5, 0.5, 0.01]
+        while len(v) < len(defaults):
+            v.append(defaults[len(v)])
+
+        # If old 13-element format, merge removed dimensions into survivors:
+        # novelty→surprise(max), task_relevance→importance(max), future_reusability→drop
+        if len(v) >= 13:
+            v[5] = max(v[5], v[9])       # surprise = max(surprise, novelty)
+            v[0] = max(v[0], v[10])      # importance = max(importance, task_relevance)
+            # future_reusability (v[11]) is dropped
+
         return cls(
-            importance=merged[0], frequency=merged[1], recency=merged[2],
-            emotional_valence=merged[3], stability=merged[4], surprise=merged[5],
-            hippocampal_dependency=merged[6],
-            success_feedback=merged[7], confidence=merged[8],
-            novelty=merged[9], task_relevance=merged[10], future_reusability=merged[11],
-            decay_rate=merged[12],
+            importance=v[0], frequency=v[1], recency=v[2],
+            emotional_valence=v[3], stability=v[4], surprise=v[5],
+            hippocampal_dependency=v[6],
+            success_feedback=v[7], confidence=v[8],
+            decay_rate=v[9],
         )
 
 
@@ -298,7 +313,8 @@ class Anchor:
         ).hexdigest()
         vec_fields = {"importance", "frequency", "recency",
                       "emotional_valence", "stability", "surprise",
-                      "hippocampal_dependency"}
+                      "hippocampal_dependency", "success_feedback", "confidence",
+                      "decay_rate"}
         vec_kw.setdefault("importance", importance)
         vec_kw.setdefault("emotional_valence", emotional_valence)
         vec_kw.setdefault("surprise", surprise)
@@ -494,10 +510,9 @@ class Anchor:
 
     @property
     def relevance(self) -> float:
-        """Composite relevance: importance × task_relevance × (1+|valence|×0.2)."""
+        """Composite relevance: importance × success_feedback × (1+|valence|×0.2)."""
         v = self.vector
-        base = v.importance * max(v.task_relevance, 0.01)
-        # Emotional memories get slight boost (0-20%)
+        base = v.importance * max(v.success_feedback, 0.01)
         emotional_boost = 1.0 + abs(v.emotional_valence) * 0.2
         return max(0.01, min(1.0, base * emotional_boost))
 
@@ -526,27 +541,24 @@ class Anchor:
 
     @property
     def importance_score(self) -> float:
-        """Compute importance from multiple signals.
+        """Compute importance from surviving signals.
 
-        importance = novelty × 0.25 + |emotional_weight| × 0.25
-                   + task_relevance × 0.25 + future_reusability × 0.25
+        importance = base × 0.50 + |emotional_valence| × 0.25 + surprise × 0.25
         """
         v = self.vector
         return max(0.01, min(1.0,
-            v.novelty * 0.25
+            v.importance * 0.50
             + abs(v.emotional_valence) * 0.25
-            + v.task_relevance * 0.25
-            + v.future_reusability * 0.25
+            + v.surprise * 0.25
         ))
 
     @property
     def retention_score(self) -> float:
         """Multiplicative memory decay model using geometric mean.
 
-        retention = (relevance × recency × frequency′ × success_feedback × confidence)^(1/5)
+        retention = (relevance × recency × frequency′ × success × confidence)^(1/5)
 
-        Cached for 0.5s to avoid recomputation in hot retrieval loops
-        where the same anchor is scored multiple times.
+        Cached for 0.5s to avoid recomputation in hot retrieval loops.
         """
         # Return cached value if fresh (< 0.5s since last compute)
         if self._ret_cached >= 0.0 and (time.time() - self._ret_ts) < 0.5:
