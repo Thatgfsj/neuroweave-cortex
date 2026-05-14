@@ -24,6 +24,7 @@ from .router import CortexRouter
 from .gate import MemoryGate
 from .timespine import TimeSpine
 from .tiered import TieredStorage
+from .hippocampus import HippocampusBuffer
 from .cascade import CascadeRecall
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
@@ -118,6 +119,7 @@ class MemoryRuntime:
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
         self._tiered: TieredStorage | None = None
+        self._hippocampus = None  # HippocampusBuffer — lazy init
 
         # Raw chunk buffer — uncompressed short-term memory tier (L0)
         self._raw_buffer: RawBuffer | None = None
@@ -331,6 +333,19 @@ class MemoryRuntime:
         return self._tiered
 
     @property
+    def hippocampus(self) -> HippocampusBuffer:
+        if self._hippocampus is None:
+            hc_cfg = getattr(self.cfg, 'hippocampus', None)
+            self._hippocampus = HippocampusBuffer(
+                l1_max_items=int(getattr(hc_cfg, 'l1_max_items', 50) if hc_cfg else 50),
+                l1_ttl_minutes=float(getattr(hc_cfg, 'l1_ttl_minutes', 30.0) if hc_cfg else 30.0),
+                l2_max_items=int(getattr(hc_cfg, 'l2_max_items', 200) if hc_cfg else 200),
+                l2_ttl_hours=float(getattr(hc_cfg, 'l2_ttl_hours', 24.0) if hc_cfg else 24.0),
+                promote_threshold=int(getattr(hc_cfg, 'promote_threshold', 3) if hc_cfg else 3),
+            )
+        return self._hippocampus
+
+    @property
     def cascade(self) -> CascadeRecall:
         if self._cascade is None:
             self._cascade = CascadeRecall(self.graph)
@@ -398,6 +413,21 @@ class MemoryRuntime:
         for cortex in self.router.cortices:
             if cortex.is_overfull():
                 cortex.ensure_capacity()
+
+        # Hippocampus buffer: ingest into L1 (transient cache)
+        hc_enabled = True
+        hc_cfg = getattr(self.cfg, 'hippocampus', None)
+        if hc_cfg:
+            hc_enabled = getattr(hc_cfg, 'enabled', True)
+        if hc_enabled:
+            self.hippocampus.ingest(
+                text=text,
+                tags=tags or [],
+                importance=importance,
+                emotional_valence=emotional_valence,
+                source_session=source_session,
+                embedding=embedding,
+            )
 
         self.graph.add_anchor(anchor)
         self._anchors_since_micro += 1
@@ -688,14 +718,19 @@ class MemoryRuntime:
         evo = self.evolution.evolve(current_time)
         self.total_evolutions += 1
 
-        # 5. Decay ghosts and clean up cold storage for purged ones
+        # 5. Hippocampus sleep decisions: promote/discard/keep L2 items
+        hc_report = {"promoted": 0, "abstracted": 0, "discarded": 0, "kept": 0}
+        if self._hippocampus is not None:
+            hc_report = self.hippocampus.sleep_decide(self.graph, self._get_embedder())
+
+        # 6. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
             for gid in purged_ids:
                 self._tiered.remove(gid)
             self._tiered.compact()
 
-        # 6. Decay autobiographical narratives
+        # 7. Decay autobiographical narratives
         self_narratives_purged = 0
         if self._autobiography:
             self_narratives_purged = self._autobiography.degrade_all()
@@ -710,6 +745,7 @@ class MemoryRuntime:
             "ghost_stats": self.ghosts.stats,
             "ghosts_purged": ghost_purged,
             "self_narratives_purged": self_narratives_purged,
+            "hippocampus": hc_report,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:

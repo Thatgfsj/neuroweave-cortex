@@ -257,6 +257,14 @@ cascade:
   min_causal_strength: 0.2
   max_chains: 5
 
+hippocampus:
+  enabled: true                   # route new input through hippocampus before LTM
+  l1_ttl_minutes: 30              # L1 instant buffer — raw text, no graph
+  l2_ttl_hours: 24                # L2 short-term — lightweight vector + local edges
+  l1_max_items: 50                # max items in L1 before eviction
+  l2_max_items: 200               # max items in L2 before eviction
+  promote_threshold: 3             # access count needed to promote L1→L2
+
 hub:
   leaf_stability: 0.9
   domain_stability: 0.95

@@ -191,6 +191,14 @@ CONFIG_SCHEMA: dict[str, dict[str, tuple]] = {
         "min_causal_strength":      (float, False, 0.0, 1.0, None),
         "max_chains":               (int, False, 1, 100, None),
     },
+    "hippocampus": {
+        "enabled":                  (bool, False, None, None, None),
+        "l1_ttl_minutes":           (float, False, 1.0, 1440.0, None),
+        "l2_ttl_hours":             (float, False, 1.0, 720.0, None),
+        "l1_max_items":             (int, False, 1, 10000, None),
+        "l2_max_items":             (int, False, 1, 10000, None),
+        "promote_threshold":        (int, False, 1, 100, None),
+    },
     "hub": {
         "leaf_stability":           (float, False, 0.0, 1.0, None),
         "domain_stability":         (float, False, 0.0, 1.0, None),

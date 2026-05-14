@@ -54,6 +54,7 @@ from .gate import MemoryGate, GateScore
 from .timespine import TimeSpine, TimeBucket, MemoryCluster
 from .cascade import CascadeRecall, CausalChain
 from .hub import HubLayer, HubNode, HubEdge, HubShard
+from .hippocampus import HippocampusBuffer, HippocampusItem
 from .brain_sphere import BrainSphere, HubCenter
 from .manager import MemoryManager
 from .runtime import MemoryRuntime, ManagerStats
