@@ -21,23 +21,61 @@ from typing import Optional
 
 
 class EmbedderRegistry:
-    """Registry to avoid L1→L3 import. Layer 3 injects the embedder at startup."""
+    """Per-instance embedder store — avoids multi-Manager singleton pollution.
 
-    _embedder = None
+    Class-level: backward-compatible singleton for single-instance callers.
+        EmbedderRegistry.set_embedder_singleton(embedder)
+        emb = EmbedderRegistry.get_embedder_singleton()
+
+    Instance-level: each MemoryRuntime gets its own registry.
+        registry = EmbedderRegistry(embedder)
+        emb = registry.get_embedder()
+    """
+
+    _embedder = None  # class-level fallback
+
+    def __init__(self, embedder=None):
+        self._embedder = embedder  # instance-level (shadows class attr on self)
+
+    def set_embedder(self, embedder) -> None:
+        self._embedder = embedder
+
+    def get_embedder(self):
+        if self._embedder is not None:
+            return self._embedder
+        # Fall back to class-level singleton (backward compat)
+        if EmbedderRegistry._embedder is not None:
+            return EmbedderRegistry._embedder
+        from .embedding import get_embedder
+        emb = get_embedder()
+        self._embedder = emb
+        return emb
+
+    @property
+    def is_available(self) -> bool:
+        if self._embedder is not None or EmbedderRegistry._embedder is not None:
+            return True
+        try:
+            from .embedding import get_embedder
+            return True
+        except Exception:
+            return False
+
+    # ── Class-level (singleton) methods ──
 
     @classmethod
-    def set_embedder(cls, embedder) -> None:
+    def set_embedder_singleton(cls, embedder) -> None:
         cls._embedder = embedder
 
     @classmethod
-    def get_embedder(cls):
+    def get_embedder_singleton(cls):
         if cls._embedder is None:
             from .embedding import get_embedder
             cls._embedder = get_embedder()
         return cls._embedder
 
     @classmethod
-    def is_available(cls) -> bool:
+    def is_available_singleton(cls) -> bool:
         if cls._embedder is not None:
             return True
         try:
@@ -269,7 +307,7 @@ class Anchor:
 
         # Derive meaningful oscillator params via embedder registry (no L1→L3 import)
         try:
-            embedder = EmbedderRegistry.get_embedder()
+            embedder = EmbedderRegistry.get_embedder_singleton()
             freq = embedder.derive_frequency(
                 importance=vector_kw.get("importance", importance),
                 emotional_valence=vector_kw.get("emotional_valence", emotional_valence),

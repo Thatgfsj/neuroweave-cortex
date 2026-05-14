@@ -213,7 +213,7 @@ def get_embedder(model_name: str = "all-MiniLM-L6-v2") -> EmbeddingProvider:
     # Auto-register with anchor's embedder registry to avoid L1→L3 import
     from .anchor import EmbedderRegistry
     if EmbedderRegistry._embedder is None:
-        EmbedderRegistry.set_embedder(_provider)
+        EmbedderRegistry.set_embedder_singleton(_provider)
     return _provider
 
 

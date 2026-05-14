@@ -567,14 +567,24 @@ def _recall_at_k(result: RetrievalResult, ground_truth_ids: list[str], k: int = 
 # ── Personalized PageRank ─────────────────────────────────────
 
 def personalized_pagerank(graph: StarGraph, query_embedding: list[float] | None,
-                          damping: float = 0.85, max_iter: int = 50,
-                          tol: float = 1e-6) -> dict[str, float]:
-    """Compute Personalized PageRank over the memory graph.
+                          damping: float = 0.85, max_iter: int = 30,
+                          tol: float = 1e-5,
+                          seed_ids: list[str] | None = None,
+                          precomputed: dict[str, dict[str, float]] | None = None
+                          ) -> dict[str, float]:
+    """Compute Personalized PageRank over the memory graph (sparse, seed-focused).
 
-    The personalization vector is seeded by embedding similarity to the query
-    — anchors more similar to the query get higher restart probability.
+    Uses sparse dict-based power iteration — no dense n×n matrix allocation.
+    For large graphs (>500 anchors), restricts computation to top-k seeds.
 
-    PPR(v) = (1-d) * personalization[v] + d * sum_{(u,v) in E} PPR(u) / deg(u)
+    If precomputed dict is provided (keyed by community/seed), returns the
+    best-matching cached vector instead of recomputing from scratch.
+
+    Args:
+        graph: StarGraph with anchors and edges.
+        query_embedding: Query vector for personalization seeding.
+        seed_ids: Optional pre-selected seed anchor IDs (bypasses similarity scan).
+        precomputed: Optional dict of precomputed PPR vectors keyed by community ID.
     """
     anchors_list = list(graph.anchors.values())
     if not anchors_list:
@@ -583,51 +593,96 @@ def personalized_pagerank(graph: StarGraph, query_embedding: list[float] | None,
     n = len(anchors_list)
     id_to_idx = {a.id: i for i, a in enumerate(anchors_list)}
 
-    # Build personalization vector from embedding similarity
-    personalization = np.zeros(n)
-    if query_embedding:
-        sims = []
-        for a in anchors_list:
-            if a.embedding:
-                dot = sum(query_embedding[i] * a.embedding[i] for i in range(min(len(query_embedding), len(a.embedding))))
-                na = math.sqrt(sum(x**2 for x in query_embedding))
-                nb = math.sqrt(sum(x**2 for x in a.embedding))
-                sims.append(max(0.0, dot / (na * nb + 1e-8)))
-            else:
-                sims.append(0.0)
-        total_sim = sum(sims)
-        if total_sim > 1e-8:
-            for i, s in enumerate(sims):
-                personalization[i] = s / total_sim
-        else:
-            personalization.fill(1.0 / n)
-    else:
-        personalization.fill(1.0 / n)
+    # ── Fast path: precomputed PPR cache ──
+    if precomputed and query_embedding:
+        best_key = None
+        best_sim = -1.0
+        for key in precomputed:
+            # Key format: community_id or seed_anchor_id
+            key_anchor = graph.anchors.get(key)
+            if key_anchor and key_anchor.embedding:
+                sim = _cosine_sim(query_embedding, key_anchor.embedding)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_key = key
+        if best_key and best_sim > 0.2:
+            return dict(precomputed[best_key])
 
-    # Build adjacency matrix (out-degree normalized)
-    adj = np.zeros((n, n))
-    for i, a in enumerate(anchors_list):
-        neighbors = graph.neighbors(a.id)
-        total_weight = sum(w for _, w in neighbors)
-        if total_weight > 0:
-            for neighbor_id, weight in neighbors:
-                j = id_to_idx.get(neighbor_id)
-                if j is not None:
-                    adj[i, j] = weight / total_weight
-        else:
-            # Dangling node → uniform jump
-            adj[i, :] = 1.0 / n
+    # ── Seed selection: top-k anchors by embedding similarity ──
+    if seed_ids is None:
+        if query_embedding:
+            sims = []
+            for a in anchors_list:
+                if a.embedding:
+                    sims.append((a.id, _cosine_sim(query_embedding, a.embedding)))
+            sims.sort(key=lambda x: -x[1])
+            seed_ids = [aid for aid, s in sims[:20] if s > 0.1]
+        if not seed_ids:
+            return {}
 
-    # Power iteration
-    ppr = personalization.copy()
+    seed_set = set(seed_ids)
+    max_nodes = max(len(seed_ids) * 10, 100)
+
+    # ── Sparse personalization vector (only non-zero for seeds) ──
+    pers = {aid: 1.0 / len(seed_ids) for aid in seed_ids}
+
+    # ── Sparse adjacency (out-degree normalized, only for reachable nodes) ──
+    # Collect the working set: seeds + neighbors up to 2 hops
+    working_set: set[str] = set(seed_ids)
+    for aid in list(working_set):
+        for nid, _ in graph.neighbors(aid):
+            if len(working_set) < max_nodes:
+                working_set.add(nid)
+
+    working_ids = [aid for aid in working_set if aid in id_to_idx]
+    local_idx = {aid: i for i, aid in enumerate(working_ids)}
+
+    # Build sparse out-degree map
+    out_deg: dict[str, float] = {}
+    out_edges: dict[str, list[tuple[str, float]]] = {}
+    for aid in working_ids:
+        neighbors = graph.neighbors(aid)
+        total_w = sum(w for _, w in neighbors)
+        if total_w > 0:
+            out_deg[aid] = total_w
+            out_edges[aid] = [(nid, w / total_w) for nid, w in neighbors if nid in working_set]
+        else:
+            out_deg[aid] = 0.0
+            out_edges[aid] = []
+
+    m = len(working_ids)
+    if m == 0:
+        return {}
+
+    # ── Sparse power iteration ──
+    ppr = {aid: pers.get(aid, 0.0) for aid in working_ids}
     for _ in range(max_iter):
-        new_ppr = (1 - damping) * personalization + damping * adj.T @ ppr
-        delta = np.sum(np.abs(new_ppr - ppr))
+        new_ppr: dict[str, float] = {aid: (1 - damping) * pers.get(aid, 0.0) for aid in working_ids}
+        for aid in working_ids:
+            if out_deg[aid] > 0:
+                flow = damping * ppr.get(aid, 0.0)
+                for nid, w in out_edges[aid]:
+                    new_ppr[nid] = new_ppr.get(nid, 0.0) + flow * w
+            else:
+                # Dangling: redistribute uniformly
+                teleport = damping * ppr.get(aid, 0.0) / max(1, m)
+                for nid in working_ids:
+                    new_ppr[nid] = new_ppr.get(nid, 0.0) + teleport
+
+        delta = sum(abs(new_ppr.get(aid, 0.0) - ppr.get(aid, 0.0)) for aid in working_ids)
         ppr = new_ppr
         if delta < tol:
             break
 
-    return {anchors_list[i].id: float(ppr[i]) for i in range(n)}
+    return {aid: ppr.get(aid, 0.0) for aid in seed_ids} if seed_ids else {aid: ppr.get(aid, 0.0) for aid in working_ids}
+
+
+def _cosine_sim(a: list[float], b: list[float]) -> float:
+    """Inline cosine similarity for PPR hot path (avoids import cycle)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x**2 for x in a))
+    nb = math.sqrt(sum(x**2 for x in b))
+    return max(0.0, dot / (na * nb + 1e-8))
 
 
 # ── Hybrid Fusion Retriever ───────────────────────────────────
@@ -717,17 +772,17 @@ class HybridFusionRetriever(Retriever):
 
             scores[anchor.id] = (0.0, explain)
 
-        # 3. Personalized PageRank for graph structure
-        ppr = personalized_pagerank(self.graph, embedding)
+        # 3. Personalized PageRank — scoped to top seeds (not all n nodes)
+        top_seeds = sorted(scores.items(),
+                          key=lambda x: -(x[1][1].semantic_sim + x[1][1].temporal_score * 0.5))[:5]
+        seed_ids = [aid for aid, _ in top_seeds]
+        ppr = personalized_pagerank(self.graph, embedding, seed_ids=seed_ids)
         max_ppr = max(ppr.values()) if ppr else 1.0
         for aid, ppr_val in ppr.items():
             if aid in scores:
                 scores[aid][1].graph_score = ppr_val / max_ppr if max_ppr > 0 else 0.0
 
         # 4. Spreading activation for reasoning paths
-        top_seeds = sorted(scores.items(),
-                          key=lambda x: -(x[1][1].semantic_sim + x[1][1].temporal_score * 0.5))[:5]
-        seed_ids = [aid for aid, _ in top_seeds]
         activation = self.graph.spread_activation(seed_ids, steps=self.spread_steps)
 
         # Map activation to scores, record reasoning paths

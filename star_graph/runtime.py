@@ -328,6 +328,9 @@ class MemoryRuntime:
         if self._embedder is None:
             from .embedding import get_embedder
             self._embedder = get_embedder()
+            # Create instance-level registry to avoid multi-Manager singleton pollution
+            from .anchor import EmbedderRegistry
+            self._embedder_registry = EmbedderRegistry(self._embedder)
         return self._embedder
 
     # ── CRUD: Basic memory operations ─────────────────────────

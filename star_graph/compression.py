@@ -87,7 +87,7 @@ class SummaryAnchor:
 
         from .anchor import EmbedderRegistry
         try:
-            embedder = EmbedderRegistry.get_embedder()
+            embedder = EmbedderRegistry.get_embedder_singleton()
             freq = embedder.derive_frequency(importance=0.7, emotional_valence=0.0, text_length=len(self.text))
         except Exception:
             import math as _math
@@ -506,7 +506,7 @@ class SessionCompressor:
         # Now compute embeddings for any anchor that doesn't have one
         try:
             from .anchor import EmbedderRegistry
-            embedder = EmbedderRegistry.get_embedder()
+            embedder = EmbedderRegistry.get_embedder_singleton()
         except Exception:
             embedder = None
 
