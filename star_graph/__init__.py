@@ -53,7 +53,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     # runtime / manager (primary entry points)
     "MemoryManager":           ("star_graph.manager", "MemoryManager"),
     "MemoryRuntime":           ("star_graph.runtime", "MemoryRuntime"),
-    "ManagerStats":            ("star_graph.runtime", "ManagerStats"),
+    "ManagerStats":            ("star_graph.manager_stats", "ManagerStats"),
     "RetrievalPipeline":       ("star_graph.retrieval_pipeline", "RetrievalPipeline"),
 
     # scheduler
@@ -65,8 +65,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 
     # sleep
     "SleepCycle":              ("star_graph.sleep", "SleepCycle"),
-    "SleepReport":             ("star_graph.sleep", "SleepReport"),
-    "PhaseMetrics":            ("star_graph.sleep", "PhaseMetrics"),
+    "SleepReport":             ("star_graph.sleep_report", "SleepReport"),
+    "PhaseMetrics":            ("star_graph.sleep_report", "PhaseMetrics"),
 
     # retrieval
     "RetrievalResult":         ("star_graph.retriever", "RetrievalResult"),

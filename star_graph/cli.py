@@ -45,6 +45,8 @@ def query() -> None:
     parser.add_argument("--graph", default=None)
     parser.add_argument("--trace", action="store_true",
                         help="Print JSON retrieval_trace explainability output")
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format (default: text)")
     args = parser.parse_args()
 
     context = " ".join(args.context) if args.context else sys.stdin.read().strip()
@@ -70,6 +72,26 @@ def query() -> None:
     resonator = Resonator(graph)
     constellation, action = resonator.predictive_retrieve(context)
 
+    if args.format == "json":
+        anchors_out = []
+        if constellation:
+            for a in constellation.anchors[:10]:
+                anchors_out.append({
+                    "id": a.id,
+                    "text": a.text,
+                    "retention_score": round(a.retention_score, 2),
+                    "is_cortical": a.is_cortical,
+                })
+        output = {
+            "query": context[:200],
+            "action": action,
+            "anchor_count": len(constellation.anchors) if constellation else 0,
+            "total_weight": round(constellation.total_weight, 2) if constellation else 0.0,
+            "anchors": anchors_out,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
+
     if constellation:
         print(f"Action: {action}  |  Anchors: {len(constellation.anchors)}  |  Weight: {constellation.total_weight:.2f}")
         for a in constellation.anchors[:10]:
@@ -85,6 +107,8 @@ def sleep_cmd() -> None:
     parser.add_argument("--retention", type=float, default=0.15)
     parser.add_argument("--edge-prune", type=float, default=0.1)
     parser.add_argument("--merge-threshold", type=float, default=0.85)
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format (default: text)")
     args = parser.parse_args()
 
     from .sleep import SleepCycle
@@ -98,6 +122,25 @@ def sleep_cmd() -> None:
         edge_prune_threshold=args.edge_prune,
     )
     store.save(graph)
+
+    if args.format == "json":
+        s = result["stats_after"]
+        output = {
+            "cycle": result["cycle"],
+            "duration_seconds": result["duration_seconds"],
+            "log": result["log"],
+            "stats": {
+                "anchors": s["anchors"],
+                "edges": s["edges"],
+                "ghosts": s["ghosts"],
+                "schemas": s["schemas"],
+                "constellations": s["constellations"],
+                "avg_retention": round(s["avg_retention"], 3),
+                "avg_hippocampal_dep": round(s["avg_hippocampal_dep"], 3),
+            },
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
 
     print(f"Sleep #{result['cycle']} complete ({result['duration_seconds']}s)")
     for entry in result["log"]:
