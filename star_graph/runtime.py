@@ -718,12 +718,15 @@ class MemoryRuntime:
         evo = self.evolution.evolve(current_time)
         self.total_evolutions += 1
 
-        # 5. Hippocampus sleep decisions: promote/discard/keep L2 items
+        # 5. Edge sparsification: evict expired edges
+        edges_evicted = self.graph.evict_expired_edges()
+
+        # 6. Hippocampus sleep decisions: promote/discard/keep L2 items
         hc_report = {"promoted": 0, "abstracted": 0, "discarded": 0, "kept": 0}
         if self._hippocampus is not None:
             hc_report = self.hippocampus.sleep_decide(self.graph, self._get_embedder())
 
-        # 6. Decay ghosts and clean up cold storage for purged ones
+        # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
             for gid in purged_ids:

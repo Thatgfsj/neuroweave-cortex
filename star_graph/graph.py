@@ -65,6 +65,26 @@ EDGE_CONTRADICTS = "contradicts"        # mutual contradiction (A and B cannot b
 EDGE_CAUSED_BY = "caused_by"            # reverse causal (A was caused by B)
 EDGE_DERIVED_FROM = "derived_from"      # inference chain (A was deduced from B)
 
+# Explicable edge relation types — edges MUST use one of these (or a domain
+# subtype) to pass the sparsification gate. Topical/cosine-only edges are rejected.
+EXPLICABLE_RELATIONS: set[str] = {
+    "causes", "fixes", "depends_on", "contradicts", "upgrades",
+    "summarizes", "related_workflow", "same_project", "same_user_goal",
+    "superseded_by", "invalidated_by", "caused_by", "derived_from",
+    "causal", "temporal", "topical",              # legacy — allowed but discouraged
+    "refines", "generalizes", "analogous_to",     # abstraction relations
+    "before", "after", "during",                  # temporal ordering
+    "resolves", "duplicates", "conflicts_with",   # resolution relations
+}
+# Legacy edge types that are NOT explicable — auto-rejected when implicit
+LEGACY_EDGE_TYPES: set[str] = {"topical", "semantic", "similar", "related"}
+# Relations that are "strong" — carry causal/explicit weight, not just semantic
+STRONG_RELATIONS: set[str] = {
+    "causes", "fixes", "depends_on", "contradicts", "upgrades",
+    "superseded_by", "invalidated_by", "caused_by", "derived_from",
+    "resolves", "conflicts_with", "duplicates",
+}
+
 
 @dataclass
 class RichEdge:
@@ -593,6 +613,30 @@ class StarGraph:
                  session: str = "") -> Optional[Edge]:
         if src not in self.anchors or tgt not in self.anchors:
             return None
+
+        # ── Edge Sparsification Gate ───────────────────────
+        # Reject or downgrade edges based on explicability.
+        # Only edges with approved relation types pass at full weight.
+        relation_lower = relation.lower() if relation else ""
+        effective_relation = relation_lower or edge_type.lower()
+
+        if effective_relation not in EXPLICABLE_RELATIONS or effective_relation in LEGACY_EDGE_TYPES:
+            if source_type == "implicit" and confidence is None and causal_strength == 0.0:
+                # Pure cosine-similarity edge with no explicable reason — reject
+                return None
+
+        # Non-strong relations get a weight penalty to favor explicable edges
+        if effective_relation in STRONG_RELATIONS:
+            weight = min(1.0, weight * 1.1)  # slight boost for strong relations
+        elif effective_relation not in EXPLICABLE_RELATIONS:
+            weight = max(0.05, weight * 0.5)  # penalty for weak/implicit relations
+
+        # Default edge TTL: 14 days for weak, 90 days for strong
+        if valid_until <= 0:
+            import time as _time
+            days = 90 if effective_relation in STRONG_RELATIONS else 14
+            valid_until = _time.time() + days * 86400
+
         key = self._key(src, tgt)
 
         # Already connected — reinforce instead of duplicate
@@ -898,6 +942,21 @@ class StarGraph:
 
     def get_dormant_edges(self, threshold: float = 0.1) -> list[tuple[str, str]]:
         return [key for key, e in self.edges.items() if e.weight < threshold]
+
+    def evict_expired_edges(self) -> int:
+        """Remove edges that have passed their valid_until date. Returns count removed."""
+        now = time.time()
+        expired = []
+        for key, edge in self.edges.items():
+            valid_until = getattr(edge, 'valid_until', 0.0)
+            if 0 < valid_until < now:
+                expired.append(key)
+        for key in expired:
+            a, b = key
+            self._adjacency[a].discard(b)
+            self._adjacency[b].discard(a)
+            self.edges.pop(key, None)
+        return len(expired)
 
     def stats(self) -> dict:
         return {
