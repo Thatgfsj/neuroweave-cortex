@@ -314,6 +314,7 @@ dual_channel:
   s2_max_depth: 4                 # max traversal depth for hierarchical search
   merge_weight_s1: 0.4            # weight of System-1 in merged results
   merge_weight_s2: 0.6            # weight of System-2 in merged results
+  auto_trigger_keywords: true     # auto-trigger on structural keywords (all/every/list/...)
 
 community:
   max_community_size: 200

@@ -1,4 +1,4 @@
-"""CLI entry points — v0.2 with schema viewing, ghost listing, stats."""
+"""CLI entry points — v1.6.0 with --format json for agent integration."""
 
 import argparse
 import json
@@ -113,11 +113,40 @@ def stats_cmd() -> None:
     parser.add_argument("--graph", default=None)
     parser.add_argument("--schemas", action="store_true", help="List schemas")
     parser.add_argument("--ghosts", action="store_true", help="List ghosts")
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format (default: text)")
     args = parser.parse_args()
 
     store = Storage(args.graph)
     graph = store.load()
     s = graph.stats()
+
+    if args.format == "json":
+        output = {
+            "anchors": s["anchors"],
+            "edges": s["edges"],
+            "ghosts": s["ghosts"],
+            "schemas": s["schemas"],
+            "constellations": s["constellations"],
+            "cortical_index": s["cortical_index"],
+            "avg_retention": round(s["avg_retention"], 3),
+            "avg_edge_weight": round(s["avg_edge_weight"], 3),
+            "avg_hippocampal_dep": round(s["avg_hippocampal_dep"], 3),
+        }
+        if args.schemas and graph.schemas:
+            output["schemas_detail"] = [
+                {"confidence": round(sc.confidence, 2),
+                 "template": sc.template[:80],
+                 "instances": len(sc.instance_ids)}
+                for sc in graph.schemas.values()
+            ]
+        if args.ghosts and graph._ghost_subsystem:
+            output["ghosts_detail"] = [
+                {"id": gid[:16], "revivals": ghost.revival_count}
+                for gid, ghost in graph._ghost_subsystem.ghosts.items()
+            ]
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
 
     print(f"Star Graph v0.2  |  {store.path}")
     print(f"Anchors: {s['anchors']}  |  Edges: {s['edges']}  |  Ghosts: {s['ghosts']}")

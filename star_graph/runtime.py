@@ -48,10 +48,9 @@ from .tracing import MemoryTracer, get_tracer
 from .survival import SurvivalFunction, SurvivalRegistry
 from .domain_router import DomainRouter
 from .write_gate import MemoryWriteGate, GateDecision
-from .edge_budget import EdgeBudgetManager
+from .edge_management import EdgeBudgetManager, EdgeDecayManager
 from .four_layer import FourLayerCompressor
 from .thermal_store import ThermalStore
-from .edge_decay import EdgeDecayManager
 from .self_org import SelfOrganization
 from .personality import PersonalityModel
 from .goal_tree import GoalTree

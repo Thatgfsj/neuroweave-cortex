@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Roadmap
 
-## Current (v1.5.0 — 2026-05)
+## Current (v1.6.0 — 2026-05)
 
 - [x] 6-state memory lifecycle (ACTIVE → GHOST → REACTIVATED)
 - [x] Ghost subsystem with intensity ranking + NegativeGhost contradiction tracking
@@ -31,7 +31,7 @@
 - [x] Dependency manifest (requirements.txt)
 - [x] Version unification (1.0.6 across all files)
 
-## v1.0.7 (current — correctness & architecture)
+## v1.0.7 (completed — correctness & architecture)
 
 P0 + P1 fixes from code audit:
 
@@ -42,7 +42,7 @@ P0 + P1 fixes from code audit:
 - [x] Cortex independent sleep (per-cortex consolidation cycles)
 - [x] Dual-Channel auto-trigger in recall() (structural query detection + low-confidence fallback)
 
-## v1.0.8 (cognitive fidelity — in progress)
+## v1.0.8 (completed — cognitive fidelity)
 
 - [x] Autobiographical memory layer (SelfNarrative — "what I know about myself")
 - [x] State / ThermalState unified transition matrix
@@ -50,7 +50,7 @@ P0 + P1 fixes from code audit:
 - [ ] Cosine similarity deduplication (single `math_utils.py` implementation)
 - [ ] Sleep phase naming standardization (N1_Replay → N6_IndexRebuild)
 
-## v1.1.0 (production readiness)
+## v1.1.0 (completed — production readiness)
 
 - [ ] Config access API (`cfg.get('exact_cache.auto_harvest', True)`)
 - [ ] `find_contradictions()` O(n²) → O(n*k) via ANN pre-filter
@@ -62,14 +62,11 @@ P0 + P1 fixes from code audit:
 - [ ] Structured logging (replace `print()` + `self.log: list[str]`)
 - [ ] README doctest in CI
 
-## Future (v1.2+)
+## v1.2+ (completed)
 
-- [ ] Multi-agent memory federation
-- [ ] Cross-agent memory transfer
-- [ ] WASM embedded version (micro-star)
-- [ ] Visual graph explorer (debugging tool)
-- [ ] Predictive retrieval (anticipate agent's next need)
-- [ ] Memory safety (forgetting by request, access control, audit trails)
+All planned v1.2+ features have been delivered across v1.2–v1.6. See version history below.
+
+See [plan.md](plan.md) for detailed implementation history and architecture decisions.
 
 ## Version History
 
@@ -81,3 +78,12 @@ P0 + P1 fixes from code audit:
 | 0.4.0 | 2026-05 | Evolution engine, scheduler, hybrid fusion, edge versioning, benchmarks, manager facade |
 | 1.0.5 | 2026-05 | Survival functions (4 curves), ghost intensity, NegativeGhost contradiction tracking |
 | 1.0.6 | 2026-05 | Multimodal CLIP, streaming buffer with backpressure, dependency manifest, 232 tests |
+| 1.0.7 | 2026-05 | Ghost unification, raw buffer priority, ANN incremental, manager split, cortex sleep, dual-channel auto |
+| 1.0.8 | 2026-05 | Sleep merge ANN, BM25 hybrid, PPR sparse, EmbedderRegistry, AnchorVector 10-dim, tiered storage |
+| 1.0.9 | 2026-05 | Global hard cap, auto-sleep daemon, cold ghost cleanup, cortex hard rejection |
+| 1.1.0 | 2026-05 | Hippocampus buffer, edge sparsification, file sharding, sleep rebuild, cortex hierarchy |
+| 1.2.0 | 2026-05 | Memory tiering, decay+reinforcement, edge traversal weights, spreading activation, cognitive cache |
+| 1.3.0 | 2026-05 | Domain router, edge budget, write gate, four-layer compression — 467 tests |
+| 1.4.0 | 2026-05 | Spreading activation retrieval, 3-tier thermal store, continuous edge time decay — 496 tests |
+| 1.5.0 | 2026-05 | Renamed to NeuroWeave Cortex. Self-organization, personality model, goal tree — 582 tests |
+| 1.6.0 | 2026-05 | Retrieval budget, versioned memory, cluster memory, causal edges, episodic memory — 649 tests |

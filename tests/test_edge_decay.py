@@ -4,7 +4,7 @@ import time
 import pytest
 from star_graph.graph import StarGraph, Edge
 from star_graph.anchor import Anchor
-from star_graph.edge_decay import EdgeDecayManager, DECAY_RATE_PER_HOUR
+from star_graph.edge_management import EdgeDecayManager, DECAY_RATE_PER_HOUR
 
 
 class TestEdgeDecayInit:

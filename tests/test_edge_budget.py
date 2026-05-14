@@ -4,7 +4,7 @@ import time
 import pytest
 from star_graph.graph import StarGraph, Edge
 from star_graph.anchor import Anchor
-from star_graph.edge_budget import EdgeBudgetManager, EDGE_TYPE_RETENTION_PRIORITY
+from star_graph.edge_management import EdgeBudgetManager, EDGE_TYPE_RETENTION_PRIORITY
 
 
 def _make_graph(num_anchors: int = 50) -> StarGraph:
