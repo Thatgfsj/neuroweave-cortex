@@ -117,14 +117,194 @@ class _DotDict:
         return warnings
 
 
+# ── config schema ─────────────────────────────────────────────────────────
+# Each section entry: {key: (type, required, min, max, allowed_values)}
+# type can be: float, int, bool, str, or a callable validator
+# Required=True means the key must exist; False means optional
+
+CONFIG_SCHEMA: dict[str, dict[str, tuple]] = {
+    "anchor": {
+        "default_importance":       (float, False, 0.0, 1.0, None),
+        "default_frequency":        (float, False, 0.0, 10.0, None),
+        "default_recency":          (float, False, 0.0, 1.0, None),
+        "default_emotional_valence":(float, False, -1.0, 1.0, None),
+        "default_stability":        (float, False, 0.0, 1.0, None),
+        "default_surprise":         (float, False, 0.0, 1.0, None),
+        "default_hippocampal_dependency": (float, False, 0.0, 1.0, None),
+        "max_text_length":          (int, False, 0, 10000, None),
+    },
+    "sleep": {
+        "swr.valence_weight":       (float, False, 0.0, 5.0, None),
+        "swr.surprise_weight":      (float, False, 0.0, 5.0, None),
+        "swr.frequency_weight":     (float, False, 0.0, 5.0, None),
+        "swr.centrality_weight":    (float, False, 0.0, 5.0, None),
+        "swr.instability_weight":   (float, False, 0.0, 5.0, None),
+        "swr.top_fraction":         (float, False, 0.0, 1.0, None),
+        "swr.sample_fraction":      (float, False, 0.0, 1.0, None),
+        "systems.tau":              (float, False, 0.1, 200.0, None),
+        "merge.default_threshold":  (float, False, 0.0, 1.0, None),
+        "prune.default_retention_threshold": (float, False, 0.0, 1.0, None),
+        "prune.ghost_stale_days":   (int, False, 1, 365, None),
+    },
+    "graph": {
+        "contradiction_threshold":  (float, False, 0.0, 1.0, None),
+        "max_edges_per_node":       (int, False, 1, 1000, None),
+        "max_degree_total":         (int, False, 1, 10000, None),
+        "edge_budget_enabled":      (bool, False, None, None, None),
+    },
+    "working_memory": {
+        "max_capacity":             (int, False, 1, 1000, None),
+        "ttl_seconds":             (float, False, 1.0, 86400.0, None),
+    },
+    "exact_cache": {
+        "max_entries_per_key":      (int, False, 1, 1000, None),
+        "auto_harvest":             (bool, False, None, None, None),
+        "harvest_on_remember":      (bool, False, None, None, None),
+    },
+    "cortex": {
+        "default_token_budget":     (int, False, 1, 1000000, None),
+        "max_anchors_before_consolidate": (int, False, 1, 100000, None),
+        "consolidate_interval_hours": (float, False, 0.1, 8760.0, None),
+    },
+    "routing": {
+        "max_cortices":             (int, False, 1, 100, None),
+        "min_score":                (float, False, 0.0, 1.0, None),
+    },
+    "gate": {
+        "k":                        (int, False, 1, 1000, None),
+        "lateral_inhibition_radius":(float, False, 0.0, 1.0, None),
+        "inhibition_strength":      (float, False, 0.0, 1.0, None),
+    },
+    "timespine": {
+        "max_clusters_per_day":     (int, False, 1, 1000, None),
+        "cluster_similarity_threshold": (float, False, 0.0, 1.0, None),
+        "max_days_scan":            (int, False, 1, 3650, None),
+        "max_clusters_scan":        (int, False, 1, 10000, None),
+    },
+    "cascade": {
+        "max_depth":                (int, False, 1, 100, None),
+        "min_causal_strength":      (float, False, 0.0, 1.0, None),
+        "max_chains":               (int, False, 1, 100, None),
+    },
+    "hub": {
+        "leaf_stability":           (float, False, 0.0, 1.0, None),
+        "domain_stability":         (float, False, 0.0, 1.0, None),
+        "global_stability":         (float, False, 0.0, 1.0, None),
+    },
+    "raw_buffer": {
+        "max_sessions":             (int, False, 1, 100, None),
+        "max_chunks_per_session":   (int, False, 1, 10000, None),
+        "bm25_weight":              (float, False, 0.0, 1.0, None),
+        "merge_weight":             (float, False, 0.0, 1.0, None),
+    },
+    "atom_facts": {
+        "provider":                 (str, False, None, None, ["template", "openai", "anthropic"]),
+        "model":                    (str, False, None, None, None),
+    },
+    "dual_channel": {
+        "s1_confidence_threshold":  (float, False, 0.0, 1.0, None),
+        "s2_max_depth":             (int, False, 1, 100, None),
+        "merge_weight_s1":          (float, False, 0.0, 1.0, None),
+        "merge_weight_s2":          (float, False, 0.0, 1.0, None),
+    },
+    "community": {
+        "max_community_size":       (int, False, 1, 10000, None),
+        "min_community_size":       (int, False, 1, 10000, None),
+        "max_iterations":           (int, False, 1, 1000, None),
+    },
+    "index": {
+        "algorithm":                (str, False, None, None, ["brute", "hnsw", "annoy"]),
+        "metric":                   (str, False, None, None, ["cosine", "euclidean", "dot"]),
+        "n_trees":                  (int, False, 1, 1000, None),
+        "rebuild_on_adds":          (int, False, 1, 100000, None),
+    },
+    "snapshot": {
+        "keep":                     (int, False, 0, 1000, None),
+        "compress":                 (bool, False, None, None, None),
+        "auto_interval_hours":      (float, False, 0.0, 8760.0, None),
+    },
+    "survival": {
+        "function":                 (str, False, None, None, ["ebbinghaus", "power_law", "exponential", "custom"]),
+    },
+    "tracing": {
+        "enabled":                  (bool, False, None, None, None),
+        "max_traces":               (int, False, 1, 10000, None),
+    },
+}
+
+# Cross-section compatibility checks: (section, key, condition_fn, message)
+# condition_fn receives the full flattened config dict and returns True if there's a problem
+_CROSS_SECTION_CHECKS: list[tuple] = [
+    # merge threshold should be >= prune retention_threshold
+    # (otherwise we'd merge less aggressively than we prune)
+    # ("sleep", "merge.default_threshold", ...)
+]
+
+
+def _validate_schema(config_dict: dict, schema: dict) -> list[str]:
+    """Validate config against schema: type, range, allowed_values. Returns warnings."""
+    warnings: list[str] = []
+    flat = _flatten_dict(config_dict)
+
+    for section, keys in schema.items():
+        if section not in config_dict:
+            warnings.append(f"[schema] missing section: {section}")
+            continue
+        for dotted_key, (expected_type, required, vmin, vmax, allowed) in keys.items():
+            value = flat.get(f"{section}.{dotted_key}")
+            if value is None:
+                if required:
+                    warnings.append(f"[schema] {section}.{dotted_key} is required but missing")
+                continue
+            # Type check
+            if expected_type == float and not isinstance(value, (int, float)):
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} should be float, got {type(value).__name__}")
+            elif expected_type == int and isinstance(value, bool):
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} should be int, got bool")
+            elif expected_type == int and not isinstance(value, int):
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} should be int, got {type(value).__name__}")
+            elif expected_type == str and not isinstance(value, str):
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} should be str, got {type(value).__name__}")
+            elif expected_type == bool and not isinstance(value, bool):
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} should be bool, got {type(value).__name__}")
+            # Range check
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if vmin is not None and value < vmin:
+                    warnings.append(f"[schema] {section}.{dotted_key}={value} < min {vmin}")
+                if vmax is not None and value > vmax:
+                    warnings.append(f"[schema] {section}.{dotted_key}={value} > max {vmax}")
+            # Allowed values
+            if allowed is not None and value not in allowed:
+                warnings.append(f"[schema] {section}.{dotted_key}={value!r} not in {allowed}")
+
+    # Cross-section checks
+    for section, dotted_key, condition_fn, message in _CROSS_SECTION_CHECKS:
+        full_key = f"{section}.{dotted_key}"
+        if condition_fn(flat):
+            warnings.append(f"[compat] {full_key}: {message}")
+
+    return warnings
+
+
+def _flatten_dict(d: dict, prefix: str = "") -> dict:
+    """Flatten nested dicts with dotted keys."""
+    result: dict = {}
+    for k, v in d.items():
+        full = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            result.update(_flatten_dict(v, full))
+        else:
+            result[full] = v
+    return result
+
+
 def _check_ranges(data: dict, path: str, warnings: list[str]) -> None:
-    """Recursively check that numeric values are in [0, 1] or otherwise reasonable."""
+    """Recursively check that numeric values are in reasonable ranges (heuristic)."""
     for k, v in data.items():
         full = f"{path}.{k}" if path else k
         if isinstance(v, dict):
             _check_ranges(v, full, warnings)
-        elif isinstance(v, (int, float)):
-            # Probabilities/weights should be in [0, 1]
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
             if "weight" in k or "factor" in k or "boost" in k or "penalty" in k:
                 if not 0.0 <= v <= 5.0:
                     warnings.append(f"{full}={v} outside expected [0,5] for weight/factor")
@@ -232,8 +412,15 @@ class Config:
     def to_dict(self) -> dict:
         return {name: section.to_dict() for name, section in self._sections.items()}
 
-    def validate(self) -> list[str]:
-        warnings = []
+    def validate(self, schema: bool = True) -> list[str]:
+        """Validate config. With schema=True (default), validates types, ranges,
+        allowed values, and missing sections against CONFIG_SCHEMA, then runs
+        heuristic range checks. With schema=False, only heuristic checks.
+        """
+        warnings: list[str] = []
+        config_dict = self.to_dict()
+        if schema:
+            warnings.extend(_validate_schema(config_dict, CONFIG_SCHEMA))
         for name, section in self._sections.items():
             section_warnings = section.validate()
             for w in section_warnings:

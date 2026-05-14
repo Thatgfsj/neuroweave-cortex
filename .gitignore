@@ -6,3 +6,9 @@ dist/
 .venv/
 *.tmp
 ~*
+.coverage
+.mypy_cache/
+.ruff_cache/
+*.pyc
+.pytest_cache/
+htmlcov/

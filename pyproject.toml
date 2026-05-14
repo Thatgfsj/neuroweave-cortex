@@ -23,3 +23,18 @@ sg-stats = "star_graph.cli:stats_cmd"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "build/",
+    "dist/",
+    "tests/",
+    "examples/",
+]
