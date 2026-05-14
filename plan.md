@@ -1,6 +1,6 @@
 # Star Graph Memory — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.1.0** | 276 tests passing | 55 commits
+> Last updated: 2026-05-15 | **v1.2.0** | 305 tests passing | 56 commits
 
 ---
 
@@ -8,13 +8,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.1.0 |
-| **Production modules** | 58 Python files in `star_graph/` |
-| **Production code** | ~24,200 lines |
-| **Test files** | 13 files in `tests/` |
-| **Test code** | ~3,600 lines |
-| **Total tests** | **276** (all passing) |
-| **Total commits** | 55 |
+| **Version** | 1.2.0 |
+| **Production modules** | 59 Python files in `star_graph/` |
+| **Production code** | ~24,750 lines |
+| **Test files** | 14 files in `tests/` |
+| **Test code** | ~4,200 lines |
+| **Total tests** | **305** (all passing) |
+| **Total commits** | 56 |
 | **License** | MIT |
 
 ### Module Inventory (58 modules)
@@ -37,6 +37,7 @@ star_graph/
 ├── storage_backend.py       # StorageBackend interface
 ├── sqlite_storage.py        # SQLiteStorage backend
 ├── tiered.py                # TieredStorage: HOT/WARM/COLD disk offloading
+├── tier.py                  # MemoryTier: STM/MTM/LTM/Core four-layer API + promotion pipeline
 ├── index.py                 # ANNIndex: approximate nearest neighbor
 ├── shard.py                 # MemoryShardManager: domain+time+size file sharding
 │
@@ -94,9 +95,10 @@ star_graph/
 ├── cli.py                   # CLI commands
 ├── mcp_server.py            # MCP server (optional)
 │
-└── tests/ (13 files, 276 tests)
+└── tests/ (14 files, 305 tests)
     ├── test_v08_modules.py          # Core module smoke tests
     ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice
+    ├── test_memory_tier.py          # STM/MTM/LTM/Core tier API + promotion pipeline (16 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -129,6 +131,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | v1.0.8 | 2026-05-14 | Sleep merge ANN, BM25 hybrid, PPR sparse, EmbedderRegistry instance, AnchorVector 10-dim, tiered storage |
 | v1.0.9 | 2026-05-14 | Global anchor hard cap, auto-sleep daemon, cold ghost cleanup, cortex auto-consolidation |
 | **v1.1.0** | **2026-05-15** | **Hippocampus buffer, edge sparsification, file sharding, sleep rebuild (fuse/rewire/abstract), cortex hierarchy, abstractive memory engine, dynamic neural rewiring, success-rate RL, temporal slice projection — 276 tests** |
+| **v1.2.0** | **2026-05-15** | **Memory tiering (STM/MTM/LTM/Core), decay+reinforcement feedback loop, FROZEN thermal tier, edge type traversal weights, cascade causal ranking — 305 tests** |
 
 ---
 
@@ -728,7 +731,11 @@ Reduces context pollution, token waste, and agent confusion.
 
 ---
 
-### Phase 10 — Memory Tiering (P0, v1.2.0)
+### Phase 10 — Memory Tiering (P0, v1.2.0) ✅ COMPLETE
+
+- [x] #40 Memory Tiering: STM/MTM/LTM/Core four-layer API + promotion pipeline
+- [x] #41 Cognitive Decay + Reinforcement: FROZEN thermal tier, reinforcement-adjusted decay, five-level downgrade
+- [x] #42 Edge Type Deepening: EDGE_TRAVERSAL_WEIGHTS wired into RichEdge, neighbors(), spread_activation, cascade
 
 #### #40 Explicit STM/MTM/LTM/Core Four-Layer API
 

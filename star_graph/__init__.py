@@ -10,7 +10,7 @@ Architecture:
   Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
