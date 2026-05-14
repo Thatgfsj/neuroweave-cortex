@@ -323,7 +323,162 @@ Phase 2 (P1, v1.0.7): Manager 拆分 → Cortex 独立睡眠 → Dual-Channel �
 Phase 3 (P2, v1.0.7): 自传体记忆 → 状态机统一 → Phase 来源修正
 Phase 4 (P3, v1.0.7): 代码质量逐项修复（10-15）
 Phase 5 (v1.0.8):    Sleep merge ANN → BM25 hybrid → PPR approx → EmbedderRegistry → AnchorVector → Tiered storage
+Phase 6 (v1.0.9):    Global hard cap → Auto-sleep daemon → Cold ghost cleanup → Cortex hard rejection
+Phase 7 (v1.1.0):    Hippocampus buffer → Edge sparsification → File sharding (Memory OS)
+Phase 8 (v1.1.0):    Sleep rebuild → Cortex hierarchy → Abstractive memory → Dynamic rewiring → Success-rate RL → Temporal slice projection
 ```
+
+---
+
+## v1.0.9 — Resource Bounding & Anti-Bloat
+
+> Memory growth analysis (2026-05-14). Existing sleep pruning/merging/compression
+> provides downward pressure, but there is no hard ceiling.
+
+| Issue | Priority |
+|-------|----------|
+| #27 Global anchor hard cap + eviction policy | **P0** |
+| #28 Auto-sleep daemon (background consolidation scheduler) | **P1** |
+| #29 Cold ghost disk cleanup (TieredStorage.compact) | **P1** |
+| #30 Cortex soft trigger → hard rejection on overflow | **P1** |
+
+### 27. Global anchor hard cap + eviction policy
+- Add `graph.max_total_anchors` (50K) and `graph.eviction_policy` (lru/fifo/lowest_retention)
+- `remember()` triggers eviction before insert if at capacity
+
+### 28. Auto-sleep daemon
+- `AutoSleepScheduler` that triggers micro-sleep on anchor count threshold, full-sleep on time interval
+
+### 29. Cold ghost disk cleanup
+- `TieredStorage.delete(anchor_id)` for purged ghosts
+- `tiered.compact()` to rewrite the JSON file without dead entries
+
+### 30. Cortex hard rejection
+- When `cortex.needs_consolidation()`, either auto-consolidate or reject new anchors
+
+---
+
+## v1.1.0 — Memory Operating System (Architecture Review 2026-05-14)
+
+> **Core insight: the problem is not "too many memories" — it's "too many connections"
+> and "all memories participate in every computation."
+
+### Phase 7 — Foundation (SSS)
+
+#### #31 Hippocampus Buffer (highest priority)
+
+User input should NOT go directly to long-term memory. Add a hippocampus cache layer:
+
+```
+Input → Working Memory → Hippocampus Buffer → [sleep decides] → Long-term Memory
+```
+
+- **L1 (instant)**: ~30min, no vectorization, no graph, text-only cache for active conversation/task chain
+- **L2 (short-term)**: ~24h, lightweight vectorization, local graph, sleep-processable
+- Sleep decides: promote / summarize / merge / discard
+
+Prevents long-term graph pollution.
+
+#### #32 Edge Sparsification (SSS)
+
+Current `cosine > threshold → connect()` leads to O(n²) edge explosion — everything becomes vaguely related, recall fails.
+
+- **Only explicable relations** get edges: CAUSES, FIXES, DEPENDS_ON, CONTRADICTS, UPGRADES, SUMMARIZES, RELATED_WORKFLOW, SAME_PROJECT, SAME_USER_GOAL
+- Every edge must carry: `type`, `weight`, `ttl` (auto-disconnect after inactivity)
+- Ban pure cosine-similarity edges
+
+#### #33 File Sharding: Domain + Time + Size
+
+Don't cut files by size alone. Three-layer sharding:
+
+```
+memory/
+├── procedural/       # how-to, workflows, solutions (high compression, long life)
+│   ├── python/
+│   │   ├── 2026_Q2_01.mem
+│   │   └── ...
+│   └── java/
+├── episodic/         # conversations, events (high volume, fast decay)
+│   ├── 2026_05_week2.mem
+│   └── ...
+├── semantic/         # user preferences, abstract knowledge (long-term stable)
+│   ├── user_preferences.mem
+│   └── world_knowledge.mem
+├── reflection/       # AI self-summary, error patterns, strategy (smallest, highest weight)
+│   └── strategy.mem
+└── hippocampus/      # active buffer, short-term cache
+    ├── active_buffer.mem
+    └── short_term.mem
+```
+
+Single file: 10-50MB recommended, 100MB max before sleep/recall costs rise sharply.
+
+### Phase 8 — Cognitive (SS)
+
+#### #34 Sleep Rebuild (not just compress)
+
+Sleep must **restructure the entire graph**, not just prune/merge:
+
+- **Node fusion**: `try-except` + `python异常处理` + `错误捕获` → `Python Error Handling`
+- **Graph rewiring**: drop weak/stale/low-success edges, strengthen high-frequency success paths
+- **Abstractive memory**: concrete events → pattern memory (e.g., "chromedriver fix failed" → "Browser Driver Version Conflict")
+
+#### #35 Cortex Hierarchy (not flat)
+
+Current memories are equal-priority. Correct structure:
+
+```
+Reflection Cortex   (smallest volume, highest weight) — AI self-summary, error patterns, strategy
+    ↓
+Semantic Cortex     (long-term stable) — user preferences, concepts
+    ↓
+Procedural Cortex   (high compression, low forgetting) — workflows, solutions
+    ↓
+Episodic Cortex     (highest volume, fastest decay, biggest pollution source) — conversations, events
+    ↓
+Hippocampus Buffer  (transient cache) — active context
+```
+
+#### #36 Abstractive Memory
+
+Don't remember concrete events forever. Form **pattern memory**:
+- Extract recurring patterns across episodes
+- Abstract into generalized knowledge
+- Concrete source events decay faster than their abstractions
+
+### Phase 9 — Self-Evolving (S)
+
+#### #37 Dynamic Neural Rewiring
+
+Graph structure is not static — it evolves:
+- High-frequency co-activation → auto-form cluster
+- Long-term inactivity → auto-disconnect edges
+- Successful reasoning chains → strengthen weights
+- Failed reasoning chains → weaken weights
+
+#### #38 Success-Rate RL for Memory Valuation
+
+Memory score should include `success_rate`, not just similarity + recency:
+
+```python
+memory_score = relevance * recency * reuse_frequency * success_rate * emotional_weight * novelty
+```
+
+The system must know which memories actually helped complete tasks.
+
+#### #39 Temporal Slice Projection
+
+Don't let ALL memories participate in recall. Only a limited-width active surface:
+
+```
+2026-05-14
+├── Core memories (max 7)
+├── Active memories (max 20)
+├── Background summary
+└── Noise layer (excluded from recall)
+```
+
+Reduces context pollution, token waste, and agent confusion.
 
 ---
 
