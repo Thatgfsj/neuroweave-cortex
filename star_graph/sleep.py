@@ -541,12 +541,13 @@ class SleepCycle:
 
         # ── Phase 7: Forgetting/Degradation ──
         t0 = time.time()
+        reinforcement_stats = self._apply_reinforcement_decay()
         thermal_stats = self._apply_thermal_forgetting()
         report.phases.append(PhaseMetrics(
             phase="N6_Forgetting",
             duration_ms=(time.time() - t0) * 1000,
             items_processed=sum(thermal_stats.values()),
-            details=thermal_stats,
+            details={**thermal_stats, "reinforcement": reinforcement_stats},
         ))
 
         # ── Phase 8: Index Rebuild + BrainSphere refresh ──
@@ -1701,36 +1702,103 @@ class SleepCycle:
 
     # ── Phase 7: Thermal Forgetting ────────────────────────
 
+    def _apply_reinforcement_decay(self) -> dict:
+        """Adjust anchor decay rates based on success/feedback history.
+
+        Reinforcement-adjusted decay formula:
+          decay_rate = base_decay × (1 - success_feedback × 0.5) × (1 - reinforcement × 0.3)
+
+        Anchors with high success_feedback decay slower (better retention).
+        Anchors with low success_feedback decay faster (adaptive forgetting).
+        Anchors with high confidence resist decay more strongly.
+
+        Returns stats: {adjusted, boosted, penalized}.
+        """
+        adjusted = 0
+        boosted = 0
+        penalized = 0
+
+        for anchor in self.graph.anchors.values():
+            v = anchor.vector
+            # Base decay rate from config or anchor's own rate
+            base_rate = getattr(v, 'decay_rate', 0.01)
+
+            # Success feedback: 0..1, higher = slower decay
+            success_damping = 1.0 - v.success_feedback * 0.5
+
+            # Confidence: higher confidence = slower decay
+            confidence_damping = 1.0 - v.confidence * 0.2
+
+            # Reinforcement from access patterns
+            reinforcement = getattr(anchor, 'replay_count', 0) / max(1, self._cycle_count)
+            reinforcement_damping = 1.0 - min(0.3, reinforcement * 0.3)
+
+            # Stability slows decay further
+            stability_damping = 1.0 - v.stability * 0.4
+
+            # New effective decay rate
+            effective_rate = base_rate * success_damping * confidence_damping
+            effective_rate *= reinforcement_damping * stability_damping
+
+            # Clamp
+            effective_rate = max(0.001, min(0.5, effective_rate))
+
+            if abs(effective_rate - base_rate) > 0.001:
+                if effective_rate < base_rate:
+                    boosted += 1
+                else:
+                    penalized += 1
+                adjusted += 1
+
+            v.decay_rate = effective_rate
+
+        return {"adjusted": adjusted, "boosted": boosted, "penalized": penalized}
+
     def _apply_thermal_forgetting(self) -> dict:
         """Apply thermal lifecycle degradation.
 
-        Scans all anchors and applies:
-        - HOT→WARM: retention dropped, reduce priority
-        - WARM→COLD: long-unaccessed, offload to index
-        - COLD→DEAD: near-zero retention, hash-only
+        Five-level thermal downgrade:
+        - HOT→WARM: retention dropped below 0.4, reduce priority
+        - WARM→COLD: long-unaccessed, retention < 0.15, offload to index
+        - COLD→FROZEN: retention < 0.06, disk-only archive tier
+        - FROZEN→DEAD: retention < 0.01, hash-only audit trail
         """
-        stats = {"hot": 0, "warm": 0, "cold": 0, "dead": 0,
+        stats = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0, "dead": 0,
                  "downgraded": 0, "finalized": 0}
         import time as _time
         now = _time.time()
 
-        from .anchor import MemoryState as MS
+        from .anchor import ThermalState, MemoryState as MS
         for anchor in self.graph.anchors.values():
             ts = anchor.thermal_state
             stats[ts.value] = stats.get(ts.value, 0) + 1
 
-            if ts.value == "hot":
-                # Check if should degrade to WARM
+            if ts == ThermalState.HOT:
+                # HOT→WARM: idle > 72h and retention below 0.4
                 hours_idle = (now - anchor.last_activated_at) / 3600
                 if hours_idle > 72 and anchor.retention_score < 0.4:
                     anchor.vector.stability = max(0.0, anchor.vector.stability - 0.05)
                     stats["downgraded"] += 1
 
-            elif ts.value == "cold":
-                # Check COLD→DEAD: retention below 0.03
-                if anchor.retention_score < 0.03:
+            elif ts == ThermalState.WARM:
+                # WARM→COLD: very long idle or low retention
+                hours_idle = (now - anchor.last_activated_at) / 3600
+                if hours_idle > 720 or anchor.retention_score < 0.15:
+                    anchor.vector.stability = max(0.0, anchor.vector.stability - 0.03)
+                    anchor.vector.recency *= 0.5
+                    stats["downgraded"] += 1
+
+            elif ts == ThermalState.COLD:
+                # COLD→FROZEN: retention below 0.06
+                if anchor.retention_score < 0.06:
+                    anchor.vector.stability = max(0.0, anchor.vector.stability - 0.02)
+                    stats["downgraded"] += 1
+
+            elif ts == ThermalState.FROZEN:
+                # FROZEN→DEAD: retention below 0.01
+                if anchor.retention_score < 0.01:
                     anchor.state = MS.GHOST
-                    anchor._ghost_reactivation_prob = 0.01
+                    anchor._ghost_reactivation_prob = 0.005
                     stats["finalized"] += 1
 
         return stats
@@ -1749,17 +1817,20 @@ class SleepCycle:
     # ── Helpers ─────────────────────────────────────────
 
     def _refresh_cortical_index(self) -> None:
+        """Rebuild cortical index, excluding FROZEN and DEAD anchors."""
+        from .anchor import ThermalState
         self.graph.cortical_index = [
             (a.embedding, a.id)
             for a in self.graph.anchors.values()
             if a.embedding and a.is_cortical
+            and a.thermal_state not in (ThermalState.FROZEN, ThermalState.DEAD)
         ]
-        # Sync ANN index
+        # Sync ANN index — exclude FROZEN/DEAD
         ann = self.graph._get_ann_index() if self.graph._ann_index is not None else None
-        if ann is not None and ann.size != len(self.graph.anchors):
+        if ann is not None:
             ann.clear()
             for a in self.graph.anchors.values():
-                if a.embedding:
+                if a.embedding and a.thermal_state not in (ThermalState.FROZEN, ThermalState.DEAD):
                     ann.add(a.id, a.embedding)
             ann.rebuild()
 

@@ -72,6 +72,12 @@ class Edge:
         self.weaken(0.02)
 
     @property
+    def traversal_weight(self) -> float:
+        """Effective traversal weight = edge weight × type multiplier."""
+        multiplier = EDGE_TRAVERSAL_WEIGHTS.get(self.edge_type, 1.0)
+        return self.weight * multiplier
+
+    @property
     def is_active(self) -> bool:
         return self.weight > 0.1
 
@@ -106,6 +112,43 @@ STRONG_RELATIONS: set[str] = {
     "causes", "fixes", "depends_on", "contradicts", "upgrades",
     "superseded_by", "invalidated_by", "caused_by", "derived_from",
     "resolves", "conflicts_with", "duplicates",
+}
+
+# Edge traversal weight multipliers — different edge types contribute
+# differently to graph traversal and spreading activation.
+EDGE_TRAVERSAL_WEIGHTS: dict[str, float] = {
+    "causes": 1.5,           # causal = most important for reasoning
+    "fixes": 1.4,            # fix relationships = high utility
+    "depends_on": 1.3,       # dependency = structural
+    "contradicts": 0.5,      # contradiction = useful but downweighted
+    "upgrades": 1.2,         # upgrade = improvement path
+    "summarizes": 1.1,       # summary = compression link
+    "related_workflow": 1.2, # workflow = process continuity
+    "same_project": 1.2,     # project grouping
+    "same_user_goal": 1.3,   # goal alignment
+    "superseded_by": 0.4,    # outdated = low traversal
+    "invalidated_by": 0.3,   # disproven = very low traversal
+    "caused_by": 1.4,        # reverse causal
+    "derived_from": 1.2,     # inference chain
+    "causal": 1.5,           # causal (legacy)
+    "temporal": 1.2,         # temporal = ordering matters
+    "topical": 1.0,          # baseline semantic
+    "refines": 1.1,          # refinement
+    "generalizes": 1.0,      # generalization
+    "analogous_to": 0.9,     # analogy = weaker
+    "before": 1.0,           # temporal before
+    "after": 1.0,            # temporal after
+    "during": 1.1,           # temporal overlap
+    "resolves": 1.3,         # resolution
+    "duplicates": 0.6,       # duplicate = only for dedup
+    "conflicts_with": 0.7,   # conflict
+    "instance_of": 1.0,      # abstraction link
+    "bridge": 0.8,           # cross-constellation bridge
+    "transitive_closure": 0.7, # inferred transitive
+    "cross_domain": 1.3,     # cross-cortex link
+    "preference": 1.3,       # user preference signal
+    "task_flow": 1.4,        # task workflow continuity
+    "ownership": 1.1,        # belonging relationship
 }
 
 
@@ -258,6 +301,12 @@ class RichEdge:
         self.failure_count += 1
         self.last_failure_at = time.time()
         self.weaken(0.02)
+
+    @property
+    def traversal_weight(self) -> float:
+        """Effective traversal weight = edge weight × type multiplier."""
+        multiplier = EDGE_TRAVERSAL_WEIGHTS.get(self.edge_type, 1.0)
+        return self.weight * multiplier
 
     @property
     def is_expired(self) -> bool:
@@ -785,7 +834,8 @@ class StarGraph:
         for other in self._adjacency.get(anchor_id, set()):
             edge = self.edges.get(self._key(anchor_id, other))
             if edge and edge.weight >= min_weight:
-                result.append((other, edge.weight))
+                tw = edge.traversal_weight if hasattr(edge, 'traversal_weight') else edge.weight
+                result.append((other, tw))
         return sorted(result, key=lambda x: -x[1])
 
     def spread_activation(self, seed_ids: list[str], steps: int | None = None,

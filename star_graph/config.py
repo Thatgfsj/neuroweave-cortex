@@ -123,6 +123,16 @@ class _DotDict:
 # Required=True means the key must exist; False means optional
 
 CONFIG_SCHEMA: dict[str, dict[str, tuple]] = {
+    "tier": {
+        "stm_max_items":               (int, False, 10, 10000, None),
+        "stm_ttl_hours":              (float, False, 0.1, 168.0, None),
+        "mtm_max_topics":              (int, False, 100, 100000, None),
+        "ltm_max_summaries":           (int, False, 50, 10000, None),
+        "core_max_entries":            (int, False, 10, 500, None),
+        "stm_to_mtm_threshold":       (float, False, 0.0, 1.0, None),
+        "mtm_to_ltm_threshold":       (float, False, 0.0, 1.0, None),
+        "ltm_to_core_threshold":      (float, False, 0.0, 1.0, None),
+    },
     "anchor": {
         "default_importance":       (float, False, 0.0, 1.0, None),
         "default_frequency":        (float, False, 0.0, 10.0, None),

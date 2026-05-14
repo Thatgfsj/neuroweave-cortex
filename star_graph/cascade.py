@@ -167,7 +167,7 @@ class CascadeRecall:
 
     def _get_causal_edges(self, anchor_id: str, direction: str,
                           min_strength: float) -> list[tuple[str, RichEdge | object]]:
-        """Get causal/temporal edges for an anchor."""
+        """Get causal/temporal edges for an anchor, ranked by traversal weight."""
         results: list[tuple[str, RichEdge | object]] = []
         causal_types = {"caused_by", "derived_from", "causal"}
         temporal_types = {"before", "after"}
@@ -181,33 +181,42 @@ class CascadeRecall:
             if isinstance(edge, RichEdge):
                 etype = edge.edge_type
                 causal_str = getattr(edge, 'causal_strength', 0.0)
+                # Causal edge types that indicate direction
+                forward_causal = {"causes", "causal"}      # A causes B (A→B)
+                backward_causal = {"caused_by", "derived_from"}  # A caused by B (B→A)
+                bidirectional_causal = {"depends_on", "fixes", "resolves"}
 
                 if direction == "backward":
-                    # Backward: what caused this anchor?
-                    if etype in ("caused_by", "derived_from") and causal_str >= min_strength:
+                    if etype in backward_causal and causal_str >= min_strength:
                         results.append((neighbor_id, edge))
                     elif etype == "temporal" and getattr(edge, 'temporal_order', '') == "before":
                         if causal_str >= min_strength:
                             results.append((neighbor_id, edge))
                 else:
-                    # Forward: what did this anchor cause?
-                    if etype in ("caused_by", "derived_from") and causal_str >= min_strength:
+                    if etype in forward_causal and causal_str >= min_strength:
+                        results.append((neighbor_id, edge))
+                    elif etype in bidirectional_causal and causal_str >= min_strength:
                         results.append((neighbor_id, edge))
                     elif etype == "temporal" and getattr(edge, 'temporal_order', '') == "after":
                         if causal_str >= min_strength:
                             results.append((neighbor_id, edge))
             else:
-                # Simple Edge — check type
-                if edge.edge_type in causal_types:
-                    if direction == "backward":
-                        results.append((neighbor_id, edge))
-                    elif direction == "forward":
-                        results.append((neighbor_id, edge))
-                elif edge.edge_type in temporal_types:
-                    if (direction == "backward" and edge.edge_type == "before") or \
-                       (direction == "forward" and edge.edge_type == "after"):
+                etype = edge.edge_type
+                if etype in causal_types:
+                    results.append((neighbor_id, edge))
+                elif etype in temporal_types:
+                    if (direction == "backward" and etype == "before") or \
+                       (direction == "forward" and etype == "after"):
                         results.append((neighbor_id, edge))
 
+        # Rank by traversal_weight (higher = more important causal path)
+        def _sort_key(item):
+            e = item[1]
+            tw = e.traversal_weight if hasattr(e, 'traversal_weight') else e.weight
+            causal = getattr(e, 'causal_strength', 0.0) if isinstance(e, RichEdge) else 0.0
+            return tw * (1.0 + causal)
+
+        results.sort(key=_sort_key, reverse=True)
         return results
 
     def _classify_edge(self, edge) -> str:

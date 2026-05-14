@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from star_graph import StarGraph, Anchor, SleepCycle
+from star_graph import StarGraph, Anchor, SleepCycle, MemoryState, ThermalState
 
 
 def make_populated_graph(n: int = 50) -> StarGraph:
@@ -415,3 +415,190 @@ class TestTemporalSlice:
         assert len(result["core_ids"]) <= 3
         assert len(result["active_ids"]) <= 4
         assert result["active_surface"] <= 7
+
+
+class TestThermalForgetting:
+    """Verify five-level thermal lifecycle with FROZEN tier."""
+
+    def test_frozen_not_retrievable(self):
+        """FROZEN anchors should not be retrievable."""
+        from star_graph import ThermalState
+        a = Anchor.create("old frozen memory", importance=0.02)
+        a.state = MemoryState.DORMANT
+        a._thermal_state = ThermalState.FROZEN
+        assert a.is_retrievable is False
+
+    def test_frozen_thermal_priority_low(self):
+        """FROZEN anchors should have very low retrieval priority."""
+        from star_graph import ThermalState
+        a = Anchor.create("frozen")
+        a._thermal_state = ThermalState.FROZEN
+        assert a.thermal_priority == 0.05
+        assert a.retrieval_cost > 0.9
+
+    def test_frozen_storage_tier(self):
+        """FROZEN anchors should map to archive storage tier."""
+        from star_graph import ThermalState
+        a = Anchor.create("frozen")
+        a._thermal_state = ThermalState.FROZEN
+        assert a.storage_tier == "archive"
+
+    def test_frozen_excluded_from_cortical_index(self):
+        """After _refresh_cortical_index, FROZEN anchors are excluded."""
+        from star_graph import ThermalState
+        graph = StarGraph()
+        hot_a = Anchor.create("active memory", importance=0.8)
+        hot_a.vector.hippocampal_dependency = 0.1  # cortical
+        graph.add_anchor(hot_a)
+
+        frozen_a = Anchor.create("frozen memory", importance=0.1)
+        frozen_a.vector.hippocampal_dependency = 0.1
+        frozen_a._thermal_state = ThermalState.FROZEN
+        graph.add_anchor(frozen_a)
+
+        # Run refresh
+        cycle = SleepCycle(graph)
+        cycle._refresh_cortical_index()
+
+        # Only the hot anchor should be in cortical index
+        index_ids = {aid for _, aid in graph.cortical_index}
+        assert hot_a.id in index_ids
+        assert frozen_a.id not in index_ids
+
+    def test_thermal_downgrade_includes_frozen(self):
+        """Sleep Phase 7 should track frozen anchors."""
+        graph = make_populated_graph(20)
+        # Artificially age all anchors
+        for a in graph.anchors.values():
+            a.last_activated_at = 0  # very old
+            a.vector.recency = 0.02
+            a.vector.stability = 0.02
+            a.vector.frequency = 0.0
+
+        cycle = SleepCycle(graph)
+        stats = cycle._apply_thermal_forgetting()
+        assert "frozen" in stats
+        # Some should have downgraded
+        assert stats["downgraded"] >= 0
+
+
+class TestReinforcementDecay:
+    """Verify reinforcement-adjusted decay formula."""
+
+    def test_reinforcement_decay_runs(self):
+        """_apply_reinforcement_decay should process all anchors."""
+        graph = make_populated_graph(15)
+        cycle = SleepCycle(graph)
+        stats = cycle._apply_reinforcement_decay()
+        assert "adjusted" in stats
+        assert "boosted" in stats
+        assert "penalized" in stats
+
+    def test_success_feedback_slows_decay(self):
+        """Anchors with high success_feedback should get lower decay_rate."""
+        graph = StarGraph()
+        winner = Anchor.create("successful strategy", importance=0.5)
+        winner.vector.success_feedback = 0.9
+        winner.vector.confidence = 0.8
+        winner.vector.stability = 0.7
+        graph.add_anchor(winner)
+
+        loser = Anchor.create("failed approach", importance=0.5)
+        loser.vector.success_feedback = 0.1
+        loser.vector.confidence = 0.2
+        loser.vector.stability = 0.1
+        loser.vector.decay_rate = 0.01
+        graph.add_anchor(loser)
+
+        cycle = SleepCycle(graph)
+        cycle._apply_reinforcement_decay()
+
+        # Winner should have lower decay rate
+        assert winner.vector.decay_rate < loser.vector.decay_rate
+
+    def test_reinforcement_decay_in_phased_sleep(self):
+        """Phased sleep should include reinforcement stats in N6_Forgetting."""
+        graph = make_populated_graph(10)
+        cycle = SleepCycle(graph)
+        report = cycle.run_phased()
+        # Find the N6_Forgetting phase
+        n6 = next(p for p in report.phases if p.phase == "N6_Forgetting")
+        assert "reinforcement" in n6.details
+
+
+class TestEdgeTraversalWeights:
+    """Verify edge type traversal weight multipliers."""
+
+    def test_rich_edge_traversal_weight(self):
+        """RichEdge should have traversal_weight property."""
+        from star_graph.graph import RichEdge
+        e = RichEdge(source="a", target="b", weight=0.5, edge_type="causes",
+                     confidence=0.8, source_type="explicit")
+        # causes has multiplier 1.5
+        assert e.traversal_weight == 0.5 * 1.5
+
+        e2 = RichEdge(source="c", target="d", weight=0.5, edge_type="contradicts",
+                      confidence=0.6, source_type="inferred")
+        # contradicts has multiplier 0.5
+        assert e2.traversal_weight == 0.5 * 0.5
+
+    def test_simple_edge_traversal_weight(self):
+        """Simple Edge should also have traversal_weight."""
+        from star_graph.graph import Edge
+        e = Edge(source="a", target="b", weight=0.5, edge_type="causes")
+        assert e.traversal_weight == 0.5 * 1.5
+
+    def test_neighbors_uses_traversal_weight(self):
+        """neighbors() should return traversal_weight, not raw edge weight."""
+        g = StarGraph()
+        g.add_anchor(Anchor.create("A"))
+        g.add_anchor(Anchor.create("B"))
+        ids = list(g.anchors.keys())
+        g.add_edge(ids[0], ids[1], weight=0.5, edge_type="causes",
+                   confidence=0.8, source_type="explicit")
+
+        nbrs = g.neighbors(ids[0])
+        assert len(nbrs) == 1
+        # causes multiplier = 1.5, weight gets boosted by STRONG_RELATIONS (1.1x) in add_edge
+        # so weight = 0.55, traversal = 0.55 * 1.5 = 0.825
+        assert nbrs[0][1] > 0.8  # traversal_weight > raw weight
+
+    def test_spread_activation_uses_traversal_weight(self):
+        """Spreading activation should propagate through traversal weights."""
+        g = StarGraph()
+        g.add_anchor(Anchor.create("A"))
+        g.add_anchor(Anchor.create("B"))
+        ids = list(g.anchors.keys())
+        # Causal edge — should propagate strongly
+        g.add_edge(ids[0], ids[1], weight=0.5, edge_type="causes",
+                   confidence=0.8, source_type="explicit")
+
+        act = g.spread_activation([ids[0]], steps=1, decay=1.0)
+        assert ids[1] in act
+        # Activation = level * traversal_weight * decay = 1.0 * 0.825 * 1.0
+        assert act[ids[1]] > 0.8
+
+    def test_cascade_ranks_by_traversal_weight(self):
+        """Cascade recall should prioritize high-traversal-weight causal edges."""
+        from star_graph.cascade import CascadeRecall
+        g = StarGraph()
+        a = Anchor.create("root cause")
+        g.add_anchor(a)
+        b = Anchor.create("consequence B")
+        g.add_anchor(b)
+        c = Anchor.create("consequence C")
+        g.add_anchor(c)
+
+        # Strong causal edge
+        g.add_edge(a.id, b.id, weight=0.8, edge_type="causes",
+                   confidence=0.9, source_type="explicit", causal_strength=0.8)
+        # Weak contradictory edge
+        g.add_edge(a.id, c.id, weight=0.5, edge_type="contradicts",
+                   confidence=0.3, source_type="inferred", causal_strength=0.1)
+
+        cascade = CascadeRecall(g)
+        chains = cascade.trace_forward(a.id, max_depth=1, max_chains=2)
+        # Should find at least the causal chain
+        assert len(chains) >= 1
+        # First chain should be the causal one
+        assert b.id in {a.id for a in chains[0].anchors}

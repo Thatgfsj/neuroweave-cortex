@@ -1,7 +1,18 @@
 # Star Graph Memory — default hyperparameters
-# v0.4 config system — every neuroscience mechanism is tunable
+# v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "0.4.0"
+version: "1.2.0"
+
+# ── Memory Tiering (STM/MTM/LTM/Core) ──
+tier:
+  stm_max_items: 100
+  stm_ttl_hours: 2.0
+  mtm_max_topics: 2000
+  ltm_max_summaries: 500
+  core_max_entries: 50
+  stm_to_mtm_threshold: 0.3
+  mtm_to_ltm_threshold: 0.5
+  ltm_to_core_threshold: 0.7
 
 anchor:
   default_importance: 0.5

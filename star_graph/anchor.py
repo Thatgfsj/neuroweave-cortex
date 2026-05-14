@@ -86,12 +86,13 @@ class EmbedderRegistry:
 
 
 class ThermalState(enum.Enum):
-    """Four-level thermal memory lifecycle — governs storage tier and retrieval cost.
+    """Five-level thermal memory lifecycle — governs storage tier and retrieval cost.
 
-    HOT  → high-frequency, full retrieval, highest priority
-    WARM → low frequency but important, compressed summary available
-    COLD → frozen, index-only, must be thawed for full retrieval
-    DEAD → metadata/hash only, not retrievable (audit trail)
+    HOT    → high-frequency, full retrieval, highest priority
+    WARM   → low frequency but important, compressed summary available
+    COLD   → index-only, must be thawed for full retrieval
+    FROZEN → disk-only, excluded from ANN index, archive tier
+    DEAD   → metadata/hash only, not retrievable (audit trail)
 
     Thermal state is DERIVED from retention_score and access patterns —
     it is not stored directly. This avoids dual-state-machine sync issues.
@@ -99,6 +100,7 @@ class ThermalState(enum.Enum):
     HOT = "hot"
     WARM = "warm"
     COLD = "cold"
+    FROZEN = "frozen"
     DEAD = "dead"
 
 
@@ -131,6 +133,7 @@ _STATE_THERMAL_MAP = {
     MemoryState.GHOST: ThermalState.COLD,
     MemoryState.REACTIVATED: ThermalState.HOT,
 }
+# DORMANT with very low retention maps to FROZEN (done in thermal_state property logic)
 
 # State transition rules: (current, event) → next
 # Events: 'create', 'replay', 'consolidate', 'retrieve', 'prune', 'revive', 'stabilize'
@@ -416,11 +419,11 @@ class Anchor:
     def is_retrievable(self) -> bool:
         """Can this anchor be returned in retrieval results?
 
-        Ghosts are not retrievable unless revived. DEAD memories are inaccessible.
+        Ghosts and FROZEN/DEAD memories are not retrievable unless revived.
         """
         if self.state == MemoryState.GHOST:
             return False
-        if self.thermal_state == ThermalState.DEAD:
+        if self.thermal_state in (ThermalState.FROZEN, ThermalState.DEAD):
             return False
         return True
 
@@ -739,8 +742,10 @@ class Anchor:
             return ThermalState.HOT
         if r > 0.15:
             return ThermalState.WARM
-        if r > 0.03:
+        if r > 0.06:
             return ThermalState.COLD
+        if r > 0.01:
+            return ThermalState.FROZEN
         return ThermalState.DEAD
 
     @property
@@ -756,6 +761,7 @@ class Anchor:
             ThermalState.HOT: 1.0,
             ThermalState.WARM: 0.6,
             ThermalState.COLD: 0.2,
+            ThermalState.FROZEN: 0.05,
             ThermalState.DEAD: 0.0,
         }[self.thermal_state]
 
@@ -771,6 +777,7 @@ class Anchor:
             ThermalState.HOT: 0.0,
             ThermalState.WARM: 0.3,
             ThermalState.COLD: 0.8,
+            ThermalState.FROZEN: 0.95,
             ThermalState.DEAD: 1.0,
         }[self.thermal_state]
 
@@ -787,6 +794,7 @@ class Anchor:
             ThermalState.HOT: "memory",
             ThermalState.WARM: "disk",
             ThermalState.COLD: "index",
+            ThermalState.FROZEN: "archive",
             ThermalState.DEAD: "audit",
         }[self.thermal_state]
 
