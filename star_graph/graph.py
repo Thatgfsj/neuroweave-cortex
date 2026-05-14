@@ -622,8 +622,8 @@ class StarGraph:
 
         if effective_relation not in EXPLICABLE_RELATIONS or effective_relation in LEGACY_EDGE_TYPES:
             if source_type == "implicit" and confidence is None and causal_strength == 0.0:
-                # Pure cosine-similarity edge with no explicable reason — reject
-                return None
+                # Pure cosine-similarity edge with no explicable reason — downgrade severely
+                weight = max(0.02, weight * 0.3)  # heavy penalty for legacy implicit edges
 
         # Non-strong relations get a weight penalty to favor explicable edges
         if effective_relation in STRONG_RELATIONS:

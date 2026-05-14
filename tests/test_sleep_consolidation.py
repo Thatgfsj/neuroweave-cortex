@@ -43,7 +43,7 @@ def make_populated_graph(n: int = 50) -> StarGraph:
     for i in range(0, len(ids) - 1, 2):
         if i + 1 < len(ids):
             graph.add_edge(ids[i], ids[i + 1], weight=0.3 + 0.2 * (i % 3),
-                           edge_type="topical")
+                           edge_type="topical", relation="same_project")
 
     return graph
 
@@ -159,7 +159,7 @@ class TestSleepCycle:
         graph.add_anchor(a1)
         graph.add_anchor(a2)
         key = graph._key(a1.id, a2.id)
-        graph.add_edge(a1.id, a2.id, weight=0.15, edge_type="topical")
+        graph.add_edge(a1.id, a2.id, weight=0.15, edge_type="topical", relation="related_workflow")
 
         # Make the edge appear dormant
         graph.edges[key].last_activated_at = 0  # very old
