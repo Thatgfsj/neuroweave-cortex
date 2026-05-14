@@ -120,7 +120,11 @@ from .benchmark import (
     compare_systems,
 )
 
-# MCP server is optional — requires `pip install mcp`
+from .spreading import SpreadingActivation, ActivatedNode
+from .cognitive_cache import (
+    QueryCache, SessionCache, TopicCache, ActivationCache,
+    CognitiveCacheManager, QueryCacheEntry,
+)
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

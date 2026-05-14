@@ -27,6 +27,8 @@ from .tiered import TieredStorage
 from .hippocampus import HippocampusBuffer
 from .shard import MemoryShardManager
 from .cascade import CascadeRecall
+from .spreading import SpreadingActivation
+from .cognitive_cache import CognitiveCacheManager
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
 from .symbolic_filter import SymbolicFilter
@@ -117,6 +119,8 @@ class MemoryRuntime:
         self._gate: MemoryGate | None = None
         self._timespine: TimeSpine | None = None
         self._cascade: CascadeRecall | None = None
+        self._spreading: SpreadingActivation | None = None
+        self._cognitive_cache: CognitiveCacheManager | None = None
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
         self._tiered: TieredStorage | None = None
@@ -359,6 +363,18 @@ class MemoryRuntime:
         if self._cascade is None:
             self._cascade = CascadeRecall(self.graph)
         return self._cascade
+
+    @property
+    def spreading(self) -> SpreadingActivation:
+        if self._spreading is None:
+            self._spreading = SpreadingActivation(self.graph, self.cfg)
+        return self._spreading
+
+    @property
+    def cognitive_cache(self) -> CognitiveCacheManager:
+        if self._cognitive_cache is None:
+            self._cognitive_cache = CognitiveCacheManager()
+        return self._cognitive_cache
 
     @property
     def hublayer(self) -> HubLayer:
@@ -735,6 +751,9 @@ class MemoryRuntime:
         if self._hippocampus is not None:
             hc_report = self.hippocampus.sleep_decide(self.graph, self._get_embedder())
 
+        # 6b. Cognitive cache rebuild: topic index + evict expired entries
+        cache_rebuild = self.cognitive_cache.rebuild_on_sleep(self.graph)
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -758,6 +777,7 @@ class MemoryRuntime:
             "ghosts_purged": ghost_purged,
             "self_narratives_purged": self_narratives_purged,
             "hippocampus": hc_report,
+            "cognitive_cache": cache_rebuild,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:

@@ -109,6 +109,27 @@ class RetrievalPipeline:
                     ))
         exact_ms = (time.time() - t0) * 1000
 
+        # Path 0.5: Cognitive cache lookup (query/session/topic/activation caches)
+        t0 = time.time()
+        cache_hit_anchors: list[tuple[Anchor, float, str]] = []
+        if query:
+            cache_result = self._rt.cognitive_cache.lookup(
+                query=query,
+                tags=list(context.task_tags) if context and getattr(context, 'task_tags', None) else None,
+                seed_ids=[item.anchor.id for item in exact_results if item.anchor],
+            )
+            seen_ids: set[str] = set()
+            for source, anchor_ids in cache_result.items():
+                for aid in anchor_ids:
+                    if aid in seen_ids:
+                        continue
+                    anchor = self._rt.graph.anchors.get(aid)
+                    if anchor and anchor.is_retrievable:
+                        seen_ids.add(aid)
+                        score = 0.88 if source == "query_cache" else 0.82
+                        cache_hit_anchors.append((anchor, score, source))
+        cache_ms = (time.time() - t0) * 1000
+
         # Path A: Raw buffer search (L0 — highest priority after exact cache)
         t0 = time.time()
         raw_results = self._rt.raw_buffer.search(
@@ -124,10 +145,26 @@ class RetrievalPipeline:
             query=query, context=context, max_items=max_items)
         graph_ms = (time.time() - t0) * 1000
 
-        # Merge: exact cache → raw buffer (recent, uncompressed) → graph (compressed)
+        # Merge: exact cache → cognitive cache → raw buffer → graph
         merged_items = list(exact_results)
         seen_texts = {self._rt._normalize_text(item.compressed_text) for item in merged_items
                       if hasattr(item, 'compressed_text') and item.compressed_text}
+        seen_ids = {item.anchor.id for item in merged_items if item.anchor}
+
+        # Insert cognitive cache hits
+        for anchor, score, source in cache_hit_anchors:
+            if anchor.id in seen_ids:
+                continue
+            seen_ids.add(anchor.id)
+            norm_text = self._rt._normalize_text(anchor.text[:120])
+            seen_texts.add(norm_text)
+            merged_items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=score,
+                memory_type=MemoryType.SEMANTIC,
+                compression_level=1,
+                compressed_text=anchor.text[:200],
+            ))
 
         for chunk, score in raw_results:
             norm_text = self._rt._normalize_text(chunk.text[:120])
@@ -159,19 +196,33 @@ class RetrievalPipeline:
             return self._system2_recall(query, context, max_items,
                                         trigger_reason="low_confidence")
 
-        layers_visited = (["exact_cache"] if exact_results else []) + ["raw_buffer"] + graph_result.get("layers_visited", [])
+        # Record results in cognitive caches
+        result_ids = [item.anchor.id for item in merged_items if item.anchor]
+        result_scores = [item.relevance_score for item in merged_items]
+        if query and result_ids:
+            self._rt.cognitive_cache.record_query(query, result_ids, result_scores)
+        for aid in result_ids:
+            self._rt.cognitive_cache.record_access(aid)
+
+        layers_visited = (["exact_cache"] if exact_results else [])
+        if cache_hit_anchors:
+            layers_visited.append("cognitive_cache")
+        layers_visited.append("raw_buffer")
+        layers_visited.extend(graph_result.get("layers_visited", []))
         total_ms = (time.time() - t_start) * 1000
 
         self._rt.tracer.record("recall", attributes={
             "query": query[:200],
             "max_items": max_items,
             "exact_hits": len(exact_results),
+            "cache_hits": len(cache_hit_anchors),
             "raw_chunks": len(raw_results),
             "graph_items": len(graph_result.get("items", [])),
             "final_count": len(merged_items),
             "layers_visited": str(layers_visited)[:300],
             "channel": "system1",
             "exact_ms": round(exact_ms, 3),
+            "cache_ms": round(cache_ms, 3),
             "raw_ms": round(raw_ms, 3),
             "graph_ms": round(graph_ms, 3),
             "total_ms": round(total_ms, 3),
@@ -184,6 +235,7 @@ class RetrievalPipeline:
             relevant_facts=[],
             reasoning_traces=[
                 f"exact_hits={len(exact_results)}",
+                f"cache_hits={len(cache_hit_anchors)}",
                 f"raw_chunks={len(raw_results)}",
                 f"graph_items={len(graph_result.get('items', []))}",
                 f"merged={len(merged_items)}",
