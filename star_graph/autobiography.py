@@ -199,7 +199,7 @@ class AutobiographicalMemory:
 
     def get_beliefs(self, min_stability: float = 0.2) -> list[dict]:
         """Get all stable self-beliefs (the agent's current self-model)."""
-        beliefs = []
+        beliefs: list[dict] = []
         for n in self._narratives.values():
             if n.self_belief and n.stability >= min_stability:
                 beliefs.append({

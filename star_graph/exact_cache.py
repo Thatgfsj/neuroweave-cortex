@@ -19,6 +19,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Any
 from typing import Optional
 
 
@@ -238,7 +239,7 @@ class ExactMatchCache:
         """Check if a key exists in the cache (O(1))."""
         return key in self._key_set
 
-    def harvest_from_anchor(self, anchor: any) -> list[str]:
+    def harvest_from_anchor(self, anchor: Any) -> list[str]:
         """Extract and store keys from an Anchor.
 
         Uses anchor.text, anchor.tags, and anchor.exact_match_keys

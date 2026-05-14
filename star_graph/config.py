@@ -111,7 +111,7 @@ class _DotDict:
 
     def validate(self, schema: _DotDict | None = None) -> list[str]:
         """Validate config values are in reasonable ranges. Returns list of warnings."""
-        warnings = []
+        warnings: list[str] = []
         data = self.to_dict()
         _check_ranges(data, "", warnings)
         return warnings

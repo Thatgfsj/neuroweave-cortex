@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 @dataclass
 class FilterResult:
     """Result of symbolic filtering."""
-    passed_ids: list[str]
-    rejected_ids: list[str]
+    passed_ids: list[str] = field(default_factory=list)
+    rejected_ids: list[str] = field(default_factory=list)
     filter_stage: str = ""       # which stage rejected them
     duration_ms: float = 0.0
     candidate_count: int = 0

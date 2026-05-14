@@ -271,7 +271,7 @@ class StreamingMemoryBuffer:
             if item.embedding is None:
                 item.embedding = self._get_embedder().encode(item.text)
 
-        kept = []
+        kept: list[StreamItem] = []
         for item in items:
             is_dup = False
             for existing in kept:
