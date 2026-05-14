@@ -1,187 +1,223 @@
 # 星图记忆 · Star Graph Memory
 
-海马体启发的 AI 长期记忆系统。
+海马体启发的 AI 认知记忆运行时系统。不是向量数据库，不是图数据库，而是一个**记忆运行时**——它像生物记忆一样：记忆、遗忘、强化、连接、抽象和演化。
 
-对话被压缩为**锚点**（建议 ≤200 字），连接成可导航的**星图**。检索使用**振荡相位锁定谐振**而非关键词搜索。记忆巩固通过**9阶段睡眠周期**完成。
+## 与向量数据库/图数据库的区别
 
-## 理论
-
-系统基于七大神经科学原理：
-
-| 原理 | 机制 |
-|------|------|
-| **尖波涟漪 (SWR)** | 睡眠期间对高优先级近期记忆进行压缩重放（~15×） |
-| **记忆再巩固** | 预测误差门控：确认 / 更新 / 新建 |
-| **相位进动** | θ-γ 振荡谐振将序列编码为相位偏移 |
-| **图式形成** | 跨事件的共同模式抽象（类比内侧前额叶皮层） |
-| **预测编码** | 自由能最小化统一编码、检索与睡眠 |
-| **情绪调节** | 双因子标记（去甲肾上腺素+皮质醇）增强编码；REM 剥离情绪 |
-| **自适应遗忘** | 精度加权衰减；幽灵锚点实现再学习的节省效应 |
-
-## 架构
-
-```
-                  ┌─────────────────────────┐
-                  │     新对话 / 查询         │
-                  └───────────┬─────────────┘
-                              │
-                  ┌───────────▼─────────────┐
-                  │   谐振引擎                │
-                  │   · 海马通路：振荡锁相    │
-                  │   · 皮层通路：直接查表    │
-                  │   · 预测误差最小化        │
-                  └───────────┬─────────────┘
-                              │
-            ┌─────────────────┼─────────────────┐
-            │                 │                 │
-   ┌────────▼──────┐  ┌──────▼──────┐  ┌───────▼──────┐
-   │  确认          │  │  更新         │  │  新记忆       │
-   │  强化锚点      │  │  再巩固       │  │  创建锚点     │
-   └────────┬──────┘  └──────┬──────┘  └───────┬──────┘
-            │                 │                 │
-            └─────────────────┼─────────────────┘
-                              │
-                  ┌───────────▼─────────────┐
-                  │   星图                    │
-                  │   · 锚点 + 振荡器         │
-                  │   · 幽灵 (节省效应)       │
-                  │   · 图式                 │
-                  │   · 皮层索引             │
-                  └───────────┬─────────────┘
-                              │
-                  ┌───────────▼─────────────┐
-                  │   9阶段睡眠引擎           │
-                  │   1. SWR 重放            │
-                  │   2. 系统巩固            │
-                  │   3. 情绪剥离            │
-                  │   4. 图式提取            │
-                  │   5. 合并相似            │
-                  │   6. 自适应剪枝+幽灵     │
-                  │   7. 桥接星座            │
-                  │   8. 赫布更新            │
-                  │   9. 突触稳态            │
-                  └─────────────────────────┘
-```
-
-## 安装
-
-```bash
-pip install star-graph-memory
-# 或从源码安装：
-git clone https://github.com/Thatgfsj/star-graph-memory.git
-cd star-graph-memory
-pip install -e .
-```
+| 能力 | 向量数据库 | 图数据库 | Star Graph |
+|---|---|---|---|
+| 语义检索 | ✓ | ✗ | ✓ |
+| 图遍历 | ✗ | ✓ | ✓ |
+| 自动遗忘（生存衰减） | ✗ | ✗ | ✓ |
+| 记忆强化（复述） | ✗ | ✗ | ✓ |
+| 冲突检测（矛盾边） | ✗ | ✗ | ✓ |
+| 模糊回忆（"我好像记得..."） | ✗ | ✗ | ✓ |
+| 涌现抽象（模式发现） | ✗ | ✗ | ✓ |
+| 时间上下文（TimeSpine 索引） | ✗ | ✗ | ✓ |
+| 8阶段睡眠巩固 | ✗ | ✗ | ✓ |
+| 幽灵复活（节省效应） | ✗ | ✗ | ✓ |
+| 自传体自我模型 | ✗ | ✗ | ✓ |
 
 ## 快速开始
 
 ```python
-from star_graph import StarGraph, Anchor
-from star_graph.sleep import SleepCycle
-from star_graph.retriever import OscillationResonanceRetriever
-from star_graph.online import OnlineConsolidator
-from star_graph.storage import Storage
+from star_graph import MemoryManager
+from star_graph.scheduler import AgentContext
 
-graph = StarGraph()
-online = OnlineConsolidator(graph, interval=5)
+# 一行初始化
+mgr = MemoryManager()
 
-# 添加记忆
-memories = [
-    ("用户偏好 Python 做爬虫，Rust 做大型项目", ["技术栈"], 0.5),
-    ("用户住在北京朝阳区，通勤约40分钟", ["个人信息", "位置"], 0.3),
-    ("用户正在学习日语，每天练习30分钟", ["学习"], 0.4),
-    ("用户喜欢意大利菜，尤其是碳水面", ["食物"], 0.6),
-]
-for text, tags, emotion in memories:
-    anchor = Anchor.create(text, tags=tags, emotional_valence=emotion)
-    graph.add_anchor(anchor)
-    online.record_interaction(anchor)
+# 记忆
+mgr.remember("用户在排查 Redis 连接超时——连接池从10调到20后修复",
+             tags=["redis", "debug", "timeout"])
+mgr.remember("用户熟悉 Python asyncio 异步编程",
+             tags=["python", "knowledge"])
+mgr.remember("用户偏好类型标注和简洁代码",
+             tags=["preference", "style"])
 
-# 谐振检索
-osc = OscillationResonanceRetriever(graph)
-result = osc.retrieve("用户住在哪里？")
-for c in result.constellations:
-    for a in c.anchors:
-        print(f"[{a.retention_score:.2f}] {a.text}")
+# 工作记忆——快速、临时的活跃上下文缓冲区
+mgr.remember_working("正在调试 auth 中间件超时问题",
+                     tags=["debug", "auth"])
 
-# 检索 trace / 可解释性：查看 memory 为什么命中
-print(result.retrieval_trace)
-# {
-#   "query": "用户住在哪里？",
-#   "method": "OscillationResonance",
-#   "retrieved_memories": [
-#     {
-#       "memory_id": "...",
-#       "score": 0.91,
-#       "reason": "entity_match + tag_match + phase_match"
-#     }
-#   ]
-# }
+# 上下文感知检索
+ctx = AgentContext(task_type="debugging", active_goals=["fix Redis connection"])
+memories = mgr.recall("Redis 连接池配置", context=ctx)
+print(memories.memory_summary)
 
-# 夜间深度睡眠
-cycle = SleepCycle(graph)
-result = cycle.run()
-print(f"合并: {result['merged']}, 剪枝: {result['pruned_anchors']}")
-print(f"幽灵: {result['ghosts_created']}, 图式: {result['schemas_formed']}")
+# System-2 深度检索——用于穷举或低置信度查询
+memories = mgr.dual_recall("列出所有 Redis 相关的问题", context=ctx)
+
+# 微巩固——增量、非阻塞
+mgr.micro_consolidate()
+
+# 睡眠——8阶段巩固
+report = mgr.sleep()
+print(report)
 
 # 持久化
-store = Storage()
-store.save(graph)
+mgr.save("agent_memory.json")
+mgr.load("agent_memory.json")
 ```
 
-## 双通路检索
+## 架构
+
+三层设计，每层仅依赖下一层：
+
+```
+第三层：行为层    │  皮层路由、记忆门控、工作记忆、
+    (cortex.py,   │  双通道检索、自适应复述、自传体记忆
+     router.py,   │  "此刻应该回忆什么，以什么细节层次？"
+     gate.py,     │
+     working_memory.py,│
+     scheduler.py,│
+     autobiography.py)│
+                  │
+第二层：认知层    │  Hub抽象、级联回忆、TimeSpine时间索引、
+    (retriever.py,│  睡眠巩固、演化、幽灵复活、
+     sleep.py,    │  抽象、社区检测、竞争
+     evolution.py,│  "记忆如何连接、强化和消退？"
+     ghost.py,    │
+     abstraction.py,│
+     community.py,│
+     competition.py,│
+     timespine.py,│
+     cascade.py,  │
+     hub.py)      │
+                  │
+第一层：存储层    │  CRUD、持久化、ANN索引、分层存储、
+    (graph.py,    │  BM25关键词索引、精确匹配缓存
+     anchor.py,   │  "这个记忆存在哪里？"
+     storage.py,  │
+     sqlite_storage.py,│
+     index.py,    │
+     bm25.py,     │
+     exact_cache.py,│
+     tiered.py)   │
+```
+
+### 核心模块
+
+| 模块 | 功能 |
+|---|---|
+| `manager.py` | 高层门面 API — `remember()`, `recall()`, `sleep()`, `save()` |
+| `runtime.py` | 依赖容器 — 管理所有子系统生命周期 |
+| `retrieval_pipeline.py` | 5层维度降级检索 (L0→L4)，自动降级回退 |
+| `scheduler.py` | 上下文感知检索，记忆类型选择 |
+| `working_memory.py` | 短期缓冲区 (15条, 1h TTL)，自动晋升至长期记忆 |
+| `sleep.py` | 8阶段睡眠：N1_Replay → N2_Merge → N3_Compression → N3b_AtomFacts → REM_Emotion → N4_Prune → N5_HubConnect → N6_IndexRebuild |
+| `evolution.py` | 基于生存函数的衰减 (艾宾浩斯/幂律/指数)、信念变迁、干扰 |
+| `retriever.py` | HybridFusion + OscillationResonance + VectorSimilarity + 个性化PageRank + 可解释评分 |
+| `dual_channel.py` | System-1 (快速) + System-2 (深度) 双通道检索，自动触发 |
+| `bm25.py` | 稀疏关键词检索 (BM25)，与稠密向量做倒数秩融合 |
+| `ghost.py` | 潜在记忆痕迹，支持模糊回忆和矛盾追踪 (NegativeGhost) |
+| `abstraction.py` | 从锚点簇中涌现类别发现 |
+| `community.py` | Louvain 社区检测，质心路由 |
+| `anchor.py` | 记忆单元：6状态生命周期，10维 AnchorVector，乘法留存 |
+| `graph.py` | 星图：RichEdge（时序、因果、状态转换）、Schema、ReflectionNode |
+| `timespine.py` | 时间索引：O(days×buckets) 时间范围检索 |
+| `cascade.py` | 因果链遍历，跨连接记忆序列 |
+| `hub.py` | 分层 hub-and-spoke 抽象 (leaf→domain→global) |
+| `cortex.py` | 分区记忆皮层，独立睡眠和检索 |
+| `exact_cache.py` | 确定性 O(1) 实体键查找 |
+| `tiered.py` | HOT/WARM/COLD 分层存储，透明磁盘卸载 |
+| `autobiography.py` | 自我叙事形成与自传体记忆 |
+| `atom_facts.py` | LLM 驱动的原子事实提取 |
+| `survival.py` | 可插拔生存函数（艾宾浩斯、幂律、指数、自定义） |
+| `compression.py` | 多层次会话压缩（episodic/strategic/meta） |
+| `resonance.py` | 相位锁定振荡谐振，用于时序一致检索 |
+| `streaming.py` | 流式记忆缓冲区（带背压控制） |
+| `benchmark.py` | 内置基准测试套件（5个类别） |
+| `config.py` | 集中 YAML 配置，schema 验证，点路径访问/覆盖 |
+
+## 记忆生命周期
+
+每个锚点经历6个状态：
+
+```
+ACTIVE → REHEARSING → CONSOLIDATING → DORMANT → GHOST → REACTIVATED
+```
+
+- **Active（活跃）**：刚刚创建或最近被访问——完全可塑，易于更新
+- **Rehearsing（复述中）**：睡眠期间被重放——临时提升重要性
+- **Consolidating（巩固中）**：从海马体向皮层转移——稳定性增加
+- **Dormant（休眠）**：稳定、低活动——只读，皮层检索
+- **Ghost（幽灵）**：被剪枝但保留压缩痕迹——可部分回忆或完全复活
+- **Reactivated（再激活）**：幽灵被新的相关经历复活——稳定性降低，可塑性高
+
+配套 **ThermalState**（HOT → WARM → COLD → DEAD）用于存储介质切换：
+- HOT：内存中，完全可访问
+- WARM：内存中，定期刷新到磁盘
+- COLD：仅磁盘，访问时透明解冻
+
+## 睡眠巩固
+
+睡眠不是清理，而是**改变图结构**：
+
+1. **N1_Replay** — 通过 SWR 评分优先重放高惊喜度、高情绪记忆
+2. **N2_Merge** — 融合近重复锚点（ANN 加速，O(n×k)），桥接星座
+3. **N3_Compression** — 海马体→皮层转移，形成图式
+4. **N3b_AtomFacts** — LLM 从压缩簇中提取原子事实
+5. **REM_Emotion** — 剥离已巩固记忆的情绪负载
+6. **N4_Prune** — 移除弱锚点/边，创建幽灵痕迹（节省效应）
+7. **N5_HubConnect** — 跨皮层 Hub 桥接
+8. **N6_IndexRebuild** — 刷新 ANN、BM25 和社区索引
+
+## 双通道检索
+
+System-1（快速，embedding + BM25 混合）与 System-2（深度，层次遍历）自动触发：
+
+- 低置信度 System-1 结果 (<0.35) 自动触发 System-2
+- 结构性关键词（"所有"、"每个"、"列出"、"哪些"、"之前"、"最后"）触发穷举搜索
+- 结果通过加权倒数秩融合合并
+
+## 配置系统
 
 ```python
-from star_graph.retriever import (
-    OscillationResonanceRetriever,  # 创新：相位锁定谐振
-    VectorSimilarityRetriever,      # 基线：余弦相似度
-    compare_retrievers,             # 对比工具
-)
+from star_graph.config import config, override, load_config
 
-osc_ret = OscillationResonanceRetriever(graph)
-vec_ret = VectorSimilarityRetriever(graph)
+# 点路径访问
+threshold = config.sleep.merge.default_threshold  # 0.85
 
-# 对比两种检索器
-comparisons = compare_retrievers(graph, [
-    "用户喜欢什么食物？",
-    "用户住在哪里？",
-])
-for c in comparisons:
-    print(f"向量相似度: {c['vector_similarity']['top_score']:.3f}")
-    print(f"振荡谐振:   {c['oscillation_resonance']['top_score']:.3f}")
+# 编程覆盖
+override('sleep.merge.default_threshold', 0.75)
+override('gate.k', 30)
+
+# Schema 验证
+warnings = config.validate()  # 类型、范围、跨段兼容性检查
+
+# 加载自定义 YAML
+cfg = load_config("my_params.yaml")
 ```
 
-## 在线微巩固
+所有 300+ 可调参数见 `star_graph/defaults.yaml`。
 
-无需等到凌晨2点。每 N 次交互后触发轻量睡眠（<50ms）：
+## 安装
 
-```python
-online = OnlineConsolidator(graph, interval=5)  # 每5次交互后微巩固
-online.record_interaction(anchor)  # 自动触发
+```bash
+git clone https://github.com/Thatgfsj/star-graph-memory.git
+cd star-graph-memory
+
+# 可编辑模式安装
+pip install -e .
+
+# 可选：SQLite 存储后端
+pip install aiosqlite
+
+# 运行演示
+python examples/emergence_demo.py
 ```
 
-三种模式：
-- `online` — 仅微巩固（SWR重放 + 赫布更新）
-- `nightly` — 完整9阶段深度睡眠
-- `hybrid` — 在线微巩固 + 夜间深度睡眠
+**注意：** `star-graph-memory` 未发布到 PyPI，请从源码安装。
 
 ## CLI
 
 ```bash
-sg-add "用户偏好 Python 做爬虫" --tags 技术栈 --emotional 0.5
-sg-query "用户喜欢什么编程语言？"
+sg-add "讨论了微服务部署模式" --tags 架构 --emotional 0.6
+sg-query "数据库连接池最佳实践"
 sg-query --trace "用户住在哪里？"
 sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
 ```
-
-## 运行示例
-
-```bash
-python examples/memory_basic.py
-```
-
-预期输出：添加10条记忆 → 查询"住在哪里？" → 双检索器对比 → 睡眠周期 → 再次查询 → 保存
 
 ## 运行测试
 
@@ -189,37 +225,6 @@ python examples/memory_basic.py
 pip install pytest
 pytest tests/ -v
 ```
-
-## 睡眠守护进程
-
-```powershell
-# Windows：安装每日凌晨2点自动运行
-powershell -ExecutionPolicy Bypass -File scripts/install_sleep_task.ps1
-```
-
-```bash
-# 空闲检测模式（用户离开15分钟后触发）
-python scripts/sleep_daemon.py --mode idle --idle-threshold 15
-```
-
-## 路线图
-
-| 季度 | 目标 |
-|------|------|
-| 2026 Q2 | v0.3.0 可运行原型 + 对比基准 |
-| 2026 Q3 | 完整9阶段睡眠 + 预印本 |
-| 2026 Q4 | LangChain/LlamaIndex 集成 |
-| 2027 Q1 | v1.0.0 生产候选版 |
-
-## 更深入的阅读
-
-- `docs/research.md` — 完整理论框架及文献引用
-- `docs/neuro_mapping.md` — 每条神经科学原理到算法的详细映射
-- `docs/benchmark.md` — 与 Mem0/HippoRAG 的对比基准
-
-## 开放协作
-
-欢迎神经科学、认知科学、AI 研究者参与讨论。如有更合理的生物-算法映射建议，请在 Issue 中提出。
 
 ## 许可证
 

@@ -351,6 +351,10 @@ Phase 5 (v1.0.8):    Sleep merge ANN → BM25 hybrid → PPR approx → Embedder
 - [x] find_contradictions() ANN-accelerated: O(n²) → O(n*k) with near-neighbor pre-filter
 - [x] retention_score caching: 0.5s TTL cache saves recomputation in hot retrieval loops
 - [x] Layer 3 TimeSpine-indexed scan: O(days*buckets) replaces full O(n) cortex scan; remember()/forget() auto-populate spine
+- [x] Structured logging: logger.py with get_logger/init_logging; sleep.py uses _log_event (logging + report list)
+- [x] Config schema validation: CONFIG_SCHEMA with type/range/allowed_values checks; _validate_schema() for section existence + key types + cross-section compat
+- [x] mypy config: pyproject.toml with basic strictness settings
+- [x] README.md + README_CN.md: updated to reflect v1.0.7-dev architecture (8-phase sleep, 10-dim AnchorVector, dual-channel, BM25 hybrid, tiered storage, all current modules)
 
 ### v1.0.8 (emergency hardening — external code review)
 - [x] #21 Sleep merge O(n²) → ANN-accelerated: candidate pairs pre-filtered via ANN query, O(n*k)
