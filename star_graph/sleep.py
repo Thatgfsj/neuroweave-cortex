@@ -13,6 +13,7 @@ Each phase produces metrics captured in SleepReport for rich, human-readable out
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import time
 from collections import defaultdict
@@ -123,10 +124,16 @@ class SleepCycle:
         self.graph = graph
         self.cfg = config if config is not None else Config.get()
         self.log: list[str] = []
+        self._log = logging.getLogger("star_graph.sleep")
         self._cycle_count: int = 0
         self._ghost_count: int = 0
         self._embedder = None
         self._compressor = None
+
+    def _log_event(self, msg: str) -> None:
+        """Log to both the structured report list and the logging system."""
+        self._log.info(msg)
+        self.log.append(msg)
 
     def _get_embedder(self):
         if self._embedder is None:
@@ -192,7 +199,7 @@ class SleepCycle:
         }
 
         if stats["episodic"] > 0:
-            self.log.append(
+            self._log_event(
                 f"Compression: {stats['episodic']} episodic + {stats['strategic']} strategic "
                 f"+ {stats['meta']} meta summaries from {stats['compressed_anchors']} anchors "
                 f"({total_inserted} 'compresses' edges)"
@@ -304,7 +311,7 @@ class SleepCycle:
         inserted = extractor.add_facts_to_graph(self.graph, all_facts)
 
         if inserted > 0:
-            self.log.append(
+            self._log_event(
                 f"Atom Facts: {inserted} facts extracted from {len(clusters)} clusters "
                 f"(provider: {extractor.provider_name})"
             )
@@ -746,7 +753,7 @@ class SleepCycle:
                                         weight=min(1.0, weight),
                                         edge_type=edge_type)
 
-        self.log.append(f"SWR Replay: replayed {len(prioritized)} anchors "
+        self._log_event(f"SWR Replay: replayed {len(prioritized)} anchors "
                         f"(topology-constrained linking, compression ~{max(1, len(recent)//3)}:1)")
 
     # ── Phase 2: Systems Consolidation ──────────────────
@@ -780,7 +787,7 @@ class SleepCycle:
                 1.0 - c.cortical_stability_factor * anchor.vector.hippocampal_dependency)
 
         cortical_count = sum(1 for a in self.graph.anchors.values() if a.is_cortical)
-        self.log.append(f"Systems Consolidation: {cortical_count}/{len(self.graph.anchors)} "
+        self._log_event(f"Systems Consolidation: {cortical_count}/{len(self.graph.anchors)} "
                         f"memories cortical")
 
     # ── Phase 3: Emotional Stripping ────────────────────
@@ -797,7 +804,7 @@ class SleepCycle:
                     abs(old_valence) * c.importance_emotional_residual + c.importance_baseline
                 )
 
-        self.log.append("Emotional Stripping: decoupled emotion from consolidated memories")
+        self._log_event("Emotional Stripping: decoupled emotion from consolidated memories")
 
     # ── Phase 4: Schema Extraction + Abstraction Emergence ─
 
@@ -861,7 +868,7 @@ class SleepCycle:
                 a.schema_ref = schema_id
 
         if formed:
-            self.log.append(f"Schema Extraction: formed {formed} new schemas (embedding-based)")
+            self._log_event(f"Schema Extraction: formed {formed} new schemas (embedding-based)")
 
         # Phase 4b: Abstraction Emergence — discover emergent categories
         abstract_formed = self._abstraction_emergence()
@@ -907,7 +914,7 @@ class SleepCycle:
                     self.graph.anchors[aid].tags.append(f"abstract:{abstract.label}")
 
         if new_abstracts:
-            self.log.append(
+            self._log_event(
                 f"Abstraction Emergence: discovered {len(new_abstracts)} "
                 f"new concepts: {[a.label for a in new_abstracts]}"
             )
@@ -1004,7 +1011,7 @@ class SleepCycle:
                 merged += 1
 
         if merged:
-            self.log.append(f"Merge: fused {merged} duplicate anchor pairs")
+            self._log_event(f"Merge: fused {merged} duplicate anchor pairs")
         return merged
 
     # ── Phase 6: Adaptive Prune ─────────────────────────
@@ -1051,7 +1058,7 @@ class SleepCycle:
         stale_count = self.graph._ghost_subsystem.decay_all()
 
         if candidates:
-            self.log.append(f"Adaptive Prune: removed {len(candidates)} anchors "
+            self._log_event(f"Adaptive Prune: removed {len(candidates)} anchors "
                             f"({self._ghost_count} ghosts, {stale_count} stale ghosts cleared)")
         return candidates
 
@@ -1064,7 +1071,7 @@ class SleepCycle:
                 self.graph._adjacency[a].discard(b)
                 self.graph._adjacency[b].discard(a)
         if candidates:
-            self.log.append(f"Edge Prune: removed {len(candidates)} dormant edges")
+            self._log_event(f"Edge Prune: removed {len(candidates)} dormant edges")
         return candidates
 
     # ── Phase 7: Bridge Distant ─────────────────────────
@@ -1097,7 +1104,7 @@ class SleepCycle:
                         bridges += 1
 
         if bridges:
-            self.log.append(f"Bridge: created {bridges} cross-constellation connections")
+            self._log_event(f"Bridge: created {bridges} cross-constellation connections")
         return bridges
 
     # ── Phase 8: Hebbian Update ─────────────────────────

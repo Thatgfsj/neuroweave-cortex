@@ -1037,7 +1037,8 @@ class MemoryRuntime:
         return "\n".join(lines)
 
     def print_health(self) -> None:
-        print(self.health_report())
+        import logging
+        logging.getLogger("star_graph.runtime").info("\n" + self.health_report())
 
     # ── Advanced: graph traversal utilities ───────────────────
 

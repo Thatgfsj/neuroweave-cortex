@@ -61,6 +61,7 @@ from .retrieval_pipeline import RetrievalPipeline
 from .autobiography import AutobiographicalMemory, SelfNarrative
 from .math_utils import cosine_sim, safe_div, clamp, sigmoid
 from .bm25 import BM25Index, reciprocal_rank_fusion
+from .logger import get_logger, init_logging
 from .compression import (
     CompressionLevel,
     SummaryAnchor,
