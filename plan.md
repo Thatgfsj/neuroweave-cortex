@@ -511,6 +511,12 @@ Reduces context pollution, token waste, and agent confusion.
 - [x] mypy config: pyproject.toml with basic strictness settings
 - [x] README.md + README_CN.md: updated to reflect v1.0.7-dev architecture (8-phase sleep, 10-dim AnchorVector, dual-channel, BM25 hybrid, tiered storage, all current modules)
 
+### v1.0.9 (resource bounding — anti-bloat)
+- [x] #27 Global anchor hard cap + eviction policy (lru/fifo/lowest_retention), max_total_anchors=50000
+- [x] #28 Auto-sleep daemon: _check_auto_sleep() triggered on anchor count + time intervals
+- [x] #29 Cold ghost cleanup: GhostSubsystem.decay_all() returns IDs → TieredStorage.remove() + compact()
+- [x] #30 Cortex hard rejection: MemoryCortex.ensure_capacity() auto-consolidates overfull cortices
+
 ### v1.0.8 (emergency hardening — external code review)
 - [x] #21 Sleep merge O(n²) → ANN-accelerated: candidate pairs pre-filtered via ANN query, O(n*k)
 - [x] #22 BM25 + embedding hybrid: BM25Index with incremental add/remove, RRF fusion in System-1 search
