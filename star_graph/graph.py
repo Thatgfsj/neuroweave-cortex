@@ -521,6 +521,54 @@ class StarGraph:
             self._adjacency[b].discard(a)
             self.edges.pop(weakest_key, None)
 
+    def _evict_anchors(self, count: int, policy: str = "lowest_retention") -> list[str]:
+        """Evict `count` anchors by policy. Returns list of evicted anchor IDs.
+
+        Policies:
+          - lowest_retention: remove anchors with lowest retention_score
+          - lru: remove anchors with oldest last_activated_at
+          - fifo: remove anchors with oldest created_at
+
+        Skips anchors created in the last 5s to protect active-context items.
+        Falls back to full anchor list if all anchors are recent.
+        """
+        if count <= 0 or not self.anchors:
+            return []
+        now = time.time()
+        recent_cutoff = now - 5  # protect only very recent anchors
+
+        candidates = [
+            aid for aid, a in self.anchors.items()
+            if a.created_at < recent_cutoff
+        ]
+        if not candidates:
+            # All anchors are recent — still evict from full set
+            candidates = list(self.anchors.keys())
+
+        if policy == "lru":
+            candidates.sort(key=lambda aid: self.anchors[aid].last_activated_at)
+        elif policy == "fifo":
+            candidates.sort(key=lambda aid: self.anchors[aid].created_at)
+        else:  # lowest_retention (default)
+            candidates.sort(key=lambda aid: self.anchors[aid].retention_score)
+
+        evicted = []
+        for aid in candidates[:count]:
+            if aid in self.anchors:
+                # Create ghost trace before removal
+                if self._ghost_subsystem:
+                    residual_edges = {}
+                    for neighbor in self._adjacency.get(aid, set()):
+                        key = self._key(aid, neighbor)
+                        edge = self.edges.get(key)
+                        if edge:
+                            residual_edges[neighbor] = edge.weight * 0.3
+                    self._ghost_subsystem.create(self.anchors[aid], residual_edges)
+                self.remove_anchor(aid)
+                evicted.append(aid)
+
+        return evicted
+
     # ── CRUD ──────────────────────────────────────────────
 
     def _get_ann_index(self):

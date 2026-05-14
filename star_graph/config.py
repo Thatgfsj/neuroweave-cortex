@@ -151,6 +151,8 @@ CONFIG_SCHEMA: dict[str, dict[str, tuple]] = {
         "max_edges_per_node":       (int, False, 1, 1000, None),
         "max_degree_total":         (int, False, 1, 10000, None),
         "edge_budget_enabled":      (bool, False, None, None, None),
+        "max_total_anchors":        (int, False, 0, 1000000, None),
+        "eviction_policy":          (str, False, None, None, ["lru", "fifo", "lowest_retention"]),
     },
     "working_memory": {
         "max_capacity":             (int, False, 1, 1000, None),

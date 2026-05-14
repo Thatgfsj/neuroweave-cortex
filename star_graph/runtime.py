@@ -377,6 +377,15 @@ class MemoryRuntime:
                 **vec_kw,
             )
 
+        # Hard cap: evict before insert if at capacity
+        max_total = int(getattr(self.cfg.graph, 'max_total_anchors', 0) if self.cfg else 0)
+        if max_total > 0 and len(self.graph.anchors) >= max_total:
+            policy = getattr(self.cfg.graph, 'eviction_policy', 'lowest_retention') if self.cfg else 'lowest_retention'
+            evicted = self.graph._evict_anchors(count=1, policy=policy)
+            if evicted and self._bm25 is not None:
+                for eid in evicted:
+                    self._bm25.remove(eid)
+
         self.graph.add_anchor(anchor)
 
         # Index on the temporal spine for time-windowed retrieval (Layer 3)

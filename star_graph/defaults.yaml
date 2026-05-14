@@ -199,6 +199,8 @@ graph:
   max_edges_per_node: 8
   max_degree_total: 24
   edge_budget_enabled: true
+  max_total_anchors: 50000          # hard cap — evicts when exceeded (0 = disabled)
+  eviction_policy: "lowest_retention"  # lru | fifo | lowest_retention
   spreading:
     default_steps: 3
     default_decay: 0.6
