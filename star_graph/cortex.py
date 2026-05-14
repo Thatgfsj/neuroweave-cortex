@@ -25,11 +25,42 @@ from .index import ANNIndex
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryContext
 
 
+# Cortex hierarchy levels — higher priority = lower number
+CORTEX_HIERARCHY = {
+    "reflection": 0,    # AI self-summary, error patterns, strategy (smallest, highest weight)
+    "semantic": 1,      # User preferences, concepts (long-term stable)
+    "procedural": 2,    # Workflows, solutions (high compression, low forgetting)
+    "episodic": 3,      # Conversations, events (highest volume, fastest decay)
+    "hippocampus": 4,   # Transient cache (active context)
+}
+
+# Hierarchy weight multipliers for retrieval scoring
+HIERARCHY_WEIGHTS: dict[int, float] = {
+    0: 1.5,   # reflection: +50% boost
+    1: 1.25,  # semantic: +25% boost
+    2: 1.1,   # procedural: +10% boost
+    3: 1.0,   # episodic: baseline
+    4: 0.6,   # hippocampus: reduced (transient)
+}
+
+# Decay rates by hierarchy — higher levels decay slower
+HIERARCHY_DECAY_DAYS: dict[int, float] = {
+    0: 365.0,  # reflection: ~1 year
+    1: 180.0,  # semantic: ~6 months
+    2: 90.0,   # procedural: ~3 months
+    3: 30.0,   # episodic: ~1 month
+    4: 1.0,    # hippocampus: ~1 day
+}
+
+
 @dataclass
 class CortexConfig:
     """Per-cortex hyperparameters — each cortex tunes its own memory dynamics."""
     name: str = "default"
     description: str = ""
+    # Hierarchy
+    hierarchy_level: int = 3       # 0=reflection, 1=semantic, 2=procedural, 3=episodic, 4=hippocampus
+    hierarchy_domain: str = "episodic"  # reflection|semantic|procedural|episodic|hippocampus
     # Domain keywords for routing
     domain_keywords: list[str] = field(default_factory=list)
     domain_embedding: list[float] | None = None  # centroid of this domain
@@ -414,6 +445,84 @@ class MemoryCortex:
     @property
     def is_near_capacity(self) -> bool:
         return len(self.graph.anchors) >= self.config.max_anchors_before_consolidate
+
+    # ── Hierarchy-aware factory methods ───────────────────
+
+    @classmethod
+    def reflection(cls, name: str = "reflection",
+                   domain_keywords: list[str] | None = None,
+                   **kwargs) -> "MemoryCortex":
+        """Create a Reflection cortex (hierarchy level 0, highest priority)."""
+        return cls(CortexConfig(
+            name=name,
+            hierarchy_level=0,
+            hierarchy_domain="reflection",
+            description=f"Reflection cortex: {name} — AI self-summary, error patterns, strategy",
+            domain_keywords=domain_keywords or ["error", "strategy", "pattern", "improvement", "lesson"],
+            decay_half_life_days=HIERARCHY_DECAY_DAYS[0],
+            token_budget=kwargs.pop("token_budget", 3000),
+            retention_threshold=kwargs.pop("retention_threshold", 0.3),
+            consolidate_interval_hours=kwargs.pop("consolidate_interval_hours", 168.0),  # weekly
+            max_anchors_before_consolidate=kwargs.pop("max_anchors_before_consolidate", 500),
+            **kwargs,
+        ))
+
+    @classmethod
+    def semantic(cls, name: str = "semantic",
+                 domain_keywords: list[str] | None = None,
+                 **kwargs) -> "MemoryCortex":
+        """Create a Semantic cortex (hierarchy level 1, long-term stable)."""
+        return cls(CortexConfig(
+            name=name,
+            hierarchy_level=1,
+            hierarchy_domain="semantic",
+            description=f"Semantic cortex: {name} — user preferences, concepts, world knowledge",
+            domain_keywords=domain_keywords or ["preference", "knowledge", "concept", "fact", "definition"],
+            decay_half_life_days=HIERARCHY_DECAY_DAYS[1],
+            token_budget=kwargs.pop("token_budget", 2500),
+            retention_threshold=kwargs.pop("retention_threshold", 0.2),
+            consolidate_interval_hours=kwargs.pop("consolidate_interval_hours", 72.0),
+            max_anchors_before_consolidate=kwargs.pop("max_anchors_before_consolidate", 2000),
+            **kwargs,
+        ))
+
+    @classmethod
+    def procedural(cls, name: str = "procedural",
+                   domain_keywords: list[str] | None = None,
+                   **kwargs) -> "MemoryCortex":
+        """Create a Procedural cortex (hierarchy level 2, high compression)."""
+        return cls(CortexConfig(
+            name=name,
+            hierarchy_level=2,
+            hierarchy_domain="procedural",
+            description=f"Procedural cortex: {name} — workflows, solutions, how-to knowledge",
+            domain_keywords=domain_keywords or ["workflow", "solution", "howto", "fix", "process"],
+            decay_half_life_days=HIERARCHY_DECAY_DAYS[2],
+            token_budget=kwargs.pop("token_budget", 2000),
+            retention_threshold=kwargs.pop("retention_threshold", 0.15),
+            consolidate_interval_hours=kwargs.pop("consolidate_interval_hours", 48.0),
+            max_anchors_before_consolidate=kwargs.pop("max_anchors_before_consolidate", 3000),
+            **kwargs,
+        ))
+
+    @classmethod
+    def episodic(cls, name: str = "episodic",
+                 domain_keywords: list[str] | None = None,
+                 **kwargs) -> "MemoryCortex":
+        """Create an Episodic cortex (hierarchy level 3, highest volume, fastest decay)."""
+        return cls(CortexConfig(
+            name=name,
+            hierarchy_level=3,
+            hierarchy_domain="episodic",
+            description=f"Episodic cortex: {name} — conversations, events, daily interactions",
+            domain_keywords=domain_keywords or [],
+            decay_half_life_days=HIERARCHY_DECAY_DAYS[3],
+            token_budget=kwargs.pop("token_budget", 1000),
+            retention_threshold=kwargs.pop("retention_threshold", 0.1),
+            consolidate_interval_hours=kwargs.pop("consolidate_interval_hours", 24.0),
+            max_anchors_before_consolidate=kwargs.pop("max_anchors_before_consolidate", 5000),
+            **kwargs,
+        ))
 
 
 # ── Helper ───────────────────────────────────────────────

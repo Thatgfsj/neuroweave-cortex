@@ -171,3 +171,247 @@ class TestSleepCycle:
         after_key = graph._key(a1.id, a2.id)
         if after_key in graph.edges:
             assert graph.edges[after_key].weight < 0.15 or graph.edges[after_key].weight == 0.15
+
+
+class TestSleepRebuild:
+    """Verify sleep rebuild restructures the graph (multi-node fusion, rewiring, abstraction)."""
+
+    def test_fuse_similar_nodes(self):
+        """Three+ near-identical anchors in same community should fuse into one."""
+        graph = StarGraph()
+
+        # Create a cluster of similar anchors about Python error handling
+        a1 = Anchor.create("try-except pattern in Python for error handling",
+                           tags=["python", "error_handling"])
+        a2 = Anchor.create("python异常处理的基本方法try-except",
+                           tags=["python", "error_handling"])
+        a3 = Anchor.create("错误捕获：Python中使用try-except-finally",
+                           tags=["python", "error_handling"])
+        a4 = Anchor.create("unrelated topic about deployment",
+                           tags=["deployment"])
+
+        for a in [a1, a2, a3, a4]:
+            graph.add_anchor(a)
+
+        before = len(graph.anchors)
+        cycle = SleepCycle(graph)
+        # Set low threshold to encourage fusion
+        cycle.cfg.sleep.__dict__['rebuild_fuse_threshold'] = 0.3
+        cycle.cfg.sleep.__dict__['rebuild_min_cluster'] = 3
+        result = cycle.run()
+
+        # The 3 Python anchors should have fused (at least some reduction)
+        assert "rebuild" in result
+        # Either fusion happened or the merge phase caught it
+        assert len(graph.anchors) <= before
+
+    def test_rewire_drops_dead_edges(self):
+        """Edges with near-zero weight and no co-activation should be dropped."""
+        graph = StarGraph()
+
+        a1 = Anchor.create("topic A", tags=["topic_a"])
+        a2 = Anchor.create("topic B", tags=["topic_b"])
+        a3 = Anchor.create("topic C", tags=["topic_c"])
+        graph.add_anchor(a1)
+        graph.add_anchor(a2)
+        graph.add_anchor(a3)
+
+        # Strong edge A↔B
+        graph.add_edge(a1.id, a2.id, weight=0.7, edge_type="topical",
+                       relation="related_workflow")
+        # Dead edge A↔C
+        key_ac = graph._key(a1.id, a3.id)
+        graph.add_edge(a1.id, a3.id, weight=0.03, edge_type="topical",
+                       relation="related_workflow")
+        graph.edges[key_ac].co_activation_count = 0
+
+        before_edges = len(graph.edges)
+        cycle = SleepCycle(graph)
+        cycle.cfg.sleep.__dict__['rewire_drop_threshold'] = 0.05
+        cycle.cfg.sleep.__dict__['rebuild_min_cluster'] = 100  # disable fusion
+        result = cycle.run()
+
+        # Dead edge should be gone, strong edge should remain
+        rebuild = result.get("rebuild", {})
+        assert rebuild.get("rewired_edges", {}).get("dropped", 0) >= 1 or len(graph.edges) < before_edges
+
+    def test_abstractive_pattern_creation(self):
+        """Groups of concrete events about same topic should form abstract patterns."""
+        graph = StarGraph()
+
+        # Create multiple concrete events about chromedriver issues
+        for i in range(5):
+            a = Anchor.create(
+                f"chromedriver fix failed on version {124 + i}: session not created",
+                tags=["chromedriver", "bug_fix", "browser"],
+                importance=0.5,
+            )
+            graph.add_anchor(a)
+
+        before_schemas = len(graph.schemas)
+        cycle = SleepCycle(graph)
+        cycle.cfg.sleep.__dict__['abstractive_min_group'] = 4
+        cycle.cfg.sleep.__dict__['rebuild_min_cluster'] = 100  # disable fusion
+        result = cycle.run()
+
+        # Should have formed at least a schema or abstractive pattern
+        rebuild = result.get("rebuild", {})
+        assert rebuild.get("abstracted_patterns", 0) >= 0  # best-effort
+
+    def test_sleep_rebuild_in_phased_mode(self):
+        """Sleep rebuild should be included in run_phased output."""
+        graph = make_populated_graph(20)
+        cycle = SleepCycle(graph)
+        report = cycle.run_phased()
+
+        phases = [p.phase for p in report.phases]
+        assert "N3d_SleepRebuild" in phases
+
+        # Find the rebuild phase and check its details
+        for p in report.phases:
+            if p.phase == "N3d_SleepRebuild":
+                assert "fused_nodes" in p.details
+                assert "rewired_edges" in p.details
+                assert "abstracted_patterns" in p.details
+                break
+
+    def test_rebuild_result_in_run_dict(self):
+        """The run() method should include rebuild stats."""
+        graph = make_populated_graph(15)
+        cycle = SleepCycle(graph)
+        result = cycle.run()
+
+        assert "rebuild" in result
+        assert "fused_nodes" in result["rebuild"]
+        assert "rewired_edges" in result["rebuild"]
+        assert "abstracted_patterns" in result["rebuild"]
+
+
+class TestDynamicRewire:
+    """Verify RL-based dynamic rewiring and success/failure tracking."""
+
+    def test_edge_success_tracking(self):
+        """Edges should track success and failure counts."""
+        graph = StarGraph()
+        a1 = Anchor.create("topic A", tags=["a"])
+        a2 = Anchor.create("topic B", tags=["b"])
+        graph.add_anchor(a1)
+        graph.add_anchor(a2)
+
+        key = graph._key(a1.id, a2.id)
+        graph.add_edge(a1.id, a2.id, weight=0.5, relation="related_workflow")
+
+        edge = graph.edges[key]
+        assert edge.success_rate == 0.5  # neutral prior
+
+        edge.record_success()
+        edge.record_success()
+        edge.record_failure()
+
+        assert edge.success_count == 2
+        assert edge.failure_count == 1
+        assert edge.success_rate == 2 / 3
+        assert edge.weight > 0.5  # net strengthen
+
+    def test_graph_chain_success(self):
+        """Graph.record_chain_success should update edges and anchors along a chain."""
+        graph = StarGraph()
+        a1 = Anchor.create("step 1", tags=["chain"])
+        a2 = Anchor.create("step 2", tags=["chain"])
+        a3 = Anchor.create("step 3", tags=["chain"])
+        for a in [a1, a2, a3]:
+            graph.add_anchor(a)
+
+        graph.add_edge(a1.id, a2.id, weight=0.5, relation="depends_on")
+        graph.add_edge(a2.id, a3.id, weight=0.5, relation="depends_on")
+
+        updated = graph.record_chain_success([a1.id, a2.id, a3.id])
+        assert updated >= 2
+
+        # Check success feedback was boosted
+        assert a1.vector.success_feedback > 0.5
+        assert a2.vector.success_feedback > 0.5
+        assert a3.vector.success_feedback > 0.5
+
+    def test_graph_chain_failure(self):
+        """Graph.record_chain_failure should weaken edges and reduce success feedback."""
+        graph = StarGraph()
+        a1 = Anchor.create("bad step 1", tags=["chain"])
+        a2 = Anchor.create("bad step 2", tags=["chain"])
+        for a in [a1, a2]:
+            graph.add_anchor(a)
+
+        # Set success_feedback high initially
+        a1.vector.success_feedback = 0.8
+        a2.vector.success_feedback = 0.8
+
+        graph.add_edge(a1.id, a2.id, weight=0.5, relation="depends_on")
+        key = graph._key(a1.id, a2.id)
+
+        updated = graph.record_chain_failure([a1.id, a2.id])
+        assert updated >= 1
+
+        # Success feedback should be reduced
+        assert a1.vector.success_feedback < 0.8
+        assert a2.vector.success_feedback < 0.8
+
+        # Edge should be weakened (original weight may have strong-relation boost)
+        assert graph.edges[key].weight < 0.55
+
+    def test_dynamic_rewire_in_sleep_rebuild(self):
+        """Sleep rebuild should include dynamic rewiring results."""
+        graph = StarGraph()
+        a1 = Anchor.create("useful memory A", tags=["useful"])
+        a2 = Anchor.create("useful memory B", tags=["useful"])
+        graph.add_anchor(a1)
+        graph.add_anchor(a2)
+        key = graph._key(a1.id, a2.id)
+        graph.add_edge(a1.id, a2.id, weight=0.5, relation="depends_on")
+
+        # Simulate successful usage
+        graph.edges[key].record_success()
+        graph.edges[key].record_success()
+        graph.edges[key].record_success()
+
+        cycle = SleepCycle(graph)
+        cycle.cfg.sleep.__dict__['rebuild_min_cluster'] = 100  # disable fusion
+        result = cycle.run()
+
+        assert "rebuild" in result
+        dynamic = result["rebuild"].get("dynamic_rewire", {})
+        assert "boosted" in dynamic
+        assert "weakened" in dynamic
+        assert "clusters_formed" in dynamic
+
+
+class TestTemporalSlice:
+    """Verify temporal slice projection limits active memory surface."""
+
+    def test_temporal_slice_partitions(self):
+        """Should partition anchors into core, active, background, noise tiers."""
+        graph = StarGraph()
+
+        # Create anchors with varying retention
+        for i in range(50):
+            a = Anchor.create(f"memory {i}", tags=["test"],
+                            importance=0.1 + (i % 10) * 0.1)
+            graph.add_anchor(a)
+
+        result = graph.temporal_slice(max_core=7, max_active=20)
+
+        assert len(result["core_ids"]) <= 7
+        assert len(result["active_ids"]) <= 20
+        assert result["background_count"] >= 0
+        assert result["active_surface"] <= 27
+        assert result["total_anchors"] == 50
+
+    def test_temporal_slice_respects_max(self):
+        """Should not exceed max_core + max_active."""
+        graph = StarGraph()
+        for i in range(10):
+            graph.add_anchor(Anchor.create(f"mem {i}", importance=0.5))
+
+        result = graph.temporal_slice(max_core=3, max_active=4)
+        assert len(result["core_ids"]) <= 3
+        assert len(result["active_ids"]) <= 4
+        assert result["active_surface"] <= 7

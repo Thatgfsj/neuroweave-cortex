@@ -248,3 +248,271 @@ class AbstractionEngine:
             "max_level": max(a.level for a in self.abstracts.values()),
             "total_source_anchors": sum(len(a.source_anchor_ids) for a in self.abstracts.values()),
         }
+
+
+# ── Cross-Session Abstractive Memory ─────────────────────
+
+@dataclass
+class PatternMemory:
+    """A recurring pattern detected across multiple sessions.
+
+    Unlike AbstractNode (which captures a static category), PatternMemory
+    tracks frequency and recurrence of a pattern over time. When a pattern
+    appears frequently enough, it's promoted to a stable abstraction.
+    """
+
+    id: str
+    pattern_text: str               # template describing the pattern
+    centroid_embedding: list[float]  # mean of all matching embeddings
+    occurrence_count: int = 1       # how many times this pattern has appeared
+    source_session_ids: list[str] = field(default_factory=list)  # unique sessions
+    source_anchor_ids: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    stability: float = 0.3          # 0..1, increases with occurrences
+    promoted: bool = False          # has been promoted to stable abstraction
+    abstract_id: str = ""           # linked AbstractNode ID after promotion
+
+    @property
+    def is_recurring(self) -> bool:
+        """Pattern is recurring if seen in 3+ sessions or 5+ times."""
+        return len(self.source_session_ids) >= 3 or self.occurrence_count >= 5
+
+    @property
+    def is_stable(self) -> bool:
+        return self.stability > 0.7
+
+
+class AbstractiveMemoryEngine:
+    """Cross-session abstractive memory — converts recurring concrete events
+    into stable pattern memories.
+
+    Runs during sleep rebuild. Detects patterns that recur across sessions,
+    tracks their frequency, and promotes frequent patterns to stable abstractions.
+    Once promoted, the concrete source events decay faster than the pattern.
+
+    Usage:
+        engine = AbstractiveMemoryEngine()
+        patterns = engine.extract_patterns(graph)
+        promoted = engine.promote_stable_patterns(graph)
+    """
+
+    def __init__(self,
+                 min_occurrences: int = 3,
+                 similarity_threshold: float = 0.75,
+                 cross_session_bonus: float = 1.3):
+        self.min_occurrences = min_occurrences
+        self.similarity_threshold = similarity_threshold
+        self.cross_session_bonus = cross_session_bonus
+        self.patterns: dict[str, PatternMemory] = {}
+        self._abstraction_engine: AbstractionEngine | None = None
+        self._counter = 0
+
+    @property
+    def abstraction_engine(self) -> AbstractionEngine:
+        if self._abstraction_engine is None:
+            self._abstraction_engine = AbstractionEngine(
+                min_cluster_size=self.min_occurrences,
+                similarity_threshold=self.similarity_threshold,
+            )
+        return self._abstraction_engine
+
+    def extract_patterns(self, graph) -> list[PatternMemory]:
+        """Extract recurring patterns from a graph by grouping anchors
+        across different sessions by semantic similarity.
+
+        Returns newly discovered patterns.
+        """
+        from collections import defaultdict
+
+        # Step 1: collect anchors by session
+        by_session: dict[str, list[str]] = defaultdict(list)
+        for aid, a in graph.anchors.items():
+            if a.embedding and a.source_session:
+                by_session[a.source_session].append(aid)
+
+        if len(by_session) < 2:
+            return []  # need at least 2 sessions for cross-session patterns
+
+        # Step 2: for each session, compute session centroid
+        session_centroids: dict[str, list[float]] = {}
+        for sid, aids in by_session.items():
+            embs = [graph.anchors[aid].embedding for aid in aids
+                   if aid in graph.anchors and graph.anchors[aid].embedding]
+            if not embs:
+                continue
+            dim = len(embs[0])
+            centroid = [0.0] * dim
+            for emb in embs:
+                for i in range(dim):
+                    centroid[i] += emb[i]
+            for i in range(dim):
+                centroid[i] /= len(embs)
+            session_centroids[sid] = centroid
+
+        # Step 3: find anchors that are similar across different sessions
+        new_patterns: list[PatternMemory] = []
+        seen_pairs: set[tuple[str, str]] = set()
+
+        sessions = list(by_session.keys())
+        for i, sid_a in enumerate(sessions):
+            for sid_b in sessions[i + 1:]:
+                for aid_a in by_session[sid_a]:
+                    if aid_a not in graph.anchors:
+                        continue
+                    a = graph.anchors[aid_a]
+                    if not a.embedding:
+                        continue
+                    for aid_b in by_session[sid_b]:
+                        if aid_b not in graph.anchors:
+                            continue
+                        b = graph.anchors[aid_b]
+                        if not b.embedding:
+                            continue
+
+                        pair = (aid_a, aid_b) if aid_a < aid_b else (aid_b, aid_a)
+                        if pair in seen_pairs:
+                            continue
+                        seen_pairs.add(pair)
+
+                        sim = _cosine_sim_abstractive(a.embedding, b.embedding)
+                        if sim > self.similarity_threshold:
+                            # Found a cross-session match — create or update pattern
+                            self._counter += 1
+                            centroid = [(a.embedding[j] + b.embedding[j]) / 2
+                                       for j in range(len(a.embedding))]
+
+                            # Generate pattern text from the shared topic
+                            common_tags = list(set(a.tags) & set(b.tags))
+                            tag_str = " + ".join(common_tags[:3]) if common_tags else "general pattern"
+                            pattern_text = f"[Cross-Session Pattern] {tag_str}: {a.text[:150]}"
+
+                            pattern = PatternMemory(
+                                id=f"pattern_{self._counter}",
+                                pattern_text=pattern_text[:500],
+                                centroid_embedding=centroid,
+                                occurrence_count=2,
+                                source_session_ids=list({sid_a, sid_b}),
+                                source_anchor_ids=[aid_a, aid_b],
+                                tags=common_tags,
+                                stability=0.3 + sim * 0.2,
+                            )
+                            self.patterns[pattern.id] = pattern
+                            new_patterns.append(pattern)
+
+        return new_patterns
+
+    def promote_stable_patterns(self, graph) -> list[AbstractNode]:
+        """Promote patterns that have reached stability threshold to AbstractNodes.
+
+        Creates AbstractNode anchors in the graph and links the source pattern
+        anchors via "instance_of" edges. Returns the list of promoted AbstractNodes.
+        """
+        promoted: list[AbstractNode] = []
+
+        for pattern in list(self.patterns.values()):
+            if pattern.promoted:
+                continue
+            if not pattern.is_recurring:
+                continue
+
+            # Create an AbstractNode from this pattern
+            abstract_id = f"abstractive_{pattern.id}"
+            abstract = AbstractNode(
+                id=abstract_id,
+                label=f"Pattern: {pattern.pattern_text[:80]}",
+                description=pattern.pattern_text,
+                source_anchor_ids=list(pattern.source_anchor_ids),
+                centroid_embedding=list(pattern.centroid_embedding),
+                confidence=min(0.9, pattern.stability),
+                level=2,  # cross-session patterns are level 2
+                tags=list(pattern.tags),
+            )
+
+            # Store in graph
+            graph.abstracts[abstract_id] = abstract
+
+            # Create a summary anchor for this pattern
+            pattern_anchor = Anchor.create(
+                text=pattern.pattern_text[:800],
+                tags=pattern.tags + ["abstractive_memory", "cross_session"],
+                importance=0.7,
+                emotional_valence=0.3,
+            )
+            pattern_anchor.id = f"anchor_{abstract_id}"
+            pattern_anchor.embedding = pattern.centroid_embedding
+            pattern_anchor.vector.stability = pattern.stability
+            graph.add_anchor(pattern_anchor)
+
+            # Link source anchors to pattern with "instance_of" edges
+            decay_factor = 0.5  # concrete events decay faster after abstraction
+            for aid in pattern.source_anchor_ids:
+                if aid in graph.anchors:
+                    graph.add_edge(aid, pattern_anchor.id,
+                                   weight=0.6, edge_type="topical",
+                                   relation="instance_of", source_type="explicit",
+                                   confidence=pattern.stability)
+                    # Accelerate decay on concrete events
+                    src = graph.anchors[aid]
+                    src.vector.stability *= decay_factor
+                    src.vector.importance *= 0.8
+
+            pattern.promoted = True
+            pattern.abstract_id = abstract_id
+            promoted.append(abstract)
+
+        return promoted
+
+    def consolidate_existing_patterns(self, graph) -> dict:
+        """Update existing patterns with new matching anchors.
+
+        Scans all anchors for matches to existing patterns, updates occurrence
+        counts, and adds new source anchors when found. Returns update stats.
+        """
+        new_matches = 0
+        merged = 0
+
+        for pattern in self.patterns.values():
+            for aid, a in graph.anchors.items():
+                if aid in pattern.source_anchor_ids:
+                    continue
+                if not a.embedding:
+                    continue
+                sim = _cosine_sim_abstractive(a.embedding, pattern.centroid_embedding)
+                if sim > self.similarity_threshold:
+                    pattern.source_anchor_ids.append(aid)
+                    if a.source_session and a.source_session not in pattern.source_session_ids:
+                        pattern.source_session_ids.append(a.source_session)
+                    pattern.occurrence_count += 1
+                    pattern.last_seen = time.time()
+                    pattern.stability = min(1.0, pattern.stability + 0.05)
+                    # Update centroid
+                    n = pattern.occurrence_count
+                    for j in range(len(pattern.centroid_embedding)):
+                        pattern.centroid_embedding[j] = (
+                            pattern.centroid_embedding[j] * (n - 1) + a.embedding[j]
+                        ) / n
+                    new_matches += 1
+
+        return {"new_matches": new_matches, "merged": merged,
+                "total_patterns": len(self.patterns)}
+
+    @property
+    def stats(self) -> dict:
+        if not self.patterns:
+            return {"total_patterns": 0, "promoted": 0, "avg_occurrences": 0}
+        return {
+            "total_patterns": len(self.patterns),
+            "promoted": sum(1 for p in self.patterns.values() if p.promoted),
+            "recurring": sum(1 for p in self.patterns.values() if p.is_recurring),
+            "avg_occurrences": sum(p.occurrence_count for p in self.patterns.values()) / len(self.patterns),
+            "total_sessions": len(set(s for p in self.patterns.values() for s in p.source_session_ids)),
+        }
+
+
+def _cosine_sim_abstractive(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x**2 for x in a))
+    nb = math.sqrt(sum(x**2 for x in b))
+    return dot / (na * nb + 1e-8)

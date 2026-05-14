@@ -482,6 +482,30 @@ Reduces context pollution, token waste, and agent confusion.
 
 ---
 
+## v1.1.0 (completed — all phases)
+
+### Phase 7 — Foundation (SSS)
+- [x] #31 Hippocampus Buffer: L1(30min text) + L2(24h vectorized), sleep_decide promotion
+- [x] #32 Edge Sparsification: EXPLICABLE_RELATIONS gate, strong/legacy classification, edge TTL
+- [x] #33 File Sharding: domain+time+size three-layer partitioning (MemoryShardManager)
+
+### Phase 8 — Cognitive (SS)
+- [x] #34 Sleep Rebuild: multi-node fusion (union-find clustering), graph rewiring (drop/strengthen/transitive), abstractive memory (concrete→pattern)
+- [x] #35 Cortex Hierarchy: CORTEX_HIERARCHY levels (reflection>semantic>procedural>episodic), HIERARCHY_WEIGHTS routing boosts, factory methods, propagate_down()
+- [x] #36 Abstractive Memory: AbstractiveMemoryEngine with cross-session pattern extraction, PatternMemory tracking, auto-promotion to AbstractNode, concrete decay
+
+### Phase 9 — Self-Evolving (S)
+- [x] #37 Dynamic Neural Rewiring: edge success/failure tracking, RL-based _dynamic_rewire (boost/weaken/cluster), graph.record_chain_success/failure
+- [x] #38 Success-Rate RL: Edge.success_rate property, graph-level chain success/failure tracking, success_feedback integrated into retention scoring
+- [x] #39 Temporal Slice Projection: graph.temporal_slice() with core(7)/active(20)/background/noise tiers
+
+### Previously completed
+- [x] v1.0.7: Ghost unification, Raw Buffer priority, ANN incremental, Manager split, Cortex sleep, Dual-Channel auto, Autobiographical, State/Thermal unified, Phase correction, Config dot-path, Sleep naming, Cosine dedup, ANN contradictions, retention cache, Layer3 TimeSpine, Structured logging, Config schema, mypy, README updates, Test coverage (250→276 tests)
+- [x] v1.0.8: Sleep merge ANN, BM25 hybrid, PPR sparse, EmbedderRegistry instance, AnchorVector 10-dim, Tiered storage
+- [x] v1.0.9: Global hard cap, Auto-sleep daemon, Cold ghost cleanup, Cortex hard rejection
+
+---
+
 ## Recently Completed (v1.0.7-dev)
 
 ### P0 (correctness & performance)

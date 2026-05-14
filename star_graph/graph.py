@@ -39,6 +39,11 @@ class Edge:
     co_activation_count: int = 0
     created_at: float = field(default_factory=time.time)
     last_activated_at: float = field(default_factory=time.time)
+    # Success/failure tracking for RL-based rewiring
+    success_count: int = 0       # times this edge was part of a successful reasoning chain
+    failure_count: int = 0       # times this edge was part of a failed reasoning chain
+    last_success_at: float = 0.0
+    last_failure_at: float = 0.0
 
     def strengthen(self, delta: float = 0.05) -> None:
         self.weight = min(1.0, self.weight + delta)
@@ -47,6 +52,24 @@ class Edge:
 
     def weaken(self, delta: float = 0.02) -> None:
         self.weight = max(0.0, self.weight - delta)
+
+    @property
+    def success_rate(self) -> float:
+        """Ratio of successful uses to total uses. Returns 0.5 if untested."""
+        total = self.success_count + self.failure_count
+        if total == 0:
+            return 0.5  # neutral prior
+        return self.success_count / total
+
+    def record_success(self) -> None:
+        self.success_count += 1
+        self.last_success_at = time.time()
+        self.strengthen(0.03)
+
+    def record_failure(self) -> None:
+        self.failure_count += 1
+        self.last_failure_at = time.time()
+        self.weaken(0.02)
 
     @property
     def is_active(self) -> bool:
@@ -145,6 +168,11 @@ class RichEdge:
     stability: float = 0.0        # 0..1: resistance to change (grows with reinforcement)
     valid_until: float = 0.0      # optional expiration timestamp (0 = never)
     used_at: float = 0.0          # last time this edge contributed to a retrieval
+    # Success/failure tracking for RL-based rewiring
+    success_count: int = 0
+    failure_count: int = 0
+    last_success_at: float = 0.0
+    last_failure_at: float = 0.0
 
     def strengthen(self, delta: float = 0.05) -> None:
         old_w = self.weight
@@ -213,6 +241,23 @@ class RichEdge:
         """Record that this edge contributed to a retrieval."""
         self.used_at = time.time()
         self.last_activated_at = time.time()
+
+    @property
+    def success_rate(self) -> float:
+        total = self.success_count + self.failure_count
+        if total == 0:
+            return 0.5
+        return self.success_count / total
+
+    def record_success(self) -> None:
+        self.success_count += 1
+        self.last_success_at = time.time()
+        self.strengthen(0.03)
+
+    def record_failure(self) -> None:
+        self.failure_count += 1
+        self.last_failure_at = time.time()
+        self.weaken(0.02)
 
     @property
     def is_expired(self) -> bool:
@@ -943,6 +988,51 @@ class StarGraph:
     def get_dormant_edges(self, threshold: float = 0.1) -> list[tuple[str, str]]:
         return [key for key, e in self.edges.items() if e.weight < threshold]
 
+    def record_chain_success(self, anchor_ids: list[str]) -> int:
+        """Record that a chain of anchors led to a successful outcome.
+
+        Strengthens edges along the chain and boosts the anchors' success_feedback.
+        Returns number of edges updated.
+        """
+        updated = 0
+        for i in range(len(anchor_ids)):
+            aid = anchor_ids[i]
+            if aid in self.anchors:
+                self.anchors[aid].record_success(benefit=0.05)
+            if i + 1 < len(anchor_ids):
+                key = self._key(aid, anchor_ids[i + 1])
+                if key in self.edges:
+                    self.edges[key].record_success()
+                    updated += 1
+                # Also check reverse
+                rev_key = self._key(anchor_ids[i + 1], aid)
+                if rev_key in self.edges:
+                    self.edges[rev_key].record_success()
+                    updated += 1
+        return updated
+
+    def record_chain_failure(self, anchor_ids: list[str]) -> int:
+        """Record that a chain of anchors led to a failed outcome.
+
+        Weakens edges along the chain and reduces the anchors' success_feedback.
+        Returns number of edges updated.
+        """
+        updated = 0
+        for i in range(len(anchor_ids)):
+            aid = anchor_ids[i]
+            if aid in self.anchors:
+                self.anchors[aid].record_failure(penalty=0.05)
+            if i + 1 < len(anchor_ids):
+                key = self._key(aid, anchor_ids[i + 1])
+                if key in self.edges:
+                    self.edges[key].record_failure()
+                    updated += 1
+                rev_key = self._key(anchor_ids[i + 1], aid)
+                if rev_key in self.edges:
+                    self.edges[rev_key].record_failure()
+                    updated += 1
+        return updated
+
     def evict_expired_edges(self) -> int:
         """Remove edges that have passed their valid_until date. Returns count removed."""
         now = time.time()
@@ -957,6 +1047,68 @@ class StarGraph:
             self._adjacency[b].discard(a)
             self.edges.pop(key, None)
         return len(expired)
+
+    def temporal_slice(self, max_core: int = 7,
+                       max_active: int = 20,
+                       query_embedding: list[float] | None = None,
+                       current_time: float | None = None) -> dict:
+        """Project a limited active memory surface — only the most relevant
+        memories participate in recall.
+
+        Three tiers:
+        - Core (max 7): highest scoring, always in context
+        - Active (max 20): good candidates, participate in recall
+        - Background: the rest, summarized but not individually accessed
+        - Noise: excluded from recall entirely
+
+        Returns dict with {core_ids, active_ids, background_count, noise_count}.
+        """
+        now = current_time or time.time()
+
+        # Score all anchors by composite relevance
+        scored: list[tuple[str, float]] = []
+        for aid, a in self.anchors.items():
+            if not a.is_retrievable:
+                continue
+
+            v = a.vector
+            # Composite score: retention + recency + success feedback + emotional
+            hours_idle = (now - a.last_activated_at) / 3600
+            recency = max(0.0, 1.0 - hours_idle / 720)  # decay over 30 days
+
+            score = (
+                a.retention_score * 0.35
+                + recency * 0.25
+                + v.success_feedback * 0.15
+                + abs(v.emotional_valence) * 0.10
+                + v.frequency * 0.10
+                + v.stability * 0.05
+            )
+
+            # Bonus for matching query embedding
+            if query_embedding and a.embedding:
+                sim = _cosine_sim_simple(query_embedding, a.embedding)
+                score *= (1.0 + sim * 0.5)
+
+            scored.append((aid, score))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: -x[1])
+
+        # Partition into tiers
+        core_ids = [aid for aid, _ in scored[:max_core]]
+        active_ids = [aid for aid, _ in scored[max_core:max_core + max_active]]
+        background_count = max(0, len(scored) - max_core - max_active)
+        noise_count = sum(1 for a in self.anchors.values() if not a.is_retrievable)
+
+        return {
+            "core_ids": core_ids,
+            "active_ids": active_ids,
+            "background_count": background_count,
+            "noise_count": noise_count,
+            "total_anchors": len(self.anchors),
+            "active_surface": len(core_ids) + len(active_ids),
+        }
 
     def stats(self) -> dict:
         return {
@@ -1032,3 +1184,11 @@ class StarGraph:
                 result.append((neighbor_id, weight))
 
         return sorted(result, key=lambda x: -x[1])
+
+
+def _cosine_sim_simple(a: list[float], b: list[float]) -> float:
+    """Fast cosine similarity for graph-internal use."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return dot / (na * nb + 1e-8)

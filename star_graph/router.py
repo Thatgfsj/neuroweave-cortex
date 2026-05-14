@@ -19,8 +19,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .cortex import MemoryCortex, CortexConfig
+from .cortex import MemoryCortex, CortexConfig, CORTEX_HIERARCHY, HIERARCHY_WEIGHTS, HIERARCHY_DECAY_DAYS
 from .config import Config
+from .math_utils import cosine_sim
 
 
 @dataclass
@@ -131,21 +132,29 @@ class CortexRouter:
                 if narrowed:
                     candidate_cortices = narrowed
 
-        # Score candidate cortices
+        # Score candidate cortices with hierarchy weighting
         scored: list[RouteResult] = []
         for cortex in candidate_cortices:
             score = cortex.route(
                 query_embedding=query_embedding,
                 query_text=query,
             )
-            if score >= min_score:
+            # Apply hierarchy weight multiplier
+            hierarchy_weight = HIERARCHY_WEIGHTS.get(
+                cortex.config.hierarchy_level, 1.0)
+            adjusted_score = score * hierarchy_weight
+            if adjusted_score >= min_score:
                 scored.append(RouteResult(
                     cortex=cortex,
-                    score=score,
-                    reasoning=f"route_score={score:.3f}",
+                    score=adjusted_score,
+                    reasoning=f"route={score:.3f}*hier={hierarchy_weight:.2f}={adjusted_score:.3f}",
                 ))
 
-        scored.sort(key=lambda r: -r.score)
+        # Sort by hierarchy-adjusted score, higher-priority cortices win ties
+        scored.sort(key=lambda r: (
+            -r.score,
+            r.cortex.config.hierarchy_level,
+        ))
         scored = scored[:max_cortices]
 
         # Fallback to default cortex if nothing matched
@@ -193,6 +202,65 @@ class CortexRouter:
             results.append((route_result.cortex, ctx))
 
         return results
+
+    # ── Hierarchy Operations ──────────────────────────────
+
+    def propagate_down(self, source_cortex_name: str,
+                       boost_importance: float = 0.1) -> dict:
+        """Propagate importance from a higher-priority cortex down to lower ones.
+
+        When a high-priority cortex (e.g., Reflection) forms a pattern, it should
+        boost the importance of related memories in lower-priority cortices
+        (e.g., Episodic). This is how strategic insights amplify tactical memories.
+
+        Uses embedding similarity between the source cortex centroid and anchors
+        in target cortices to determine what to boost.
+
+        Returns stats dict: {cortex_name: anchors_boosted}
+        """
+        source = self.get_cortex(source_cortex_name)
+        if not source:
+            return {}
+        source_level = source.config.hierarchy_level
+        source_centroid = source.centroid
+        if not source_centroid:
+            return {}
+
+        stats: dict[str, int] = {}
+        for target in self.cortices:
+            if target.config.name == source_cortex_name:
+                continue
+            # Only propagate DOWN (to higher level numbers = lower priority)
+            if target.config.hierarchy_level <= source_level:
+                continue
+
+            boosted = 0
+            for anchor in target.graph.anchors.values():
+                if not anchor.embedding:
+                    continue
+                sim = cosine_sim(source_centroid, anchor.embedding)
+                if sim > 0.6:  # relevant to the high-priority insight
+                    anchor.vector.importance = min(1.0, anchor.vector.importance + boost_importance * sim)
+                    boosted += 1
+
+            if boosted:
+                stats[target.config.name] = boosted
+
+        return stats
+
+    def get_hierarchy_summary(self) -> dict:
+        """Return a summary of the cortex hierarchy."""
+        by_level: dict[int, list[str]] = {}
+        for c in self.cortices:
+            level = c.config.hierarchy_level
+            by_level.setdefault(level, []).append(c.config.name)
+
+        return {
+            "total_cortices": len(self.cortices),
+            "by_level": {f"L{lv}({list(CORTEX_HIERARCHY.keys())[lv] if lv < len(CORTEX_HIERARCHY) else 'unknown'})": names
+                        for lv, names in sorted(by_level.items())},
+            "hierarchy_weights": {str(k): v for k, v in HIERARCHY_WEIGHTS.items()},
+        }
 
     # ── Cortex creation ──────────────────────────────────
 

@@ -119,6 +119,17 @@ sleep:
     target_mean: 0.3
     scale_blend: 0.5
 
+  # ── Sleep Rebuild (N3d) ──
+  rebuild_fuse_threshold: 0.85      # cosine threshold for multi-node fusion
+  rebuild_min_cluster: 3            # minimum anchors to form a fusion cluster
+  rewire_drop_threshold: 0.05       # edges below this weight with 0 co-activation → drop
+  rewire_strengthen_min_coact: 3    # co-activation count to trigger strengthen
+  rewire_transitive_min_weight: 0.6 # minimum edge weight for transitive closure
+  rewire_transitive_decay: 0.7      # decay factor for transitive edge weight
+  abstractive_min_group: 4          # minimum anchors to form an abstractive pattern
+  abstractive_decay_factor: 0.6     # how much to decay concrete anchors after abstraction
+  dynamic_cluster_coact: 5          # co-activation threshold to auto-form clusters
+
   edge_formation:
     emotion_weight_boost: 0.3
 

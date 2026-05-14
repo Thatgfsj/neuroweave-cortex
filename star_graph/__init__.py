@@ -10,7 +10,7 @@ Architecture:
   Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 """
 
-__version__ = "1.0.6"
+__version__ = "1.1.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -32,7 +32,7 @@ from .embedding import EmbeddingProvider, get_embedder
 from .index import ANNIndex
 from .seed import seed_everything, is_deterministic
 from .ghost import GhostNode, NegativeGhost, GhostSubsystem
-from .abstraction import AbstractNode, AbstractionEngine
+from .abstraction import AbstractNode, AbstractionEngine, PatternMemory, AbstractiveMemoryEngine
 from .community import Community, CommunityHealth, CommunityDetection
 from .raw_buffer import RawBuffer, RawChunk
 from .dual_channel import DualChannelRetriever, DualChannelOutput, ChannelResult
@@ -48,7 +48,7 @@ from .sqlite_storage import SQLiteStorage
 from .evolution import MemoryEvolutionEngine, EvolutionEvent, BeliefTransition
 from .scheduler import CognitiveMemoryScheduler, AgentContext, MemoryType, MemoryItem, MemoryContext
 from .working_memory import WorkingMemory, WorkingMemoryEntry
-from .cortex import MemoryCortex, CortexConfig
+from .cortex import MemoryCortex, CortexConfig, CORTEX_HIERARCHY, HIERARCHY_WEIGHTS, HIERARCHY_DECAY_DAYS
 from .router import CortexRouter, RouteResult
 from .gate import MemoryGate, GateScore
 from .timespine import TimeSpine, TimeBucket, MemoryCluster
