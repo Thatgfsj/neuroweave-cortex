@@ -23,6 +23,7 @@ from .cortex import MemoryCortex, CortexConfig
 from .router import CortexRouter
 from .gate import MemoryGate
 from .timespine import TimeSpine
+from .tiered import TieredStorage
 from .cascade import CascadeRecall
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
@@ -56,6 +57,7 @@ class ManagerStats:
     cortices: int = 0
     hubs: int = 0
     clusters: int = 0
+    cold_anchors: int = 0
     sleep_cycles: int = 0
     total_evolutions: int = 0
     uptime_seconds: float = 0.0
@@ -112,6 +114,7 @@ class MemoryRuntime:
         self._cascade: CascadeRecall | None = None
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
+        self._tiered: TieredStorage | None = None
 
         # Raw chunk buffer — uncompressed short-term memory tier (L0)
         self._raw_buffer: RawBuffer | None = None
@@ -309,6 +312,15 @@ class MemoryRuntime:
             for aid, a in self.graph.anchors.items():
                 self._bm25.add(aid, a.text)
         return self._bm25
+
+    @property
+    def tiered(self) -> TieredStorage:
+        if self._tiered is None:
+            cold_path = ""
+            if self.storage_path:
+                cold_path = os.path.join(os.path.dirname(self.storage_path) or ".", "memory_cold.json")
+            self._tiered = TieredStorage(path=cold_path)
+        return self._tiered
 
     @property
     def cascade(self) -> CascadeRecall:
@@ -601,14 +613,17 @@ class MemoryRuntime:
             cortices=self.router.cortices,
         )
 
-        # 3. Evolve the graph
+        # 3. Offload COLD anchors → disk (tiered storage)
+        cold_offloaded = self.offload_cold_anchors()
+
+        # 4. Evolve the graph
         evo = self.evolution.evolve(current_time)
         self.total_evolutions += 1
 
-        # 4. Decay ghosts
+        # 5. Decay ghosts
         ghost_purged = self.ghosts.decay_all()
 
-        # 5. Decay autobiographical narratives
+        # 6. Decay autobiographical narratives
         self_narratives_purged = 0
         if self._autobiography:
             self_narratives_purged = self._autobiography.degrade_all()
@@ -617,6 +632,8 @@ class MemoryRuntime:
         return {
             "cortex_reports": cortex_reports,
             "global_report": global_report,
+            "cold_offloaded": cold_offloaded,
+            "cold_store_size": self.tiered.size,
             "evolution": evo,
             "ghost_stats": self.ghosts.stats,
             "ghosts_purged": ghost_purged,
@@ -910,6 +927,57 @@ class MemoryRuntime:
         """Get the agent's emotional profile across interactions."""
         return self.autobiography.get_emotional_profile(session_id)
 
+    # ── Tiered storage ─────────────────────────────────────────
+
+    def offload_cold_anchors(self) -> int:
+        """Offload COLD thermal-state anchors to disk, freeing RAM.
+
+        Called during sleep N4_Prune. Anchors with thermal_state == COLD are
+        serialized to TieredStorage and removed from graph.anchors.
+        Returns count of offloaded anchors.
+        """
+        from .anchor import ThermalState
+        cold_ids = []
+        for aid, a in self.graph.anchors.items():
+            if getattr(a, '_thermal_state', None) == ThermalState.COLD:
+                cold_ids.append(aid)
+
+        if not cold_ids:
+            return 0
+
+        from .tiered import offload_anchor_to_cold
+        for aid in cold_ids:
+            anchor = self.graph.anchors.get(aid)
+            if anchor is None:
+                continue
+            offload_anchor_to_cold(anchor, self.tiered)
+            self.graph.anchors.pop(aid, None)
+
+        self.tiered.flush()
+        return len(cold_ids)
+
+    def thaw_anchor(self, anchor_id: str):
+        """Reload a COLD anchor from disk into memory. Returns Anchor or None."""
+        data = self.tiered.load(anchor_id)
+        if data is None:
+            return None
+
+        from .anchor import Anchor
+        anchor = Anchor(
+            id=anchor_id,
+            text=data.get("text", ""),
+            embedding=data.get("embedding"),
+            tags=data.get("tags", []),
+            source_session=data.get("source_session", ""),
+            created_at=data.get("created_at", time.time()),
+            last_activated_at=data.get("last_activated_at", time.time()),
+            community_id=data.get("community_id", ""),
+            importance=data.get("importance", 0.5),
+            emotional_valence=data.get("emotional_valence", 0.0),
+        )
+        self.graph.anchors[anchor_id] = anchor
+        return anchor
+
     # ── Health & reporting ────────────────────────────────────
 
     @property
@@ -919,6 +987,7 @@ class MemoryRuntime:
         cortex_count = len(self._router.cortices) if self._router else 0
         hub_count = len(self._hublayer.hubs) if self._hublayer else 0
         cluster_count = self._timespine.stats["total_clusters"] if self._timespine else 0
+        cold_count = self._tiered.size if self._tiered else 0
         return ManagerStats(
             anchors=len(self.graph.anchors),
             edges=len(self.graph.edges),
@@ -929,6 +998,7 @@ class MemoryRuntime:
             cortices=cortex_count,
             hubs=hub_count,
             clusters=cluster_count,
+            cold_anchors=cold_count,
             sleep_cycles=self.sleep_cycles,
             total_evolutions=self.total_evolutions,
             uptime_seconds=time.time() - self._started_at,
