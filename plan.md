@@ -509,10 +509,14 @@ Reduces context pollution, token waste, and agent confusion.
 - [x] Structured logging: logger.py with get_logger/init_logging; sleep.py uses _log_event (logging + report list)
 - [x] Config schema validation: CONFIG_SCHEMA with type/range/allowed_values checks; _validate_schema() for section existence + key types + cross-section compat
 - [x] mypy config: pyproject.toml with basic strictness settings
-- [x] README.md + README_CN.md: updated to reflect v1.0.7-dev architecture (8-phase sleep, 10-dim AnchorVector, dual-channel, BM25 hybrid, tiered storage, all current modules)
+- [x] README.md + README_CN.md: updated to reflect v1.0.7-dev architecture
+- [x] Test coverage: 18 new tests (config schema, eviction policies, README doctest imports)
+- [x] mypy config: pyproject.toml with strictness settings; real bugs fixed (FilterResult, exact_cache any→Any)
+- [x] README doctest: test_readme_doctest.py validates code blocks import cleanly
+- [x] All P3 items complete. Test suite: 250 tests passing.
 
 ### v1.0.9 (resource bounding — anti-bloat)
-- [x] #27 Global anchor hard cap + eviction policy (lru/fifo/lowest_retention), max_total_anchors=50000
+- [x] #27 Global anchor hard cap + eviction policy (lru/fifo/lowest_retention)
 - [x] #28 Auto-sleep daemon: _check_auto_sleep() triggered on anchor count + time intervals
 - [x] #29 Cold ghost cleanup: GhostSubsystem.decay_all() returns IDs → TieredStorage.remove() + compact()
 - [x] #30 Cortex hard rejection: MemoryCortex.ensure_capacity() auto-consolidates overfull cortices
