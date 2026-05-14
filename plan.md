@@ -698,3 +698,160 @@ Reduces context pollution, token waste, and agent confusion.
 - [x] Dependency manifest (requirements.txt)
 - [x] Version unification (1.0.6) + orphan module exports
 - [x] 232 tests passing
+
+---
+
+## v1.2.0 — Cognitive OS: Memory Tiering, Compiler, Activation (Architecture Review 2026-05-15)
+
+> **核心诊断：图正在退化成"高维链表"。所有东西跟所有东西有点像，边数量指数膨胀，热点节点形成"记忆黑洞"。**
+>
+> 真正需要的是：**记忆分层 + 衰减 + 抽象 + 边类型 + 局部激活 + 认知编译**。
+>
+> 这个项目的竞争点不是 vector DB / RAG，而是 **"关系型认知记忆"** — memory is not storage, memory is structure.
+
+### Gap Analysis: 已有 vs 缺失
+
+| # | 方向 | 已有基础 | 关键缺失 |
+|---|------|---------|---------|
+| 1 | 记忆分层 STM/MTM/LTM/Core | HippocampusBuffer(L1/L2), cortex hierarchy, ThermalState | 无显式四层 API，无 MTM topic-cluster，无 Core 层 |
+| 2 | 边类型系统 | EXPLICABLE_RELATIONS(25种), STRONG_RELATIONS(12种), edge sparsification | causal/temporal/preference/task_flow 区分度不够 |
+| 3 | 记忆衰减 | AnchorVector decay_rate, survival functions, Ebbinghaus/PowerLaw, retention_score | 缺强化激活反馈闭环，衰减与 thermal 联动不够紧密 |
+| 4 | Concept 抽象 | AbstractionEngine, AbstractiveMemoryEngine, PatternMemory, sleep rebuild | 缺 cognitive compression pipeline (1000→20→5→1) |
+| 5 | 激活扩散 | CortexRouter sparse activation (1-3 cortices), temporal_slice (core/active/bg/noise) | 无图内局部扩散 (spreading activation on subgraph) |
+| 6 | Memory Shard + Temperature | MemoryShardManager, TieredStorage(HOT/WARM/COLD), ThermalState | shard 与 temperature 未联动，无 frozen 层 |
+| 7 | 强化记忆 | Edge.co_activation_count, Anchor.record_success/failure, success_rate | success_rate 未纳入主要检索路径权重 |
+| 8 | 认知压缩 | MultiLevelCompressor(RAW→EPISODIC→STRATEGIC→META), sleep compression | 无 worldview 层，无 user profile 层，无 1000→1 全链路 |
+| 9 | 向量污染防护 | Edge sparsification gate (拒绝纯 cosine 边), explicable relations only | temporal+task_relevance 多维边权未实现 |
+| 10 | 认知缓存 | ExactMatchCache, retention_score cache (0.5s TTL) | 缺 query cache, session cache, topic cache |
+| 11 | 自反思循环 | AutobiographicalMemory, SelfNarrative, sleep rebuild | 无自动错误记忆修正闭环 |
+| 12 | Graph Cognition First | StarGraph + RichEdge + HubLayer + BrainSphere + Cortex | Embedding 仍是主要入口，需弱化 embedding-first 改为 graph-first |
+
+---
+
+### Phase 10 — Memory Tiering (P0, v1.2.0)
+
+#### #40 Explicit STM/MTM/LTM/Core Four-Layer API
+
+Current state: HippocampusBuffer is a transient cache, but there's no explicit tiering API. Every `remember()` call goes through the same path.
+
+Target architecture:
+```
+Input → STM (deque, no graph, high churn)
+     ↘ MTM (StarGraph, topic clusters, medium stability)
+     ↘ LTM (summary nodes, high compression, low write)
+     ↘ Core (user profile, capability model, worldview — almost never changes)
+```
+
+Implementation:
+- `MemoryTier` enum: STM, MTM, LTM, CORE
+- STM: `collections.deque` + embedding, max 100 items, TTL 2 hours, no graph overhead
+- MTM: existing StarGraph + cortex, topic-cluster granularity (not message-level)
+- LTM: summary-only nodes, write-on-consolidation, high stability (decay 365+ days)
+- Core: key-value profile store, manual + auto-extracted, near-immutable
+- `remember()` auto-routes by tier: new input → STM, sleep promotes STM→MTM→LTM→Core
+- `recall()` searches tiers in order: Core → LTM → MTM → STM
+
+#### #41 Cognitive Decay + Reinforcement Feedback Loop
+
+Current state: AnchorVector has decay_rate and survival functions, but reinforcement doesn't feed back into decay curve adjustment.
+
+Implementation:
+- Decay formula: `weight_t = weight_0 × e^(-λt × (1 - reinforcement × 0.3))`
+- Each successful recall → `reinforcement += 0.05`, slows future decay
+- thermal downgrade path: HOT(7d) → WARM(30d) → COLD(90d) → FROZEN(archived)
+- `_apply_reinforcement_decay()` in sleep: scan all anchors, adjust decay_rate by success_rate
+- Frozen tier: write to disk-only shard, exclude from ANN index
+
+#### #42 Edge Type Deepening: Causal + Temporal + Preference + TaskFlow
+
+Current state: 25 explicable relations exist, but the retrieval system doesn't differentiate them during traversal.
+
+Implementation:
+- Edge type → traversal weight mapping:
+  - causal: ×1.5 (most important for reasoning)
+  - temporal(before/after): ×1.2 (ordering matters)
+  - preference: ×1.3 (user intent signal)
+  - task_flow: ×1.4 (workflow continuity)
+  - semantic: ×1.0 (baseline)
+  - contradiction: ×0.5 (useful but downweighted)
+- `CascadeRecall` uses edge types to trace causal chains
+- `add_edge()` auto-infers type from context when possible
+
+---
+
+### Phase 11 — Spreading Activation + Cognitive Cache (P1, v1.2.0)
+
+#### #43 Local Subgraph Activation (Spreading Activation)
+
+Current state: Retrieval searches entire cortex subgraphs (even with sparse activation, each cortex can have 5000+ anchors).
+
+Implementation:
+- Given query embedding, find seed node(s) via ANN
+- From seed, spread activation to neighbors (BFS, max depth 3)
+- Each hop: `activation *= edge_weight × decay(0.6)`
+- Collect activated nodes, rank by accumulated activation
+- Return top-k from activated subgraph only (not full graph)
+- `SpreadingActivation` class in `retriever.py` or new module
+- Hybrid: spreading activation for graph structure + embedding for seed finding
+
+#### #44 Multi-Level Cognitive Cache
+
+Current state: ExactMatchCache exists but query/session/topic caches don't.
+
+Implementation:
+- `QueryCache`: LRU cache of recent query→result pairs, TTL 5 min
+- `SessionCache`: per-session working set of frequently accessed anchors
+- `TopicCache`: pre-computed topic→top_anchors mapping, rebuilt on sleep
+- `ActivationCache`: cached spreading activation results for hot seeds
+- All caches in `cognitive_cache.py`, wired into `recall()` before full retrieval
+
+---
+
+### Phase 12 — Cognitive Compiler + Worldview (P2, v1.2.0)
+
+#### #45 Cognitive Compression Pipeline (1000→20→5→1)
+
+Current state: MultiLevelCompressor compresses DORMANT anchors within sessions, but has no full-chain worldview emergence.
+
+Implementation:
+```
+1000 messages → Sleep compression → 200 episodic summaries
+200 episodic → AbstractiveMemoryEngine → 20 concept nodes
+20 concepts → Cross-session pattern merge → 5 worldview nodes
+5 worldviews → Core profile extraction → 1 user profile
+```
+- `CognitiveCompiler` class: orchestrates the full pipeline
+- Each level has its own compression ratio and stability threshold
+- Worldview nodes: long-term stable beliefs about the user (e.g., "prefers Python", "works on memory systems", "values code simplicity")
+- User profile: auto-extracted from worldview consensus
+
+#### #46 Self-Reflection Loop (Auto Error Correction)
+
+Current state: AutobiographicalMemory tracks self-narratives, but doesn't actively correct errors.
+
+Implementation:
+- Contradiction detection on sleep: if A contradicts B, check which has higher confidence+stability
+- Lower-confidence belief gets `invalidated_by` edge, reduced weight
+- `SelfCorrectionReport`: log of what was corrected and why
+- Agent can query "what did I get wrong about X?" → returns corrected beliefs
+- Ghost revival: if corrected belief was wrong, original ghost can be reactivated
+
+#### #47 Graph-First Retrieval (Weaken Embedding Primacy)
+
+Current state: Retrieval entry points are embedding-based (ANN → cosine). Graph structure is secondary.
+
+Implementation:
+- New `recall()` path: graph traversal first, embedding refinement second
+- Seed selection by embedding (cheap), then graph walk for context (rich)
+- `topology_rank()`: score nodes by graph centrality + edge type richness, not just embedding similarity
+- Config flag: `retrieval.graph_first_weight` (default 0.6) to balance graph vs embedding signals
+
+---
+
+### Priority Order (v1.2.0)
+
+| Phase | Priority | Items |
+|-------|----------|-------|
+| **10** | **P0** | #40 Memory Tiering, #41 Decay+Reinforcement, #42 Edge Type Deepening |
+| **11** | **P1** | #43 Spreading Activation, #44 Cognitive Cache |
+| **12** | **P2** | #45 Cognitive Compiler, #46 Self-Reflection, #47 Graph-First Retrieval |
