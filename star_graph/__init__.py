@@ -1,4 +1,4 @@
-"""NeuroWeave Cortex (NWC) — v1.5.0 cognitive architecture.
+"""NeuroWeave Cortex (NWC) — v1.6.0 cognitive architecture.
 
 A graph-first, cortex-partitioned cognitive memory runtime for AI agents.
 
@@ -12,7 +12,7 @@ Architecture:
                         thermal store (hot/cold/archive), edge decay
 """
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -141,6 +141,11 @@ from .edge_decay import EdgeDecayManager
 from .self_org import SelfOrganization, EmergentTopic
 from .personality import PersonalityModel, PersonalityProfile
 from .goal_tree import GoalTree, GoalNode, GoalStatus
+from .retrieval_budget import RetrievalBudget, BudgetState
+from .versioned_memory import CognitiveTrajectory, BeliefVersion
+from .cluster_memory import ClusterRouter, ClusterCentroid
+from .causal_edges import CausalEdgeClassifier, CausalChain, CAUSAL_EDGE_TYPES
+from .episodic_memory import EpisodicMemory, EpisodeNode, SessionSummary
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

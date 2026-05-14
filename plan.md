@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.5.0** | 582 tests passing | 60 commits
+> Last updated: 2026-05-15 | **v1.6.0** | 649 tests passing | 62 commits
 
 ---
 
@@ -8,16 +8,16 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.5.0 |
-| **Production modules** | 73 Python files in `star_graph/` |
-| **Production code** | ~32,000 lines |
-| **Test files** | 28 files in `tests/` |
-| **Test code** | ~7,800 lines |
-| **Total tests** | **582** (all passing) |
-| **Total commits** | 60 |
+| **Version** | 1.6.0 |
+| **Production modules** | 78 Python files in `star_graph/` |
+| **Production code** | ~36,000 lines |
+| **Test files** | 33 files in `tests/` |
+| **Test code** | ~9,300 lines |
+| **Total tests** | **649** (all passing) |
+| **Total commits** | 62 |
 | **License** | MIT |
 
-### Module Inventory (64 modules)
+### Module Inventory (78 modules)
 
 ```
 star_graph/
@@ -71,6 +71,11 @@ star_graph/
 ├── self_org.py               # SelfOrganization: auto-cluster, merge near-duplicates, emergent topic detection
 ├── personality.py             # PersonalityModel: Big Five traits, working style, expertise, values extraction
 ├── goal_tree.py               # GoalTree: hierarchical goal decomposition, progress propagation, stale archival
+├── retrieval_budget.py         # RetrievalBudget: MAX_HOPS=3, MAX_NODES=24, MAX_TOKENS=6000 hard limits
+├── versioned_memory.py         # CognitiveTrajectory: belief evolution chains (用户喜欢Python → 用户研究认知架构)
+├── cluster_memory.py           # ClusterRouter: query→cluster centroid → scoped retrieval pre-filtering
+├── causal_edges.py             # CausalEdgeClassifier: CAUSES/DEPENDS_ON/MOTIVATES/GOAL_OF/RESULT_OF/PRECEDES
+├── episodic_memory.py          # EpisodicMemory: time-ordered episode streams with context + emotional arcs
 │
 ├── ── Sleep & Consolidation ──
 ├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
@@ -108,7 +113,7 @@ star_graph/
 ├── cli.py                   # CLI commands
 ├── mcp_server.py            # MCP server (optional)
 │
-└── tests/ (28 files, 582 tests)
+└── tests/ (33 files, 649 tests)
     ├── test_v08_modules.py          # Core module smoke tests
     ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice + thermal + edge traversal
     ├── test_memory_tier.py          # STM/MTM/LTM/Core tier API + promotion pipeline (16 tests)
@@ -126,6 +131,11 @@ star_graph/
     ├── test_self_org.py             # Self-organization, clustering, topic detection (22 tests)
     ├── test_personality.py          # Personality model, Big Five traits, expertise (28 tests)
     ├── test_goal_tree.py            # Goal tree, progress tracking, archival (36 tests)
+    ├── test_retrieval_budget.py     # Retrieval budget hop/node/token limits (19 tests)
+    ├── test_versioned_memory.py     # Cognitive trajectory belief chains (13 tests)
+    ├── test_cluster_memory.py       # Cluster router retrieval pre-filtering (10 tests)
+    ├── test_causal_edges.py         # Causal edge types inference + tracing (9 tests)
+    ├── test_episodic_memory.py      # Episodic memory event streams (16 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -162,6 +172,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | **v1.3.0** | **2026-05-15** | **Domain router (hierarchical topic tree), edge budget (smart eviction, max 32), write gate (5-stage quality filter), four-layer compression (M→E→S→P) — 467 tests** |
 | **v1.4.0** | **2026-05-15** | **Spreading activation primary retrieval, 3-tier thermal store (hot/cold/archive), continuous edge time decay — 496 tests** |
 | **v1.5.0** | **2026-05-15** | **Renamed to NeuroWeave Cortex (NWC). Self-organization (auto-cluster/merge/topics), personality model (Big Five traits/expertise/values), goal tree (hierarchical progress tracking) — 582 tests** |
+| **v1.6.0** | **2026-05-15** | **Retrieval budget (S-5: hop/node/token limits), versioned memory (A-9: belief evolution chains), cluster memory (A-10: retrieval pre-filtering), causal edge types (B-12: 6 richer types), episodic memory (B-13: event streams). All S/A/B items complete — 649 tests** |
 
 ---
 
@@ -1050,7 +1061,7 @@ Implementation:
 | S-2 | Domain Routing | ✅ Done (#48) | query → domain → cluster → node, no global retrieval |
 | S-3 | Memory Write Gate | ✅ Done (#50) | Importance/duplicate/temporal/personality/goal scoring before storage |
 | S-4 | Layered Memory Abstraction | ✅ Done (#51) | message → event → semantic → personality → long-term cognition |
-| **S-5** | **Retrieval Budget** | **NEW** | MAX_HOPS=3, MAX_NODES=24, MAX_TOKENS=6000 to prevent spreading activation runaway |
+| **S-5** | **Retrieval Budget** | **✅ Done** | MAX_HOPS=3, MAX_NODES=24, MAX_TOKENS=6000 to prevent spreading activation runaway |
 
 #### S-5 Retrieval Budget
 
@@ -1076,8 +1087,8 @@ Implementation plan:
 | A-6 | Spreading Activation | ✅ Done (#52) | Node activation → neighbor diffusion → weight decay → path recall |
 | A-7 | Time Decay System | ✅ Done (#54) | weight = semantic × recency × frequency × importance |
 | A-8 | Hot/Cold/Archive | ✅ Done (#53) | Three-tier auto-promotion/demotion storage |
-| **A-9** | **Versioned Memory** | **NEW** | Cognitive trajectory: user_likes_python → user_prefers_ai_dev → user_studies_cognitive_arch |
-| **A-10** | **Cluster Memory** | **Partially done** | Auto-clustering: Python/AI/creative clusters. Community detection + self_org exist, needs retrieval integration |
+| **A-9** | **Versioned Memory** | **✅ Done** | Cognitive trajectory: user_likes_python → user_prefers_ai_dev → user_studies_cognitive_arch |
+| **A-10** | **Cluster Memory** | **✅ Done** | Auto-clustering: Python/AI/creative clusters. Community detection + self_org exist, integrated retrieval pre-filtering |
 
 #### A-9 Versioned Memory (Cognitive Trajectory)
 
@@ -1110,8 +1121,8 @@ Implementation plan (partial — community.py + self_org.py exist):
 | # | Item | Status | Description |
 |---|------|--------|-------------|
 | B-11 | Self-Organizing Memory | ✅ Done (#55) | Auto-form preferences, goals, habits, thinking patterns, behavioral trends |
-| **B-12** | **Causal Edge Types** | **Partially done** | leads_to, depends_on, motivates, goal, result — richer than "related" |
-| **B-13** | **Episodic Memory** | **NEW** | Time + environment + context + state → memory event streams |
+| **B-12** | **Causal Edge Types** | **✅ Done** | leads_to, depends_on, motivates, goal, result — richer than "related" |
+| **B-13** | **Episodic Memory** | **✅ Done** | Time + environment + context + state → memory event streams |
 | B-14 | Memory Compressor | ✅ Done (#51) | 100 messages → 5 cognition → 1 long-term personality |
 | B-15 | Graph Snapshot | ✅ Done | Time-sliced cognitive state (snapshot.py) |
 

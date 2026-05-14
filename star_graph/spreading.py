@@ -134,7 +134,10 @@ class SpreadingActivation:
 
             for node_id, level in current_wave.items():
                 neighbors = self.graph.neighbors(node_id, min_weight=self._min_traversal_weight)
+                # Apply node budget: stop adding new nodes at limit
                 for neighbor_id, traversal_weight in neighbors:
+                    if len(activated) >= 48:  # hard safety limit
+                        break
                     propagated = level * traversal_weight * (self._decay ** (depth + 1))
                     if propagated < self._min_traversal_weight:
                         continue

@@ -225,6 +225,11 @@ class RetrievalPipeline:
                 pass
 
         merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
+
+        # Enforce retrieval budget — hard limits on node count + token budget (S-5)
+        budget_state = self._rt.retrieval_budget.begin()
+        merged_items = self._rt.retrieval_budget.enforce_nodes(merged_items, budget_state)
+        merged_items = self._rt.retrieval_budget.enforce_tokens(merged_items, budget_state)
         merged_items = merged_items[:max_items]
 
         # Auto-trigger System-2 if System-1 confidence is low
@@ -263,6 +268,9 @@ class RetrievalPipeline:
             "raw_ms": round(raw_ms, 3),
             "graph_ms": round(graph_ms, 3),
             "spreading_ms": round(spreading_ms, 3),
+            "budget_nodes": budget_state.nodes_activated,
+            "budget_tokens": budget_state.tokens_used,
+            "budget_truncated": budget_state.truncated,
             "total_ms": round(total_ms, 3),
         }, duration_ms=total_ms)
 

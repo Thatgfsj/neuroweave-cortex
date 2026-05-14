@@ -55,6 +55,11 @@ from .edge_decay import EdgeDecayManager
 from .self_org import SelfOrganization
 from .personality import PersonalityModel
 from .goal_tree import GoalTree
+from .retrieval_budget import RetrievalBudget
+from .versioned_memory import CognitiveTrajectory
+from .cluster_memory import ClusterRouter
+from .causal_edges import CausalEdgeClassifier
+from .episodic_memory import EpisodicMemory
 from .multimodal import (
     MultimodalEmbeddingProvider, MultimodalAnchor, CrossModalRetriever, CrossModalResult,
 )
@@ -178,6 +183,21 @@ class MemoryRuntime:
 
         # Goal tree — hierarchical goal decomposition (#57)
         self._goal_tree: GoalTree | None = None
+
+        # Retrieval budget — hop/node/token limits (S-5)
+        self._retrieval_budget: RetrievalBudget | None = None
+
+        # Versioned memory — cognitive trajectory tracking (A-9)
+        self._versioned_memory: CognitiveTrajectory | None = None
+
+        # Cluster memory — retrieval pre-filtering (A-10)
+        self._cluster_router: ClusterRouter | None = None
+
+        # Causal edge classifier — richer edge types (B-12)
+        self._causal_classifier: CausalEdgeClassifier | None = None
+
+        # Episodic memory — time + context event streams (B-13)
+        self._episodic_memory: EpisodicMemory | None = None
 
         # Snapshot manager — versioned state snapshots with WAL
         self._snapshot_mgr: SnapshotManager | None = None
@@ -512,6 +532,48 @@ class MemoryRuntime:
         return self._goal_tree
 
     @property
+    def retrieval_budget(self) -> RetrievalBudget:
+        """Lazy-init retrieval budget for hop/node/token limits."""
+        if self._retrieval_budget is None:
+            rb_cfg = getattr(self.cfg, 'retrieval_budget', None)
+            max_hops = getattr(rb_cfg, 'max_hops', 3) if rb_cfg else 3
+            max_nodes = getattr(rb_cfg, 'max_nodes', 24) if rb_cfg else 24
+            max_tokens = getattr(rb_cfg, 'max_tokens', 6000) if rb_cfg else 6000
+            self._retrieval_budget = RetrievalBudget(
+                max_hops=max_hops, max_nodes=max_nodes, max_tokens=max_tokens)
+        return self._retrieval_budget
+
+    @property
+    def versioned_memory(self) -> CognitiveTrajectory:
+        """Lazy-init cognitive trajectory for belief evolution tracking."""
+        if self._versioned_memory is None:
+            self._versioned_memory = CognitiveTrajectory()
+        return self._versioned_memory
+
+    @property
+    def cluster_router(self) -> ClusterRouter:
+        """Lazy-init cluster router for retrieval pre-filtering."""
+        if self._cluster_router is None:
+            cr_cfg = getattr(self.cfg, 'cluster_memory', None)
+            min_size = getattr(cr_cfg, 'min_cluster_size', 5) if cr_cfg else 5
+            self._cluster_router = ClusterRouter(min_cluster_size=min_size)
+        return self._cluster_router
+
+    @property
+    def causal_classifier(self) -> CausalEdgeClassifier:
+        """Lazy-init causal edge classifier for richer edge types."""
+        if self._causal_classifier is None:
+            self._causal_classifier = CausalEdgeClassifier()
+        return self._causal_classifier
+
+    @property
+    def episodic_memory(self) -> EpisodicMemory:
+        """Lazy-init episodic memory for event stream recording."""
+        if self._episodic_memory is None:
+            self._episodic_memory = EpisodicMemory()
+        return self._episodic_memory
+
+    @property
     def hublayer(self) -> HubLayer:
         if self._hublayer is None:
             hub_cfg = getattr(self.cfg, 'hub', None)
@@ -657,6 +719,16 @@ class MemoryRuntime:
 
         # Incremental personality model update (#56)
         self.personality.ingest_anchor(anchor)
+
+        # Episodic memory recording — time-ordered event stream (B-13)
+        self.episodic_memory.record_episode(
+            session_id=source_session,
+            summary=text[:200],
+            anchor_ids=[anchor.id],
+            tags=tags or [],
+            emotional_valence=emotional_valence,
+            importance=importance,
+        )
 
         # Auto-sleep check: trigger micro/full consolidation on thresholds
         self._check_auto_sleep()
@@ -1029,6 +1101,32 @@ class MemoryRuntime:
         except Exception:
             pass
 
+        # 6l. Cluster memory — rebuild cluster index from communities (A-10)
+        cm_result = {"clusters_built": 0}
+        try:
+            cm_result["clusters_built"] = self.cluster_router.build_index(self.graph)
+        except Exception:
+            pass
+
+        # 6m. Versioned memory — detect belief evolution chains (A-9)
+        vm_result = {"new_beliefs": 0}
+        try:
+            new_beliefs = self.versioned_memory.detect_from_graph(self.graph)
+            vm_result["new_beliefs"] = len(new_beliefs)
+        except Exception:
+            pass
+
+        # 6n. Episodic memory — summarize completed sessions (B-13)
+        em_result = {"sessions_summarized": 0}
+        try:
+            for session_id in list(self.episodic_memory._session_index.keys()):
+                if session_id not in self.episodic_memory._summaries:
+                    summary = self.episodic_memory.summarize_session(session_id)
+                    if summary:
+                        em_result["sessions_summarized"] += 1
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -1066,6 +1164,9 @@ class MemoryRuntime:
             "self_org": so_result,
             "personality_version": personality_version,
             "goal_tree": gt_result,
+            "cluster_memory": cm_result,
+            "versioned_memory": vm_result,
+            "episodic_memory": em_result,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
@@ -1546,13 +1647,26 @@ class MemoryRuntime:
 
     def connect(self, source_id: str, target_id: str,
                 weight: float = 0.5, edge_type: str = "topical") -> Edge | None:
-        """Explicitly connect two memories. Edge budget enforced post-connection."""
+        """Explicitly connect two memories. Edge budget enforced post-connection.
+
+        When edge_type is "topical" (default), the causal edge classifier
+        attempts to infer a richer causal type from the anchor texts (B-12).
+        """
         if source_id not in self.graph.anchors or target_id not in self.graph.anchors:
             return None
         src_emb = self.graph.anchors[source_id].embedding
         tgt_emb = self.graph.anchors[target_id].embedding
         if src_emb and tgt_emb and weight == 0.5:
             weight = _cosine_sim(src_emb, tgt_emb)
+
+        # Infer richer causal edge type from anchor texts
+        if edge_type == "topical":
+            anchor_a = self.graph.anchors[source_id]
+            anchor_b = self.graph.anchors[target_id]
+            inferred_type, confidence = self.causal_classifier.infer_from_anchors(anchor_a, anchor_b)
+            if confidence > 0.3:
+                edge_type = inferred_type
+
         edge = self.graph.add_edge(source_id, target_id, weight=weight, edge_type=edge_type)
         if edge:
             self.edge_budget.enforce(self.graph, source_id)
