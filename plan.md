@@ -352,6 +352,14 @@ Phase 5 (v1.0.8):    Sleep merge ANN → BM25 hybrid → PPR approx → Embedder
 - [x] retention_score caching: 0.5s TTL cache saves recomputation in hot retrieval loops
 - [x] Layer 3 TimeSpine-indexed scan: O(days*buckets) replaces full O(n) cortex scan; remember()/forget() auto-populate spine
 
+### v1.0.8 (emergency hardening — external code review)
+- [x] #21 Sleep merge O(n²) → ANN-accelerated: candidate pairs pre-filtered via ANN query, O(n*k)
+- [x] #22 BM25 + embedding hybrid: BM25Index with incremental add/remove, RRF fusion in System-1 search
+- [x] #23 PPR sparse rewrite: seed-scoped dict-based iteration, no dense n×n matrix
+- [x] #24 EmbedderRegistry instance-level: per-runtime registry prevents multi-Manager embedder pollution
+- [x] #25 AnchorVector 13→10 dims: remove future_reusability, merge novelty→surprise, task_relevance→importance
+- [x] #26 Tiered storage: COLD anchors offload to disk (TieredStorage), transparent thaw on access, wired into sleep
+
 ### Previous (v1.0.6)
 - [x] Survival functions (Ebbinghaus / Power-law / Exponential / Custom)
 - [x] Ghost intensity + NegativeGhost contradiction tracking
