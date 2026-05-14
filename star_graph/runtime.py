@@ -29,6 +29,8 @@ from .shard import MemoryShardManager
 from .cascade import CascadeRecall
 from .spreading import SpreadingActivation
 from .cognitive_cache import CognitiveCacheManager
+from .compiler import CognitiveCompiler
+from .reflection_loop import SelfReflectionLoop
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
 from .symbolic_filter import SymbolicFilter
@@ -121,6 +123,8 @@ class MemoryRuntime:
         self._cascade: CascadeRecall | None = None
         self._spreading: SpreadingActivation | None = None
         self._cognitive_cache: CognitiveCacheManager | None = None
+        self._compiler: CognitiveCompiler | None = None
+        self._reflection_loop: SelfReflectionLoop | None = None
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
         self._tiered: TieredStorage | None = None
@@ -375,6 +379,19 @@ class MemoryRuntime:
         if self._cognitive_cache is None:
             self._cognitive_cache = CognitiveCacheManager()
         return self._cognitive_cache
+
+    @property
+    def compiler(self) -> CognitiveCompiler:
+        if self._compiler is None:
+            self._compiler = CognitiveCompiler()
+        return self._compiler
+
+    @property
+    def reflection_loop(self) -> SelfReflectionLoop:
+        if self._reflection_loop is None:
+            self._reflection_loop = SelfReflectionLoop()
+            self._reflection_loop.set_ghost_subsystem(self.ghosts)
+        return self._reflection_loop
 
     @property
     def hublayer(self) -> HubLayer:
@@ -754,6 +771,31 @@ class MemoryRuntime:
         # 6b. Cognitive cache rebuild: topic index + evict expired entries
         cache_rebuild = self.cognitive_cache.rebuild_on_sleep(self.graph)
 
+        # 6c. Cognitive compiler: run worldview emergence pipeline
+        compiler_result = {"worldviews": 0, "profile_version": 0}
+        try:
+            compiler_result_raw = self.compiler.compile(self.graph)
+            compiler_result = {
+                "worldviews": len(compiler_result_raw.get("worldviews", [])),
+                "profile_version": compiler_result_raw.get("stats", {}).get("profile_version", 0),
+                "compression_chain": compiler_result_raw.get("stats", {}).get("compression_chain", ""),
+            }
+        except Exception:
+            pass
+
+        # 6d. Self-reflection loop: detect and correct contradictions
+        reflection_reports = []
+        try:
+            if self._reflection_loop is None:
+                self._reflection_loop = self.reflection_loop
+            new_reports = self._reflection_loop.run(
+                self.graph,
+                autobiography=self._autobiography,
+            )
+            reflection_reports = [r.to_dict() for r in new_reports]
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -778,6 +820,12 @@ class MemoryRuntime:
             "self_narratives_purged": self_narratives_purged,
             "hippocampus": hc_report,
             "cognitive_cache": cache_rebuild,
+            "compiler": compiler_result,
+            "reflection": {
+                "corrections": len(reflection_reports),
+                "reports": reflection_reports[:5],
+            },
+            "reflection_stats": self.reflection_loop.stats,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
@@ -1408,6 +1456,54 @@ class MemoryRuntime:
 
         summaries.sort(key=lambda x: -x["confidence"])
         return summaries[:max_summaries]
+
+    # ── Cognitive Compiler API (#45) ─────────────────────────
+
+    def compile_worldviews(self) -> dict:
+        """Run the full cognitive compilation pipeline and return results."""
+        return self.compiler.compile(self.graph)
+
+    def get_worldviews(self, min_stability: float = 0.5) -> list:
+        """Get stable worldview beliefs about the user."""
+        wvs = self.compiler.get_stable_worldviews(min_stability=min_stability)
+        return [
+            {
+                "id": wv.id,
+                "label": wv.label,
+                "description": wv.description,
+                "type": wv.worldview_type,
+                "confidence": round(wv.confidence, 3),
+                "stability": round(wv.stability, 3),
+                "evidence_count": wv.evidence_count,
+                "domain": wv.domain,
+                "tags": wv.tags,
+            }
+            for wv in wvs
+        ]
+
+    def get_user_profile(self) -> dict | None:
+        """Get the synthesized user profile from worldview consensus."""
+        profile = self.compiler.profile
+        if profile is None:
+            return None
+        return {
+            "summary": profile.summary,
+            "preferences": profile.preferences,
+            "expertise_areas": profile.expertise_areas,
+            "working_style": profile.working_style,
+            "values": profile.values,
+            "habits": profile.habits,
+            "confidence": round(profile.confidence, 3),
+            "version": profile.version,
+        }
+
+    # ── Self-Reflection API (#46) ────────────────────────────
+
+    def get_corrections(self, topic: str = "") -> list[dict]:
+        """Get correction reports. 'what did I get wrong about X?'"""
+        if topic:
+            return self.reflection_loop.get_corrections_for_topic(topic)
+        return self.reflection_loop.get_recent_corrections()
 
     @staticmethod
     def _normalize_text(text: str) -> str:

@@ -367,3 +367,30 @@ compression:
   source_retention_factor: 0.3
   summary_initial_stability: 0.85
   summary_hippocampal_dependency: 0.1
+
+# ── Cognitive Compiler (#45) ──
+compiler:
+  episodic_ratio: 0.20
+  concept_ratio: 0.10
+  worldview_ratio: 0.25
+  min_worldview_confidence: 0.4
+  min_worldview_evidence: 2
+  worldview_half_life_days: 90.0
+  similarity_threshold: 0.55
+  max_worldviews: 20
+
+# ── Self-Reflection Loop (#46) ──
+reflection_loop:
+  contradiction_threshold: 0.7
+  min_confidence_gap: 0.15
+  weaken_factor: 0.30
+  ghost_on_correction: true
+  max_reports: 100
+  auto_revive_threshold: 0.3
+
+# ── Graph-First Retrieval (#47) ──
+graph_first:
+  graph_weight: 0.6
+  embedding_weight: 0.4
+  max_depth: 2
+  seed_count: 5

@@ -125,6 +125,9 @@ from .cognitive_cache import (
     QueryCache, SessionCache, TopicCache, ActivationCache,
     CognitiveCacheManager, QueryCacheEntry,
 )
+from .compiler import CognitiveCompiler, WorldviewNode, UserProfile
+from .reflection_loop import SelfReflectionLoop, SelfCorrectionReport
+from .topology import topology_rank, graph_first_recall, EDGE_TYPE_RICHNESS_WEIGHTS
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

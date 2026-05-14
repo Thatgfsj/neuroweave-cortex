@@ -1,6 +1,6 @@
 # Star Graph Memory — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.2.0** | 305 tests passing | 56 commits
+> Last updated: 2026-05-15 | **v1.2.0** | 373 tests passing | 57 commits
 
 ---
 
@@ -9,12 +9,12 @@
 | Metric | Value |
 |--------|-------|
 | **Version** | 1.2.0 |
-| **Production modules** | 59 Python files in `star_graph/` |
-| **Production code** | ~24,750 lines |
-| **Test files** | 14 files in `tests/` |
-| **Test code** | ~4,200 lines |
-| **Total tests** | **305** (all passing) |
-| **Total commits** | 56 |
+| **Production modules** | 64 Python files in `star_graph/` |
+| **Production code** | ~27,000 lines |
+| **Test files** | 19 files in `tests/` |
+| **Test code** | ~5,500 lines |
+| **Total tests** | **373** (all passing) |
+| **Total commits** | 57 |
 | **License** | MIT |
 
 ### Module Inventory (58 modules)
@@ -57,7 +57,11 @@ star_graph/
 ├── gate.py                  # MemoryGate: winner-take-all competition
 ├── competition.py           # MemoryCompetition: multi-memory scoring
 ├── resonance.py             # Resonator: oscillatory bridge detection
-├── hub.py                   # HubLayer + HubNode + HubShard
+├── spreading.py             # SpreadingActivation: BFS subgraph activation with traversal weights
+├── cognitive_cache.py       # Multi-level cognitive cache: query/session/topic/activation
+├── compiler.py              # CognitiveCompiler: 1000→20→5→1 worldview emergence pipeline
+├── reflection_loop.py       # SelfReflectionLoop: auto contradiction detection + correction
+├── topology.py              # Graph topology ranking: centrality + edge-type-based scoring
 │
 ├── ── Sleep & Consolidation ──
 ├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
@@ -95,10 +99,15 @@ star_graph/
 ├── cli.py                   # CLI commands
 ├── mcp_server.py            # MCP server (optional)
 │
-└── tests/ (14 files, 305 tests)
+└── tests/ (16 files, 336 tests)
     ├── test_v08_modules.py          # Core module smoke tests
-    ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice
+    ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice + thermal + edge traversal
     ├── test_memory_tier.py          # STM/MTM/LTM/Core tier API + promotion pipeline (16 tests)
+    ├── test_spreading.py            # Spreading activation with edge-type-weighted BFS (8 tests)
+    ├── test_cognitive_cache.py      # Multi-level cognitive cache (query/session/topic/activation, 23 tests)
+    ├── test_cognitive_compiler.py   # Cognitive compiler worldview pipeline (14 tests)
+    ├── test_reflection_loop.py      # Self-reflection loop contradiction detection (9 tests)
+    ├── test_topology.py             # Graph-first retrieval topology ranking (14 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -131,7 +140,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | v1.0.8 | 2026-05-14 | Sleep merge ANN, BM25 hybrid, PPR sparse, EmbedderRegistry instance, AnchorVector 10-dim, tiered storage |
 | v1.0.9 | 2026-05-14 | Global anchor hard cap, auto-sleep daemon, cold ghost cleanup, cortex auto-consolidation |
 | **v1.1.0** | **2026-05-15** | **Hippocampus buffer, edge sparsification, file sharding, sleep rebuild (fuse/rewire/abstract), cortex hierarchy, abstractive memory engine, dynamic neural rewiring, success-rate RL, temporal slice projection — 276 tests** |
-| **v1.2.0** | **2026-05-15** | **Memory tiering (STM/MTM/LTM/Core), decay+reinforcement feedback loop, FROZEN thermal tier, edge type traversal weights, cascade causal ranking — 305 tests** |
+| **v1.2.0** | **2026-05-15** | **Memory tiering, decay+reinforcement loop, FROZEN thermal tier, edge traversal weights, spreading activation, cognitive cache, cognitive compiler (worldview emergence), self-reflection loop, graph-first retrieval — 373 tests** |
 
 ---
 
@@ -814,11 +823,13 @@ Implementation:
 
 ---
 
-### Phase 12 — Cognitive Compiler + Worldview (P2, v1.2.0)
+### Phase 12 — Cognitive Compiler + Worldview (P2, v1.2.0) ✅ COMPLETE
+
+- [x] #45 Cognitive Compression Pipeline (1000→20→5→1)
+- [x] #46 Self-Reflection Loop (Auto Error Correction)
+- [x] #47 Graph-First Retrieval (Weaken Embedding Primacy)
 
 #### #45 Cognitive Compression Pipeline (1000→20→5→1)
-
-Current state: MultiLevelCompressor compresses DORMANT anchors within sessions, but has no full-chain worldview emergence.
 
 Implementation:
 ```
