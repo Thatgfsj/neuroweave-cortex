@@ -1,6 +1,138 @@
-# Star Graph Memory — Refactoring & Improvement Plan
+# Star Graph Memory — Repository Overview & Improvement Plan
 
-> Based on comprehensive codebase audit (2026-05-13). 232 tests passing, v1.0.6.
+> Last updated: 2026-05-15 | **v1.1.0** | 276 tests passing | 55 commits
+
+---
+
+## Repository Snapshot
+
+| Metric | Value |
+|--------|-------|
+| **Version** | 1.1.0 |
+| **Production modules** | 58 Python files in `star_graph/` |
+| **Production code** | ~24,200 lines |
+| **Test files** | 13 files in `tests/` |
+| **Test code** | ~3,600 lines |
+| **Total tests** | **276** (all passing) |
+| **Total commits** | 55 |
+| **License** | MIT |
+
+### Module Inventory (58 modules)
+
+```
+star_graph/
+├── __init__.py              # v1.1.0 exports — 100+ symbols
+├── __main__.py              # CLI entry point
+├── anchor.py                # Anchor + AnchorVector (10-dim) + memory lifecycle
+├── graph.py                 # StarGraph: CRUD, edges, communities, temporal slice
+├── sleep.py                 # SleepCycle: 8-phase sleep + sleep rebuild
+├── runtime.py               # MemoryRuntime: DI container, auto-sleep, sharded save/load
+├── manager.py               # MemoryManager: facade API, retrieval orchestration
+├── retrieval_pipeline.py    # RetrievalPipeline: L0→L4 descent logic
+├── config.py                # Config system: YAML defaults, schema validation, DotDict
+├── defaults.yaml            # All default configuration values
+│
+├── ── Layer 1: Storage ──
+├── storage.py               # Abstract Storage + JSONStorage
+├── storage_backend.py       # StorageBackend interface
+├── sqlite_storage.py        # SQLiteStorage backend
+├── tiered.py                # TieredStorage: HOT/WARM/COLD disk offloading
+├── index.py                 # ANNIndex: approximate nearest neighbor
+├── shard.py                 # MemoryShardManager: domain+time+size file sharding
+│
+├── ── Layer 2: Cognitive ──
+├── cortex.py                # MemoryCortex: domain-specific brain regions + hierarchy
+├── router.py                # CortexRouter: hierarchy-weighted sparse activation
+├── retriever.py             # OSC/Vector/HybridFusion retrievers + PPR
+├── dual_channel.py          # DualChannelRetriever: System-1/System-2
+├── bm25.py                  # BM25Index: keyword sparse retrieval + RRF fusion
+├── scheduler.py             # CognitiveMemoryScheduler: retrieval with decay
+├── hub.py                   # HubLayer: cross-cortex abstraction nodes
+├── brain_sphere.py          # BrainSphere: O(1) hub center lookup
+├── cascade.py               # CascadeRecall: causal chain reasoning
+├── timespine.py             # TimeSpine: temporal indexing
+├── working_memory.py        # WorkingMemory: short-term buffer
+├── hippocampus.py           # HippocampusBuffer: L1(30min)+L2(24h) transient cache
+├── gate.py                  # MemoryGate: winner-take-all competition
+├── competition.py           # MemoryCompetition: multi-memory scoring
+├── resonance.py             # Resonator: oscillatory bridge detection
+├── hub.py                   # HubLayer + HubNode + HubShard
+│
+├── ── Sleep & Consolidation ──
+├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
+├── online.py                # OnlineConsolidator: real-time micro-consolidation
+├── micro_sleep.py           # MicroSleepScheduler: incremental non-blocking
+├── cost_estimator.py        # SleepCostEstimator: LLM cost prediction
+├── compression.py           # MultiLevelCompressor: RAW→EPISODIC→STRATEGIC→META
+├── atom_facts.py            # FactExtractor: LLM entity-centric fact extraction
+├── abstraction.py           # AbstractionEngine + AbstractiveMemoryEngine
+├── evolution.py             # MemoryEvolutionEngine: belief state transitions
+│
+├── ── Cognitive Enhancements ──
+├── ghost.py                 # GhostSubsystem: pruned memory afterimages
+├── community.py             # CommunityDetection: label propagation partitioning
+├── autobiography.py         # AutobiographicalMemory: self-narrative formation
+├── survival.py              # Survival functions: Ebbinghaus/PowerLaw/Exponential
+├── symbolic_filter.py       # SymbolicFilter: rule-based retrieval filtering
+├── multimodal.py            # MultimodalEmbedding: CLIP text+image joint embedding
+│
+├── ── Infrastructure ──
+├── embedding.py             # EmbeddingProvider + get_embedder registry
+├── math_utils.py            # cosine_sim, safe_div, clamp, sigmoid
+├── logger.py                # Structured logging (get_logger/init_logging)
+├── metrics.py               # CognitiveMetrics: health + performance
+├── snapshot.py              # SnapshotManager: crash recovery + WAL
+├── async_manager.py         # AsyncMemoryManager: async API
+├── tracing.py               # MemoryTracer: OpenTelemetry spans
+├── seed.py                  # Deterministic seeding
+├── layers.py                # Layer boundary enforcement
+│
+├── ── Misc ──
+├── streaming.py             # StreamingMemoryBuffer: backpressure
+├── exact_cache.py           # ExactMatchCache: O(1) deterministic lookup
+├── benchmark.py             # BenchmarkSuite: 5 categories, compare_systems
+├── cli.py                   # CLI commands
+├── mcp_server.py            # MCP server (optional)
+│
+└── tests/ (13 files, 276 tests)
+    ├── test_v08_modules.py          # Core module smoke tests
+    ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice
+    ├── test_config_schema.py        # Config validation (15 tests)
+    ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
+    ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
+    ├── test_survival.py             # Survival function decay curves
+    ├── test_ghost_intensity.py      # Ghost resurrection + intensity
+    ├── test_oscillation_match.py    # OscillationResonanceRetriever
+    ├── test_retrieval_trace.py      # RetrievalTrace + ExplainableScore
+    ├── test_streaming.py            # StreamingMemoryBuffer backpressure
+    ├── test_multimodal.py           # MultimodalEmbeddingProvider
+    ├── test_readme_doctest.py       # README code block validation
+    └── __init__.py
+```
+
+### Architecture Layers
+
+```
+Layer 3 (Behavior):  Cortex routing, memory gating, working memory,
+                     dimensional reduction retrieval, adaptive replay
+Layer 2 (Cognitive): Hub abstraction, cascade recall, time spine,
+                     sleep consolidation, evolution, ghost revival
+Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
+```
+
+### Version History
+
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| v1.0.6 | 2026-05-13 | Base: 232 tests, survival, ghost, multimodal, streaming, exact cache, micro-sleep, snapshot, async, benchmark |
+| v1.0.7 | 2026-05-14 | Ghost unification, raw buffer priority, ANN incremental, manager split, cortex sleep, dual-channel auto, autobiographical, state/thermal unified, phase correction, config dot-path, sleep naming, cosine dedup, ANN contradictions, retention cache, layer3 timespine, structured logging, config schema, mypy, README updates |
+| v1.0.8 | 2026-05-14 | Sleep merge ANN, BM25 hybrid, PPR sparse, EmbedderRegistry instance, AnchorVector 10-dim, tiered storage |
+| v1.0.9 | 2026-05-14 | Global anchor hard cap, auto-sleep daemon, cold ghost cleanup, cortex auto-consolidation |
+| **v1.1.0** | **2026-05-15** | **Hippocampus buffer, edge sparsification, file sharding, sleep rebuild (fuse/rewire/abstract), cortex hierarchy, abstractive memory engine, dynamic neural rewiring, success-rate RL, temporal slice projection — 276 tests** |
+
+---
+
+> Based on comprehensive codebase audit (2026-05-13). Originally 232 tests passing, v1.0.6.
 
 ## Priority Summary
 
