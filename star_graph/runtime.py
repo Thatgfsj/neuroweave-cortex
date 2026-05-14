@@ -25,6 +25,7 @@ from .gate import MemoryGate
 from .timespine import TimeSpine
 from .tiered import TieredStorage
 from .hippocampus import HippocampusBuffer
+from .shard import MemoryShardManager
 from .cascade import CascadeRecall
 from .hub import HubLayer, HubNode
 from .brain_sphere import BrainSphere, HubCenter
@@ -120,6 +121,7 @@ class MemoryRuntime:
         self._bm25 = None  # BM25 keyword index — lazy init
         self._tiered: TieredStorage | None = None
         self._hippocampus = None  # HippocampusBuffer — lazy init
+        self._shard_manager = None  # MemoryShardManager — lazy init
 
         # Raw chunk buffer — uncompressed short-term memory tier (L0)
         self._raw_buffer: RawBuffer | None = None
@@ -344,6 +346,13 @@ class MemoryRuntime:
                 promote_threshold=int(getattr(hc_cfg, 'promote_threshold', 3) if hc_cfg else 3),
             )
         return self._hippocampus
+
+    @property
+    def shard_manager(self) -> MemoryShardManager:
+        if self._shard_manager is None:
+            base = os.path.dirname(self.storage_path) if self.storage_path else "memory"
+            self._shard_manager = MemoryShardManager(base_dir=base, max_file_size_mb=50)
+        return self._shard_manager
 
     @property
     def cascade(self) -> CascadeRecall:
@@ -909,6 +918,77 @@ class MemoryRuntime:
                 json.dump(ghost_data, f, indent=2, ensure_ascii=False)
         self.storage_path = filepath
         return filepath
+
+    def save_sharded(self, base_dir: str = "memory") -> dict:
+        """Save anchors partitioned by domain + time into shard files.
+
+        Returns stats dict with shard_count, total_anchors, total_size_mb.
+        """
+        sm = MemoryShardManager(base_dir=base_dir, max_file_size_mb=50)
+        # Group anchors by domain (inferred from tags or cortex membership)
+        batches: dict[str, list[dict]] = {}
+        for aid, anchor in self.graph.anchors.items():
+            domain = self._infer_domain(anchor)
+            file_path = sm.route_anchor(anchor, domain=domain)
+            if file_path not in batches:
+                batches[file_path] = []
+            batches[file_path].append({
+                "id": aid,
+                "text": anchor.text,
+                "embedding": anchor.embedding,
+                "tags": anchor.tags,
+                "importance": anchor.vector.importance,
+                "emotional_valence": anchor.vector.emotional_valence,
+                "source_session": anchor.source_session,
+                "created_at": anchor.created_at,
+                "last_activated_at": anchor.last_activated_at,
+                "domain": domain,
+            })
+
+        for file_path, data in batches.items():
+            sm.save_shard(file_path, data)
+
+        return sm.stats
+
+    def load_sharded(self, base_dir: str = "memory") -> int:
+        """Load all anchors from shard files. Returns count loaded."""
+        sm = MemoryShardManager(base_dir=base_dir)
+        all_data = sm.load_all()
+        for data in all_data:
+            if data.get("id") and data.get("text"):
+                anchor = Anchor.create(
+                    text=data["text"],
+                    source_session=data.get("source_session", ""),
+                    embedding=data.get("embedding"),
+                    emotional_valence=data.get("emotional_valence", 0.0),
+                    importance=data.get("importance", 0.5),
+                    tags=data.get("tags", []),
+                )
+                anchor.id = data["id"]
+                anchor.created_at = data.get("created_at", time.time())
+                anchor.last_activated_at = data.get("last_activated_at", time.time())
+                self.graph.add_anchor(anchor)
+        return len(all_data)
+
+    def _infer_domain(self, anchor) -> str:
+        """Infer the memory domain from anchor tags."""
+        tags_lower = [t.lower() for t in anchor.tags]
+        tag_text = " ".join(tags_lower) + " " + anchor.text.lower()
+
+        procedural_kw = {"how", "fix", "solution", "workflow", "deploy", "install",
+                         "config", "setup", "debug", "error", "bug", "patch"}
+        semantic_kw = {"preference", "knowledge", "concept", "fact", "opinion",
+                       "user", "style", "likes", "dislikes", "background"}
+        reflection_kw = {"strategy", "lesson", "pattern", "summary", "insight",
+                         "reflection", "meta", "review", "analysis"}
+
+        if any(kw in tag_text for kw in reflection_kw):
+            return "reflection"
+        if any(kw in tag_text for kw in procedural_kw):
+            return "procedural"
+        if any(kw in tag_text for kw in semantic_kw):
+            return "semantic"
+        return "episodic"  # default: conversations and events
 
     def load(self, path: str) -> StarGraph:
         """Load the memory system from disk."""
