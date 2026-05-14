@@ -504,15 +504,15 @@ class GhostSubsystem:
         results.sort(key=lambda x: -x[1])
         return results
 
-    def decay_all(self) -> int:
-        """Decay all ghosts, remove fully purged ones. Returns count removed."""
+    def decay_all(self) -> tuple[int, list[str]]:
+        """Decay all ghosts, remove fully purged ones. Returns (count, removed_ids)."""
         to_remove = []
         for gid, ghost in self.ghosts.items():
             if ghost.decay():
                 to_remove.append(gid)
         for gid in to_remove:
             del self.ghosts[gid]
-        return len(to_remove)
+        return len(to_remove), to_remove
 
     @property
     def stats(self) -> dict:

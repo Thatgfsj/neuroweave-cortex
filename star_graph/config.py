@@ -134,6 +134,9 @@ CONFIG_SCHEMA: dict[str, dict[str, tuple]] = {
         "max_text_length":          (int, False, 0, 10000, None),
     },
     "sleep": {
+        "auto_micro_interval_hours":    (float, False, 0.0, 8760.0, None),
+        "auto_full_interval_hours":     (float, False, 0.0, 8760.0, None),
+        "auto_anchor_threshold":         (int, False, 0, 100000, None),
         "swr.valence_weight":       (float, False, 0.0, 5.0, None),
         "swr.surprise_weight":      (float, False, 0.0, 5.0, None),
         "swr.frequency_weight":     (float, False, 0.0, 5.0, None),

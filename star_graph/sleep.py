@@ -1055,7 +1055,7 @@ class SleepCycle:
                 self._ghost_count += 1
 
         # Decay ghosts via subsystem
-        stale_count = self.graph._ghost_subsystem.decay_all()
+        stale_count, _ = self.graph._ghost_subsystem.decay_all()
 
         if candidates:
             self._log_event(f"Adaptive Prune: removed {len(candidates)} anchors "

@@ -59,6 +59,10 @@ anchor:
     critical_width_factor: 0.15
 
 sleep:
+  auto_micro_interval_hours: 1.0    # auto-trigger micro_consolidate every N hours
+  auto_full_interval_hours: 24.0    # auto-trigger full sleep every N hours
+  auto_anchor_threshold: 100        # auto-trigger micro when N new anchors since last
+
   swr:
     valence_weight: 0.25
     surprise_weight: 0.25

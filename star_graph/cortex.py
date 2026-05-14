@@ -283,6 +283,12 @@ class MemoryCortex:
             self._centroid_stale = True
         return anchor
 
+    def ensure_capacity(self) -> dict | None:
+        """Auto-consolidate if overfull. Returns report dict or None if no-op."""
+        if self.is_overfull():
+            return self.consolidate()
+        return None
+
     def consolidate(self) -> dict:
         """Run a local sleep cycle on this cortex."""
         from .sleep import SleepCycle

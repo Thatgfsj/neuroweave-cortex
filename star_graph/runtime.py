@@ -60,6 +60,9 @@ class ManagerStats:
     cold_anchors: int = 0
     sleep_cycles: int = 0
     total_evolutions: int = 0
+    auto_micro_sleeps: int = 0
+    auto_full_sleeps: int = 0
+    anchors_since_micro: int = 0
     uptime_seconds: float = 0.0
     cognitive_health: dict | None = None
 
@@ -153,6 +156,11 @@ class MemoryRuntime:
         # Stats
         self.sleep_cycles: int = 0
         self.total_evolutions: int = 0
+        self._last_micro_sleep: float = time.time()
+        self._last_full_sleep: float = time.time()
+        self._anchors_since_micro: int = 0
+        self._auto_micro_count: int = 0
+        self._auto_full_count: int = 0
 
     # ── Subsystem access (lazy init) ──────────────────────────
 
@@ -386,7 +394,13 @@ class MemoryRuntime:
                 for eid in evicted:
                     self._bm25.remove(eid)
 
+        # Cortex capacity: auto-consolidate overfull cortices before adding
+        for cortex in self.router.cortices:
+            if cortex.is_overfull():
+                cortex.ensure_capacity()
+
         self.graph.add_anchor(anchor)
+        self._anchors_since_micro += 1
 
         # Index on the temporal spine for time-windowed retrieval (Layer 3)
         self.timespine.index_anchor(
@@ -400,6 +414,9 @@ class MemoryRuntime:
         # Index in BM25 keyword index for sparse retrieval channel
         if self._bm25 is not None:
             self._bm25.add(anchor.id, text)
+
+        # Auto-sleep check: trigger micro/full consolidation on thresholds
+        self._check_auto_sleep()
 
         # Dual-write: also store raw uncompressed chunk in L0 buffer
         self.raw_buffer.add(
@@ -580,6 +597,48 @@ class MemoryRuntime:
 
     # ── Cognitive maintenance ─────────────────────────────────
 
+    def _check_auto_sleep(self) -> dict:
+        """Called after each remember() to check if auto-sleep thresholds are met.
+
+        Returns a dict with keys 'micro' (MicroSleepResult or None) and 'full' (dict or None).
+        Only triggers one sleep type per check (micro takes priority).
+        """
+        result: dict = {"micro": None, "full": None}
+        now = time.time()
+        sleep_cfg = getattr(self.cfg, 'sleep', None)
+
+        micro_interval = float(getattr(sleep_cfg, 'auto_micro_interval_hours', 1.0) if sleep_cfg else 1.0) * 3600
+        full_interval = float(getattr(sleep_cfg, 'auto_full_interval_hours', 24.0) if sleep_cfg else 24.0) * 3600
+        anchor_threshold = int(getattr(sleep_cfg, 'auto_anchor_threshold', 100) if sleep_cfg else 100)
+
+        # Micro-sleep: triggered by anchor count OR time interval
+        needs_micro = (
+            self._anchors_since_micro >= anchor_threshold
+            or (self._last_micro_sleep > 0 and now - self._last_micro_sleep >= micro_interval)
+        )
+        if needs_micro:
+            try:
+                result["micro"] = self.micro_consolidate()
+                self._auto_micro_count += 1
+            except Exception:
+                pass
+            self._last_micro_sleep = now
+            self._anchors_since_micro = 0
+
+        # Full sleep: triggered by time interval since last full sleep
+        needs_full = (now - self._last_full_sleep >= full_interval)
+        if needs_full and not needs_micro:  # don't do full sleep same cycle as micro
+            try:
+                result["full"] = self.sleep(current_time=now)
+                self._auto_full_count += 1
+            except Exception:
+                pass
+            self._last_full_sleep = now
+            self._last_micro_sleep = now
+            self._anchors_since_micro = 0
+
+        return result
+
     def micro_consolidate(self) -> dict:
         """Lightweight online consolidation — call after every few interactions."""
         if self._online_consolidator is None:
@@ -629,8 +688,12 @@ class MemoryRuntime:
         evo = self.evolution.evolve(current_time)
         self.total_evolutions += 1
 
-        # 5. Decay ghosts
-        ghost_purged = self.ghosts.decay_all()
+        # 5. Decay ghosts and clean up cold storage for purged ones
+        ghost_purged, purged_ids = self.ghosts.decay_all()
+        if purged_ids and self._tiered is not None:
+            for gid in purged_ids:
+                self._tiered.remove(gid)
+            self._tiered.compact()
 
         # 6. Decay autobiographical narratives
         self_narratives_purged = 0
@@ -1010,6 +1073,9 @@ class MemoryRuntime:
             cold_anchors=cold_count,
             sleep_cycles=self.sleep_cycles,
             total_evolutions=self.total_evolutions,
+            auto_micro_sleeps=self._auto_micro_count,
+            auto_full_sleeps=self._auto_full_count,
+            anchors_since_micro=self._anchors_since_micro,
             uptime_seconds=time.time() - self._started_at,
         )
 

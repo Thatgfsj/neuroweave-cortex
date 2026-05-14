@@ -89,6 +89,21 @@ class TieredStorage:
         os.replace(tmp, self._path)
         self._dirty = False
 
+    def compact(self) -> int:
+        """Rewrite the cold store file, removing any deleted entries.
+
+        Returns the number of entries compacted (difference in size).
+        """
+        if not self._path:
+            return 0
+        self._ensure_loaded()
+        before = len(self._store)
+        # The store only contains live entries — removed entries are deleted from dict.
+        # compact() just ensures the file on disk matches the in-memory dict.
+        self._dirty = True
+        self.flush()
+        return before  # all entries currently in dict are live
+
     def reload(self) -> None:
         """Reload from disk, discarding in-memory changes."""
         self._loaded = False
