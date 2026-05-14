@@ -1,7 +1,7 @@
 # Star Graph Memory — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.4.0"
+version: "1.5.0"
 
 # ── Memory Tiering (STM/MTM/LTM/Core) ──
 tier:
@@ -450,3 +450,22 @@ thermal_store:
 edge_decay:
   base_multiplier: 1.0               # global decay speed multiplier
   min_edge_weight: 0.02              # edges below this are evicted
+
+# ── Self-Organization (#55) ──
+self_org:
+  merge_threshold: 0.88
+  cluster_similarity: 0.55
+  min_cluster_size: 3
+  max_topics: 30
+
+# ── Personality Model (#56) ──
+personality:
+  update_on_remember: true           # incremental ingest per anchor
+  extract_on_sleep: true             # full extraction during sleep
+
+# ── Goal Tree (#57) ──
+goal_tree:
+  detect_on_sleep: true              # scan for new goals during sleep
+  propagate_on_sleep: true           # propagate sub-goal progress upward
+  archive_stale_hours: 168.0         # archive goals idle for 7 days
+  archive_achieved_hours: 720.0      # archive achieved goals after 30 days

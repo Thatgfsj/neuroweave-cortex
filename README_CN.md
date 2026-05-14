@@ -1,10 +1,10 @@
-# 星图记忆 · Star Graph Memory
+# NeuroWeave Cortex (NWC) · 神经编织皮层
 
 海马体启发的 AI 认知记忆运行时系统。不是向量数据库，不是图数据库，而是一个**记忆运行时**——它像生物记忆一样：记忆、遗忘、强化、连接、抽象和演化。
 
 ## 与向量数据库/图数据库的区别
 
-| 能力 | 向量数据库 | 图数据库 | Star Graph |
+| 能力 | 向量数据库 | 图数据库 | NeuroWeave Cortex |
 |---|---|---|---|
 | 语义检索 | ✓ | ✗ | ✓ |
 | 图遍历 | ✗ | ✓ | ✓ |
@@ -194,8 +194,8 @@ cfg = load_config("my_params.yaml")
 ## 安装
 
 ```bash
-git clone https://github.com/Thatgfsj/star-graph-memory.git
-cd star-graph-memory
+git clone https://github.com/Thatgfsj/neuroweave-cortex.git
+cd neuroweave-cortex
 
 # 可编辑模式安装
 pip install -e .
@@ -207,7 +207,7 @@ pip install aiosqlite
 python examples/emergence_demo.py
 ```
 
-**注意：** `star-graph-memory` 未发布到 PyPI，请从源码安装。
+**注意：** NeuroWeave Cortex 未发布到 PyPI，请从源码安装。
 
 ## CLI
 

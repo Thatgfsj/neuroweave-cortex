@@ -1,6 +1,6 @@
-# Star Graph Memory — Roadmap
+# NeuroWeave Cortex (NWC) — Roadmap
 
-## Current (v1.0.6 — 2026-05)
+## Current (v1.5.0 — 2026-05)
 
 - [x] 6-state memory lifecycle (ACTIVE → GHOST → REACTIVATED)
 - [x] Ghost subsystem with intensity ranking + NegativeGhost contradiction tracking

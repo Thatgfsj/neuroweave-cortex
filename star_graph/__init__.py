@@ -1,16 +1,18 @@
-"""Star Graph Memory System — v0.6 cognitive architecture.
+"""NeuroWeave Cortex (NWC) — v1.5.0 cognitive architecture.
 
-A sparse-activated, cortex-partitioned cognitive memory runtime for AI agents.
+A graph-first, cortex-partitioned cognitive memory runtime for AI agents.
 
 Architecture:
   Layer 3 (Behavior):  Cortex routing, memory gating, working memory,
-                        dimensional reduction retrieval, adaptive replay
+                        spreading activation, retrieval budget control
   Layer 2 (Cognitive): Hub abstraction, cascade recall, time spine,
-                        sleep consolidation, evolution, ghost revival
-  Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
+                        sleep consolidation, evolution, ghost revival,
+                        personality modeling, goal tracking
+  Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup,
+                        thermal store (hot/cold/archive), edge decay
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 from .anchor import Anchor, AnchorVector, Oscillator, MemoryState, ThermalState
 from .graph import StarGraph, Edge, RichEdge, Constellation, Schema, ReflectionNode
@@ -136,6 +138,9 @@ from .four_layer import (
 )
 from .thermal_store import ThermalStore
 from .edge_decay import EdgeDecayManager
+from .self_org import SelfOrganization, EmergentTopic
+from .personality import PersonalityModel, PersonalityProfile
+from .goal_tree import GoalTree, GoalNode, GoalStatus
 try:
     from .mcp_server import server as mcp_server
 except ImportError:

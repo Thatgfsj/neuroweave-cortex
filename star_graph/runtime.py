@@ -52,6 +52,9 @@ from .edge_budget import EdgeBudgetManager
 from .four_layer import FourLayerCompressor
 from .thermal_store import ThermalStore
 from .edge_decay import EdgeDecayManager
+from .self_org import SelfOrganization
+from .personality import PersonalityModel
+from .goal_tree import GoalTree
 from .multimodal import (
     MultimodalEmbeddingProvider, MultimodalAnchor, CrossModalRetriever, CrossModalResult,
 )
@@ -166,6 +169,15 @@ class MemoryRuntime:
 
         # Edge decay manager — continuous time-based edge decay (#54)
         self._edge_decay_mgr: EdgeDecayManager | None = None
+
+        # Self-organization — auto-cluster, merge, topic detection (#55)
+        self._self_org: SelfOrganization | None = None
+
+        # Personality model — deep trait extraction (#56)
+        self._personality: PersonalityModel | None = None
+
+        # Goal tree — hierarchical goal decomposition (#57)
+        self._goal_tree: GoalTree | None = None
 
         # Snapshot manager — versioned state snapshots with WAL
         self._snapshot_mgr: SnapshotManager | None = None
@@ -473,6 +485,33 @@ class MemoryRuntime:
         return self._edge_decay_mgr
 
     @property
+    def self_org(self) -> SelfOrganization:
+        """Lazy-init self-organization engine for auto-clustering and merging."""
+        if self._self_org is None:
+            so_cfg = getattr(self.cfg, 'self_org', None)
+            merge_th = getattr(so_cfg, 'merge_threshold', 0.88) if so_cfg else 0.88
+            cluster_sim = getattr(so_cfg, 'cluster_similarity', 0.55) if so_cfg else 0.55
+            self._self_org = SelfOrganization(
+                merge_threshold=merge_th,
+                cluster_similarity=cluster_sim,
+            )
+        return self._self_org
+
+    @property
+    def personality(self) -> PersonalityModel:
+        """Lazy-init personality model for deep trait extraction."""
+        if self._personality is None:
+            self._personality = PersonalityModel()
+        return self._personality
+
+    @property
+    def goal_tree(self) -> GoalTree:
+        """Lazy-init goal tree for hierarchical goal tracking."""
+        if self._goal_tree is None:
+            self._goal_tree = GoalTree()
+        return self._goal_tree
+
+    @property
     def hublayer(self) -> HubLayer:
         if self._hublayer is None:
             hub_cfg = getattr(self.cfg, 'hub', None)
@@ -615,6 +654,9 @@ class MemoryRuntime:
                 importance=importance,
                 tags=tags or [],
             )
+
+        # Incremental personality model update (#56)
+        self.personality.ingest_anchor(anchor)
 
         # Auto-sleep check: trigger micro/full consolidation on thresholds
         self._check_auto_sleep()
@@ -962,6 +1004,31 @@ class MemoryRuntime:
         except Exception:
             pass
 
+        # 6i. Self-organization — auto-cluster, merge duplicates, detect topics (#55)
+        so_result = {"topics_detected": 0, "merges": 0, "communities_assigned": 0}
+        try:
+            so_result = self.self_org.organize(self.graph, current_time=current_time)
+        except Exception:
+            pass
+
+        # 6j. Personality model — full extraction from graph (#56)
+        personality_version = 0
+        try:
+            profile = self.personality.extract_from_graph(self.graph)
+            personality_version = profile.version
+        except Exception:
+            pass
+
+        # 6k. Goal tree — detect new goals, propagate progress, archive stale (#57)
+        gt_result = {"new_goals": 0, "propagated": 0, "archived": 0}
+        try:
+            new_goals = self.goal_tree.detect_from_graph(self.graph)
+            gt_result["new_goals"] = len(new_goals)
+            gt_result["propagated"] = self.goal_tree.propagate_progress()
+            gt_result["archived"] = self.goal_tree.archive_stale(hours=168.0)
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -996,6 +1063,9 @@ class MemoryRuntime:
             "four_layer": fl_result,
             "thermal_store": ts_result,
             "edge_decay": ed_result,
+            "self_org": so_result,
+            "personality_version": personality_version,
+            "goal_tree": gt_result,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:

@@ -1,4 +1,4 @@
-# Star Graph Memory — Cognitive Memory Runtime
+# NeuroWeave Cortex (NWC) — Cognitive Memory Runtime
 
 An infrastructure-grade memory system for AI agents. Not a vector database. Not a graph database. A **memory runtime** — it remembers, forgets, strengthens, connects, abstracts, and evolves, the way biological memory does.
 
@@ -9,9 +9,9 @@ Memory Stability: 0.72   Recall Plasticity: 0.58   Compression: 1.6x
 
 ## What makes it different
 
-Vector databases retrieve. Graph databases traverse. Star Graph runs a **cognitive lifecycle**:
+Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **cognitive lifecycle**:
 
-| Capability | Vector DB | Graph DB | Star Graph |
+| Capability | Vector DB | Graph DB | NeuroWeave Cortex |
 |---|---|---|---|
 | Semantic retrieval | yes | no | yes |
 | Graph traversal | no | yes | yes |
@@ -233,8 +233,8 @@ See `star_graph/defaults.yaml` for all 300+ tunable parameters.
 ## Installation
 
 ```bash
-git clone https://github.com/Thatgfsj/star-graph-memory.git
-cd star-graph-memory
+git clone https://github.com/Thatgfsj/neuroweave-cortex.git
+cd neuroweave-cortex
 
 # Install in editable mode
 pip install -e .
@@ -246,7 +246,7 @@ pip install aiosqlite
 python examples/emergence_demo.py
 ```
 
-**Note:** `star-graph-memory` is not published on PyPI. Install from source as shown above.
+**Note:** NeuroWeave Cortex is not published on PyPI. Install from source as shown above.
 
 ## Interactive Demo
 

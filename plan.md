@@ -1,6 +1,6 @@
-# Star Graph Memory — Repository Overview & Improvement Plan
+# NeuroWeave Cortex (NWC) — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.4.0** | 496 tests passing | 59 commits
+> Last updated: 2026-05-15 | **v1.5.0** | 582 tests passing | 60 commits
 
 ---
 
@@ -8,13 +8,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.4.0 |
-| **Production modules** | 70 Python files in `star_graph/` |
-| **Production code** | ~30,000 lines |
-| **Test files** | 25 files in `tests/` |
-| **Test code** | ~6,800 lines |
-| **Total tests** | **496** (all passing) |
-| **Total commits** | 59 |
+| **Version** | 1.5.0 |
+| **Production modules** | 73 Python files in `star_graph/` |
+| **Production code** | ~32,000 lines |
+| **Test files** | 28 files in `tests/` |
+| **Test code** | ~7,800 lines |
+| **Total tests** | **582** (all passing) |
+| **Total commits** | 60 |
 | **License** | MIT |
 
 ### Module Inventory (64 modules)
@@ -68,6 +68,9 @@ star_graph/
 ├── four_layer.py             # FourLayerCompressor: message→event→semantic→personality compression
 ├── thermal_store.py          # ThermalStore: 3-tier hot/cold/archive auto promotion + demotion
 ├── edge_decay.py             # EdgeDecayManager: continuous time-based edge decay with adaptive rates
+├── self_org.py               # SelfOrganization: auto-cluster, merge near-duplicates, emergent topic detection
+├── personality.py             # PersonalityModel: Big Five traits, working style, expertise, values extraction
+├── goal_tree.py               # GoalTree: hierarchical goal decomposition, progress propagation, stale archival
 │
 ├── ── Sleep & Consolidation ──
 ├── sleep.py                 # SleepCycle: 8-phase + sleep rebuild (fuse/rewire/abstract)
@@ -105,7 +108,7 @@ star_graph/
 ├── cli.py                   # CLI commands
 ├── mcp_server.py            # MCP server (optional)
 │
-└── tests/ (16 files, 336 tests)
+└── tests/ (28 files, 582 tests)
     ├── test_v08_modules.py          # Core module smoke tests
     ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice + thermal + edge traversal
     ├── test_memory_tier.py          # STM/MTM/LTM/Core tier API + promotion pipeline (16 tests)
@@ -120,6 +123,9 @@ star_graph/
     ├── test_four_layer.py           # Four-layer memory compression (25 tests)
     ├── test_thermal_store.py        # Thermal store 3-tier auto storage (11 tests)
     ├── test_edge_decay.py           # Edge continuous time decay (17 tests)
+    ├── test_self_org.py             # Self-organization, clustering, topic detection (22 tests)
+    ├── test_personality.py          # Personality model, Big Five traits, expertise (28 tests)
+    ├── test_goal_tree.py            # Goal tree, progress tracking, archival (36 tests)
     ├── test_config_schema.py        # Config validation (15 tests)
     ├── test_abstractive_memory.py   # Cross-session pattern extraction (6 tests)
     ├── test_cortex_hierarchy.py     # Hierarchy routing + propagation (9 tests)
@@ -155,6 +161,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | **v1.2.0** | **2026-05-15** | **Memory tiering, decay+reinforcement loop, FROZEN thermal tier, edge traversal weights, spreading activation, cognitive cache, cognitive compiler (worldview emergence), self-reflection loop, graph-first retrieval — 373 tests** |
 | **v1.3.0** | **2026-05-15** | **Domain router (hierarchical topic tree), edge budget (smart eviction, max 32), write gate (5-stage quality filter), four-layer compression (M→E→S→P) — 467 tests** |
 | **v1.4.0** | **2026-05-15** | **Spreading activation primary retrieval, 3-tier thermal store (hot/cold/archive), continuous edge time decay — 496 tests** |
+| **v1.5.0** | **2026-05-15** | **Renamed to NeuroWeave Cortex (NWC). Self-organization (auto-cluster/merge/topics), personality model (Big Five traits/expertise/values), goal tree (hierarchical progress tracking) — 582 tests** |
 
 ---
 
@@ -983,3 +990,164 @@ Implementation:
 - `decay_all_edges(graph)`: bulk decay during sleep, evicts edges below `min_edge_weight`
 - Decay rate adapts to success rate: high-success edges decay at half speed
 - Wired into `runtime.sleep()` as step 6h (decay all edges)
+
+---
+
+### Phase 15 — B-Level Modules (v1.5.0) ✅ COMPLETE
+
+- [x] #55 Self-Organization: auto-cluster, merge near-duplicates, emergent topic detection
+- [x] #56 Personality Model: Big Five traits, working style, expertise, values extraction
+- [x] #57 Goal Tree: hierarchical goal decomposition, progress propagation, stale archival
+
+#### #55 Self-Organization
+
+Implementation:
+- `SelfOrganization` class: `organize(graph)` orchestrates 3 mechanisms
+- Community detection: BFS label propagation, auto-assigns `community_id` to connected anchors
+- Emergent topic detection: greedy embedding clustering + TF-IDF keyword labeling → `EmergentTopic`
+- Near-duplicate merge: cosine similarity + tag overlap check, rewires edges on merge
+- `get_topics()`, `get_topic_anchors()` query API
+- Wired into `runtime.sleep()` as step 6i
+
+#### #56 Personality Model
+
+Implementation:
+- `PersonalityProfile` dataclass: Big Five (OCEAN) traits, working style, communication preferences, expertise areas, values
+- `PersonalityModel` class: `ingest_anchor()` (incremental) + `extract_from_graph()` (full scan)
+- Trait extraction via keyword signals in English + Chinese
+- Learning style detection: reading/doing/asking
+- Value extraction: efficiency, simplicity, reliability, learning, autonomy
+- Expertise inference from anchor tags and domain keywords
+- Formality computation from formal/informal marker ratio
+- Wired into `runtime.remember()` (incremental ingest) and `runtime.sleep()` (full extraction)
+
+#### #57 Goal Tree
+
+Implementation:
+- `GoalNode` dataclass: hierarchical parent/child, progress 0-1, priority, confidence, staleness tracking
+- `GoalStatus`: ACTIVE → ACHIEVED/ABANDONED/BLOCKED → ARCHIVED
+- `GoalTree` class: regex-based goal detection from memory text (EN + ZH patterns)
+- Auto-tagging: bugfix, development, learning, deployment, testing, refactoring, setup
+- Priority inference from urgency signals (urgent/critical/maybe/someday)
+- `mark_progress()` → auto-mark achieved at 1.0, propagates to parent
+- `propagate_progress()`: bottom-up sub-goal → parent progress averaging
+- `archive_stale()` (168h) + `archive_achieved()` (720h) for cleanup
+- Query API: active/blocked/recently_achieved/root/stale goal retrieval
+- Wired into `runtime.sleep()` as step 6k (detect + propagate + archive)
+
+---
+
+## v1.6.0 — Next Priorities (User-Specified)
+
+> Based on user's priority list (2026-05-15). Graph-first architecture with retrieval budget control,
+> cognitive trajectory tracking, richer edge types, and episodic memory.
+
+### S-Level (immediate)
+
+| # | Item | Status | Description |
+|---|------|--------|-------------|
+| S-1 | Graph Sparsification | ✅ Done (#49) | Edge budget: max 32 edges/node, smart eviction. Tighten to 16 |
+| S-2 | Domain Routing | ✅ Done (#48) | query → domain → cluster → node, no global retrieval |
+| S-3 | Memory Write Gate | ✅ Done (#50) | Importance/duplicate/temporal/personality/goal scoring before storage |
+| S-4 | Layered Memory Abstraction | ✅ Done (#51) | message → event → semantic → personality → long-term cognition |
+| **S-5** | **Retrieval Budget** | **NEW** | MAX_HOPS=3, MAX_NODES=24, MAX_TOKENS=6000 to prevent spreading activation runaway |
+
+#### S-5 Retrieval Budget
+
+Prevent spreading activation from exploding:
+
+```
+MAX_HOPS = 3       # max BFS depth from seed
+MAX_NODES = 24     # max activated nodes per query
+MAX_TOKENS = 6000  # max token budget for retrieved content
+```
+
+Implementation plan:
+- `RetrievalBudget` class enforcing all three limits
+- Integrate into `spreading.activate()` to halt BFS at hop limit
+- Integrate into `recall()` to truncate results at node + token limits
+- Token counting: use tiktoken or character-based estimation
+- Config section: `retrieval_budget` with max_hops, max_nodes, max_tokens
+
+### A-Level (next)
+
+| # | Item | Status | Description |
+|---|------|--------|-------------|
+| A-6 | Spreading Activation | ✅ Done (#52) | Node activation → neighbor diffusion → weight decay → path recall |
+| A-7 | Time Decay System | ✅ Done (#54) | weight = semantic × recency × frequency × importance |
+| A-8 | Hot/Cold/Archive | ✅ Done (#53) | Three-tier auto-promotion/demotion storage |
+| **A-9** | **Versioned Memory** | **NEW** | Cognitive trajectory: user_likes_python → user_prefers_ai_dev → user_studies_cognitive_arch |
+| **A-10** | **Cluster Memory** | **Partially done** | Auto-clustering: Python/AI/creative clusters. Community detection + self_org exist, needs retrieval integration |
+
+#### A-9 Versioned Memory (Cognitive Trajectory)
+
+Don't create duplicate isolated cognitive nodes. Track evolution:
+
+```
+用户喜欢Python → 用户偏向AI开发 → 用户研究认知架构
+```
+
+Implementation plan:
+- `CognitiveTrajectory` class: linked list of belief states with timestamps
+- Auto-detect when a new memory supersedes/refines an existing belief
+- `evolve_belief(old_id, new_text)`: creates new version, links to old, marks old as "superseded"
+- `get_trajectory(topic)`: returns the full evolution chain
+- `get_current_belief(topic)`: returns the latest version only
+- Sleep integration: detect belief drift during consolidation
+
+#### A-10 Cluster Memory
+
+Auto-form memory clusters to reduce full-graph search:
+
+Implementation plan (partial — community.py + self_org.py exist):
+- Integrate community centroids into retrieval pre-filtering
+- `ClusterRouter`: maps query → nearest cluster centroid → search within cluster
+- Cluster health monitoring: fragmentation detection, auto-rebalance
+- Wired into `retrieval_pipeline.py` as a pre-filter before ANN search
+
+### B-Level (later)
+
+| # | Item | Status | Description |
+|---|------|--------|-------------|
+| B-11 | Self-Organizing Memory | ✅ Done (#55) | Auto-form preferences, goals, habits, thinking patterns, behavioral trends |
+| **B-12** | **Causal Edge Types** | **Partially done** | leads_to, depends_on, motivates, goal, result — richer than "related" |
+| **B-13** | **Episodic Memory** | **NEW** | Time + environment + context + state → memory event streams |
+| B-14 | Memory Compressor | ✅ Done (#51) | 100 messages → 5 cognition → 1 long-term personality |
+| B-15 | Graph Snapshot | ✅ Done | Time-sliced cognitive state (snapshot.py) |
+
+#### B-12 Richer Causal Edge Types
+
+Current edge types are good but need causal depth:
+
+```
+Not just "related" → CAUSES, DEPENDS_ON, MOTIVATES, GOAL_OF, RESULT_OF, PRECEDES, CONTRADICTS
+```
+
+Implementation plan:
+- Extend `EXPLICABLE_RELATIONS` with causal subtypes
+- `CausalChain.infer_type()`: heuristic type inference from text patterns
+- Causal graph traversal: only follow causal edges for reasoning queries
+- Visualization: causal chain export for debugging
+
+#### B-13 Episodic Memory
+
+Add temporal + contextual richness to memory:
+
+```
+Memory event stream: {time, environment, context, state, action, outcome}
+```
+
+Implementation plan:
+- `EpisodeNode` dataclass: timestamp, session_id, context_snapshot, emotional_arc, participants
+- `EpisodeStream`: time-ordered linked list of episodes within a session
+- `contextual_recall(query, time_range, context_filter)`: time-scoped + context-filtered retrieval
+- Auto-summarization: N episodes → 1 session summary
+- `timespine.py` already has time-indexing; extend with context dimensions
+
+### Architecture Direction
+
+**Graph-first, Vector-assisted** (not vector-first):
+
+- Vector: semantic supplement, fuzzy recall, initial filtering only
+- Graph: the real core — structure, relationships, trajectories, causality
+- Avoid: full-graph diffusion (use budget), permanent memory (must forget), message-level long-term storage (must abstract), super-nodes (limit connections)
