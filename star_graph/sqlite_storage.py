@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS schemas (
     tags_json TEXT NOT NULL DEFAULT '[]'
 );
 
+CREATE TABLE IF NOT EXISTS ghosts (
+    id TEXT PRIMARY KEY,
+    residue_blob BLOB,
+    original_tags_json TEXT NOT NULL DEFAULT '[]',
+    pruned_at REAL NOT NULL,
+    revival_count INTEGER NOT NULL DEFAULT 0,
+    original_importance REAL NOT NULL DEFAULT 0.5
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

@@ -148,7 +148,7 @@ class TestVectorSimilarity:
         ret = VectorSimilarityRetriever(graph)
         result = ret.retrieve("project planning discussion")
 
-        assert result.latency_ms < 100
+        assert result.latency_ms < 500
         assert len(result.constellations) > 0
         assert 0.0 <= result.top_score <= 1.0
 

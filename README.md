@@ -92,14 +92,14 @@ Layer 2: Cognitive   │  Hub abstraction, cascade recall, TimeSpine temporal in
      hub.py)         │
                      │
 Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
-    (graph.py,       │  BM25 keyword index, exact-match cache
+    (graph.py,       │  BM25 keyword index, multi-level caching
      anchor.py,      │  "Where is this memory stored?"
      storage.py,     │
      sqlite_storage.py,│
      index.py,       │
      bm25.py,        │
-     exact_cache.py, │
-     tiered.py)      │
+     cognitive_cache.py,│
+     tier.py)        │
 ```
 
 ### Core modules
@@ -125,8 +125,8 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 | `cascade.py` | Causal chain traversal across connected memory sequences |
 | `hub.py` | Hierarchical hub-and-spoke abstraction (leaf→domain→global) |
 | `cortex.py` | Partitioned memory cortices with independent sleep and retrieval |
-| `exact_cache.py` | Deterministic O(1) lookup for entity-keyed queries |
-| `tiered.py` | HOT/WARM/COLD storage tiers with transparent disk offload |
+| `cognitive_cache.py` | Multi-level cache (query/session/topic/activation) + exact-match entity lookup |
+| `tier.py` | STM/MTM/LTM/Core cognitive tiering + HOT/WARM/COLD storage tiers |
 | `autobiography.py` | Self-narrative formation and autobiographical memory |
 | `atom_facts.py` | LLM-powered atomic fact extraction from memory clusters |
 | `survival.py` | Pluggable survival functions (Ebbinghaus, Power-law, Exponential, Custom) |
