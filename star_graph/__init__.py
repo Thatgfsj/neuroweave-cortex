@@ -297,8 +297,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "CostEstimate":            ("star_graph.cost_estimator", "CostEstimate"),
 
     # snapshot
-    "SnapshotManager":         ("star_graph.snapshot", "SnapshotManager"),
-    "SnapshotMeta":            ("star_graph.snapshot", "SnapshotMeta"),
+    "SnapshotManager":         ("star_graph.contrib.snapshot", "SnapshotManager"),
+    "SnapshotMeta":            ("star_graph.contrib.snapshot", "SnapshotMeta"),
 
     # async
     "AsyncMemoryManager":      ("star_graph.async_manager", "AsyncMemoryManager"),
@@ -325,22 +325,22 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "Resonator":               ("star_graph.resonance", "Resonator"),
 
     # symbolic filter
-    "SymbolicFilter":          ("star_graph.symbolic_filter", "SymbolicFilter"),
-    "FilterResult":            ("star_graph.symbolic_filter", "FilterResult"),
+    "SymbolicFilter":          ("star_graph.contrib.symbolic_filter", "SymbolicFilter"),
+    "FilterResult":            ("star_graph.contrib.symbolic_filter", "FilterResult"),
 
     # streaming
-    "StreamItem":              ("star_graph.streaming", "StreamItem"),
-    "StreamStats":             ("star_graph.streaming", "StreamStats"),
-    "StreamingMemoryBuffer":   ("star_graph.streaming", "StreamingMemoryBuffer"),
+    "StreamItem":              ("star_graph.contrib.streaming", "StreamItem"),
+    "StreamStats":             ("star_graph.contrib.streaming", "StreamStats"),
+    "StreamingMemoryBuffer":   ("star_graph.contrib.streaming", "StreamingMemoryBuffer"),
 
     # benchmark
-    "BenchmarkSuite":          ("star_graph.benchmark", "BenchmarkSuite"),
-    "BenchmarkScenario":       ("star_graph.benchmark", "BenchmarkScenario"),
-    "BenchmarkResult":         ("star_graph.benchmark", "BenchmarkResult"),
-    "ScenarioResult":          ("star_graph.benchmark", "ScenarioResult"),
-    "Category":                ("star_graph.benchmark", "Category"),
-    "run_benchmark":           ("star_graph.benchmark", "run_benchmark"),
-    "compare_systems":         ("star_graph.benchmark", "compare_systems"),
+    "BenchmarkSuite":          ("star_graph.contrib.benchmark", "BenchmarkSuite"),
+    "BenchmarkScenario":       ("star_graph.contrib.benchmark", "BenchmarkScenario"),
+    "BenchmarkResult":         ("star_graph.contrib.benchmark", "BenchmarkResult"),
+    "ScenarioResult":          ("star_graph.contrib.benchmark", "ScenarioResult"),
+    "Category":                ("star_graph.contrib.benchmark", "Category"),
+    "run_benchmark":           ("star_graph.contrib.benchmark", "run_benchmark"),
+    "compare_systems":         ("star_graph.contrib.benchmark", "compare_systems"),
 
     # layers
     "enforce_layer_boundaries": ("star_graph.layers", "enforce_layer_boundaries"),
@@ -355,7 +355,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "CrossModalResult":        ("star_graph.multimodal", "CrossModalResult"),
 
     # MCP server (optional)
-    "mcp_server":              ("star_graph.mcp_server", "server"),
+    "mcp_server":              ("star_graph.contrib.mcp_server", "server"),
 }
 
 
