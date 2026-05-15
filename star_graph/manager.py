@@ -92,6 +92,37 @@ class MemoryManager:
             f"(not found on MemoryRuntime or RetrievalPipeline)"
         )
 
-    # ── Methods requiring inter-component coordination ──────
-    # (most methods are auto-delegated; only add explicit ones
-    #  when the method needs to coordinate between runtime and pipeline)
+    # ── Sync/Async unification ──────────────────────────────
+
+    def to_async(self):
+        """Return an AsyncMemoryManager wrapping this manager.
+
+        Provides the same API but with async/await support for all operations.
+        """
+        from .async_manager import AsyncMemoryManager
+        return AsyncMemoryManager(self)
+
+    async def async_remember(self, text: str, **kwargs):
+        """Async wrapper for remember()."""
+        import asyncio
+        return await asyncio.to_thread(self.remember, text, **kwargs)
+
+    async def async_recall(self, query: str = "", **kwargs):
+        """Async wrapper for recall()."""
+        import asyncio
+        return await asyncio.to_thread(self.recall, query, **kwargs)
+
+    async def async_sleep(self, **kwargs):
+        """Async wrapper for sleep()."""
+        import asyncio
+        return await asyncio.to_thread(self.sleep, **kwargs)
+
+    async def async_micro_consolidate(self, **kwargs):
+        """Async wrapper for micro_consolidate()."""
+        import asyncio
+        return await asyncio.to_thread(self.micro_consolidate, **kwargs)
+
+    async def async_stats(self, **kwargs):
+        """Async wrapper for stats()."""
+        import asyncio
+        return await asyncio.to_thread(lambda: self.stats, **kwargs)

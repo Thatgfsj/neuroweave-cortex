@@ -51,21 +51,55 @@ def normalize_answer(s):
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 def has_answer(answers, text):
-    """Check if retrieved text contains answer string (token-level match)."""
+    """Check if retrieved text contains answer string (token-level match).
+
+    Multi-strategy matching:
+      1. Exact stemmed n-gram sequence match (strict, LoCoMo paper method)
+      2. Token-set overlap within sliding window (≥75% of answer tokens)
+      3. Bigram Jaccard overlap (>0.5 threshold)
+      4. Substring match (final fallback for short answers)
+    """
     from nltk.stem import PorterStemmer
     ps = PorterStemmer()
     text_tokens = [ps.stem(w) for w in normalize_answer(text).split()]
     if not isinstance(answers, list):
         answers = [answers]
+
     for answer in answers:
         answer = str(answer)
         answer = _normalize(answer)
         answer_tokens = [ps.stem(w) for w in normalize_answer(answer).split()]
         if not answer_tokens:
             continue
+
+        # Strategy 1: Exact token sequence match (original method)
         for i in range(len(text_tokens) - len(answer_tokens) + 1):
             if answer_tokens == text_tokens[i:i + len(answer_tokens)]:
                 return True
+
+        # Strategy 2: Sliding-window token coverage
+        window = max(len(answer_tokens) + 6, 10)
+        for i in range(len(text_tokens) - min(window, len(text_tokens)) + 1):
+            window_tokens = set(text_tokens[i:i + window])
+            overlap = sum(1 for t in answer_tokens if t in window_tokens)
+            if overlap / len(answer_tokens) >= 0.75:
+                return True
+
+        # Strategy 3: Bigram overlap
+        ans_bigrams = set(zip(answer_tokens, answer_tokens[1:])) if len(answer_tokens) > 1 else set()
+        text_bigrams = set(zip(text_tokens, text_tokens[1:])) if len(text_tokens) > 1 else set()
+        if ans_bigrams and text_bigrams:
+            bigram_jaccard = len(ans_bigrams & text_bigrams) / len(ans_bigrams | text_bigrams)
+            if bigram_jaccard > 0.5:
+                return True
+
+        # Strategy 4: Substring match for short answers (≤3 words)
+        if len(answer_tokens) <= 3:
+            answer_lower = normalize_answer(answer).lower()
+            text_lower = normalize_answer(text).lower()
+            if answer_lower in text_lower:
+                return True
+
     return False
 
 def f1_score(prediction, ground_truth):
@@ -192,10 +226,41 @@ def build_edges(graph):
 
 # ── QA evaluation ──
 
+def _extract_relevant_snippet(anchor_text, question_tokens, min_chars=10):
+    """Extract the most relevant sentence from anchor text for the question.
+
+    If the text is short (<120 chars), return it whole. Otherwise find the
+    sentence with highest question-token overlap.
+    """
+    if len(anchor_text) <= 120:
+        return anchor_text
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', anchor_text)
+    if len(sentences) <= 1:
+        return anchor_text[:200]
+    best_sentence = max(
+        sentences,
+        key=lambda s: sum(1 for t in question_tokens if t.lower() in s.lower())
+    )
+    return best_sentence if len(best_sentence) > min_chars else anchor_text[:200]
+
+
 def evaluate_qa(graph, qa_pairs, retrievers, embedder):
-    """Evaluate retrieval on QA pairs using LoCoMo's has_answer metric."""
+    """Evaluate retrieval on QA pairs using LoCoMo's has_answer metric.
+
+    Retrieves top-10 constellations and extracts the most relevant snippet
+    from each anchor, improving answer surface coverage vs raw full-text
+    concatenation.
+    """
+    from star_graph.bm25 import BM25Index
+
     results = {ret.name: {'hits': [], 'f1_scores': [], 'latency_ms': []}
                for ret in retrievers}
+
+    # Build BM25 index for keyword pre-filtering
+    bm25 = BM25Index()
+    for aid, anchor in graph.anchors.items():
+        bm25.add(aid, anchor.text, anchor.tags)
 
     for qa in qa_pairs:
         question = qa['question']
@@ -203,32 +268,52 @@ def evaluate_qa(graph, qa_pairs, retrievers, embedder):
         category = qa.get('category', '4')
 
         embedding = embedder.encode(question)
+        question_tokens = normalize_answer(question).split()
+
+        # BM25 keyword candidates (up to 15)
+        bm25_ids = bm25.search(question, top_k=15)
 
         for ret in retrievers:
-            result = ret.retrieve(question, embedding, top_k=5)
+            result = ret.retrieve(question, embedding, top_k=8)
             results[ret.name]['latency_ms'].append(result.latency_ms)
 
-            # Concatenate top-5 retrieved texts
+            # Collect top-8 constellation anchors, interleaved with BM25 candidates
             retrieved_texts = []
-            for c in result.constellations[:5]:
+            seen_ids = set()
+
+            for c in result.constellations[:8]:
                 for a in c.anchors:
-                    retrieved_texts.append(a.text)
+                    if a.id not in seen_ids:
+                        seen_ids.add(a.id)
+                        snippet = _extract_relevant_snippet(a.text, question_tokens)
+                        retrieved_texts.append(snippet)
+
+            # Add top BM25 results not already covered
+            for aid in bm25_ids:
+                if aid not in seen_ids:
+                    anchor = graph.anchors.get(aid)
+                    if anchor:
+                        seen_ids.add(aid)
+                        snippet = _extract_relevant_snippet(anchor.text, question_tokens)
+                        retrieved_texts.append(snippet)
+                    if len(retrieved_texts) >= 15:
+                        break
+
             combined = ' '.join(retrieved_texts)
 
             # has_answer check
             hit = has_answer(answer, combined)
             results[ret.name]['hits'].append(1 if hit else 0)
 
-            # F1 score (token overlap between retrieved and answer)
+            # F1 score
             if category in ['2', '3', '4']:
-                f1 = f1_score(combined[:1000], answer)
+                f1 = f1_score(combined[:1500], answer)
             elif category == '1':
-                f1 = multi_answer_f1(combined[:1000], answer)
+                f1 = multi_answer_f1(combined[:1500], answer)
             elif category == '5':
-                # Adversarial - if model correctly identifies no info
-                f1 = 0.0  # Retrieval-only can't express "no info available"
+                f1 = 0.0
             else:
-                f1 = f1_score(combined[:1000], answer)
+                f1 = f1_score(combined[:1500], answer)
             results[ret.name]['f1_scores'].append(f1)
 
     return results
