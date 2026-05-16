@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuroweave-cortex"
-version = "1.6.0"
+version = "1.0.0"
 description = "NeuroWeave Cortex (NWC) — Graph-first cognitive memory runtime for AI agents. Hippocampal-inspired architecture with domain routing, spreading activation, edge budget management, 4-layer compression, thermal storage, personality modeling, and 8-phase sleep consolidation."
 readme = "README.md"
 requires-python = ">=3.11"

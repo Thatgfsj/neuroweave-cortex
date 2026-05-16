@@ -1,4 +1,4 @@
-"""NeuroWeave Cortex (NWC) — v1.6.0 cognitive architecture.
+"""NeuroWeave Cortex (NWC) — v1.0.0 cognitive architecture.
 
 A graph-first, cortex-partitioned cognitive memory runtime for AI agents.
 
@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.6.0"
+__version__ = "1.0.0"
 
 import sys
 from typing import Any

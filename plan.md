@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-15 | **v1.6.0** | 649 tests passing
+> Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing
 
 ## Current State
 

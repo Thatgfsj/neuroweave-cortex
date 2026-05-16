@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Repository Overview & Improvement Plan
 
-> Last updated: 2026-05-15 | **v1.6.0** | 649 tests passing | 62 commits
+> Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing | 64 commits
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.6.0 |
+| **Version** | 1.0.0 |
 | **Production modules** | 78 Python files in `star_graph/` |
 | **Production code** | ~36,000 lines |
 | **Test files** | 33 files in `tests/` |
@@ -172,7 +172,7 @@ Layer 1 (Storage):   CRUD, persistence, indexing, ANN lookup
 | **v1.3.0** | **2026-05-15** | **Domain router (hierarchical topic tree), edge budget (smart eviction, max 32), write gate (5-stage quality filter), four-layer compression (M→E→S→P) — 467 tests** |
 | **v1.4.0** | **2026-05-15** | **Spreading activation primary retrieval, 3-tier thermal store (hot/cold/archive), continuous edge time decay — 496 tests** |
 | **v1.5.0** | **2026-05-15** | **Renamed to NeuroWeave Cortex (NWC). Self-organization (auto-cluster/merge/topics), personality model (Big Five traits/expertise/values), goal tree (hierarchical progress tracking) — 582 tests** |
-| **v1.6.0** | **2026-05-15** | **Retrieval budget (S-5: hop/node/token limits), versioned memory (A-9: belief evolution chains), cluster memory (A-10: retrieval pre-filtering), causal edge types (B-12: 6 richer types), episodic memory (B-13: event streams). All S/A/B items complete — 649 tests** |
+| **v1.0.0** | **2026-05-16** | **Official release — 1,989 tests, 80% coverage, PyPI publication, all S/A/B items complete** |
 
 ---
 
@@ -1048,7 +1048,7 @@ Implementation:
 
 ---
 
-## v1.6.0 — Next Priorities (User-Specified)
+## v1.0.0 — First Official Release
 
 > Based on user's priority list (2026-05-15). Graph-first architecture with retrieval budget control,
 > cognitive trajectory tracking, richer edge types, and episodic memory.

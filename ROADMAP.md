@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Roadmap
 
-## Current (v1.6.0 — 2026-05)
+## Current (v1.0.0 — 2026-05)
 
 - [x] 6-state memory lifecycle (ACTIVE → GHOST → REACTIVATED)
 - [x] Ghost subsystem with intensity ranking + NegativeGhost contradiction tracking
@@ -86,4 +86,4 @@ See [plan.md](plan.md) for detailed implementation history and architecture deci
 | 1.3.0 | 2026-05 | Domain router, edge budget, write gate, four-layer compression — 467 tests |
 | 1.4.0 | 2026-05 | Spreading activation retrieval, 3-tier thermal store, continuous edge time decay — 496 tests |
 | 1.5.0 | 2026-05 | Renamed to NeuroWeave Cortex. Self-organization, personality model, goal tree — 582 tests |
-| 1.6.0 | 2026-05 | Retrieval budget, versioned memory, cluster memory, causal edges, episodic memory — 649 tests |
+| 1.0.0 | 2026-05 | Official release — PyPI publication, 1,989 tests, 80% coverage |

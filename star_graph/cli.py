@@ -1,4 +1,4 @@
-"""CLI entry points — v1.6.0 with --format json for agent integration."""
+"""CLI entry points — v1.0.0 with --format json for agent integration."""
 
 import argparse
 import json

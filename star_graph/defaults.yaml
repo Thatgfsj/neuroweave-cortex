@@ -1,7 +1,7 @@
 # NeuroWeave Cortex (NWC) — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.6.0"
+version: "1.0.0"
 
 # ── Memory Tiering (STM/MTM/LTM/Core) ──
 tier:

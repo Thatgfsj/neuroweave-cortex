@@ -278,7 +278,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** 1,989 tests passing, 80% coverage (v1.6.0).
+**Status:** 1,989 tests passing, 80% coverage (v1.0.0).
 
 ## Roadmap
 
