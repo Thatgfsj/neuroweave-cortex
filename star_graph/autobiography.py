@@ -264,7 +264,7 @@ class AutobiographicalMemory:
                           correction: str = "") -> list[str]:
         """Weaken all beliefs containing a substring. Returns affected IDs."""
         affected = []
-        for n in self._narratives.values():
+        for n in list(self._narratives.values()):
             if belief_substring.lower() in n.self_belief.lower():
                 n.weaken()
                 affected.append(n.id)

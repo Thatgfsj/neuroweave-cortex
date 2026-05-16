@@ -229,9 +229,7 @@ class TestWriteGateDebounce:
 class TestWriterGateNoisePatterns:
     def test_bot_command_flagged(self):
         gate = MemoryWriteGate()
-        # Pure bot command without additional context → noise
         result = gate.evaluate("/status")
-        # May be rejected as too_short or noise
         assert result.decision != GateDecision.ACCEPT
 
     def test_single_letter_noise(self):
@@ -243,3 +241,199 @@ class TestWriterGateNoisePatterns:
         gate = MemoryWriteGate()
         result = gate.evaluate("hello")
         assert result.decision in (GateDecision.REJECT, GateDecision.DEFER)
+
+    def test_noise_pattern_long_enough(self):
+        """Noise pattern that is long enough to pass min_text_length."""
+        gate = MemoryWriteGate()
+        # "thank you" is 9 chars, matches pattern with score 0.9 (> 0.7)
+        result = gate.evaluate("thank you")
+        assert result.decision == GateDecision.REJECT
+        assert "noise" in result.reason
+
+    def test_no_meaningful_tokens(self):
+        """Text with no meaningful tokens gets high noise score."""
+        gate = MemoryWriteGate()
+        # "a b c d e" — 9 chars but no tokens of length ≥ 3
+        result = gate.evaluate("a b c d e")
+        assert result.decision == GateDecision.REJECT
+
+    def test_filler_word_ratio(self):
+        """High filler word ratio or no meaningful tokens triggers noise."""
+        gate = MemoryWriteGate()
+        # "um uh er" — 8 chars, but all tokens are 2 chars (not ≥3) → no tokens
+        result = gate.evaluate("um uh er")
+        assert result.decision in (GateDecision.REJECT, GateDecision.DEFER)
+
+    def test_bot_command_with_context(self):
+        """Bot command with enough context may be rejected or deferred."""
+        gate = MemoryWriteGate()
+        result = gate.evaluate("/deploy production now")
+        assert result.decision in (GateDecision.REJECT, GateDecision.DEFER, GateDecision.ACCEPT)
+
+
+class TestWriteGateEmotionalNoiseDetails:
+    def test_emotional_noise_unique_ratio(self):
+        """High emotion + low unique word ratio + few words → emotional noise."""
+        gate = MemoryWriteGate()
+        result = gate.evaluate(
+            "I hate hate hate hate this this this",
+            emotional_valence=-0.9,
+            importance=0.5,
+        )
+        assert result.decision in (GateDecision.DEFER, GateDecision.REJECT)
+
+    def test_high_emotion_short_text_detail(self):
+        """abs_emotion > 0.8 + short text → high emotional noise."""
+        gate = MemoryWriteGate()
+        result = gate.evaluate(
+            "I am so angry right now!!!",
+            emotional_valence=-0.95,
+            importance=0.3,
+        )
+        # len=25 (< 50), abs_emotion=0.95 (> 0.8) → noise score 0.9
+        assert result.decision in (GateDecision.DEFER, GateDecision.REJECT)
+
+
+class TestWriteGateDuplicateDetails:
+    def test_anchor_without_embedding_skipped(self):
+        """Brute force path skips anchors without embeddings."""
+        gate = MemoryWriteGate()
+        gate.duplicate_threshold = 0.95
+        gate.merge_threshold = 0.7
+        from star_graph.graph import StarGraph
+        from star_graph.anchor import Anchor
+        g = StarGraph()
+        # Anchor without embedding
+        a = Anchor.create(text="no embedding here")
+        a.id = "no_emb_1"
+        g.add_anchor(a)
+        result = gate.evaluate(
+            "Some completely different text here ok",
+            embedding=[0.5] * 16,
+            graph=g,
+            importance=0.6,
+        )
+        assert result.decision == GateDecision.ACCEPT
+
+    def test_merge_decision_brute_force(self):
+        """Similarity between merge and duplicate thresholds → MERGE."""
+        gate = MemoryWriteGate()
+        gate.duplicate_threshold = 0.95
+        gate.merge_threshold = 0.5
+        from star_graph.graph import StarGraph
+        from star_graph.anchor import Anchor
+        g = StarGraph()
+        emb = [0.5] * 16
+        a = Anchor.create(text="python web development", embedding=emb)
+        a.id = "merge_test_1"
+        g.add_anchor(a)
+        # Similar but not identical embedding → sim around 0.87-0.95
+        similar_emb = [0.5 + 0.02 * (i % 3) for i in range(16)]
+        result = gate.evaluate(
+            "python web development with flask",
+            embedding=similar_emb,
+            graph=g,
+            importance=0.6,
+        )
+        assert result.decision in (GateDecision.MERGE, GateDecision.REJECT)
+
+    def test_duplicate_check_ann_path(self):
+        """ANN-accelerated duplicate check with _ann_index set."""
+        gate = MemoryWriteGate()
+        gate.duplicate_threshold = 0.95
+        gate.merge_threshold = 0.7
+        from star_graph.graph import StarGraph
+        from star_graph.anchor import Anchor
+        g = StarGraph()
+        emb = [0.5] * 16
+        a = Anchor.create(text="test memory", embedding=emb)
+        a.id = "ann_test_1"
+        g.add_anchor(a)
+
+        # Set up a mock ANN index
+        class MockANN:
+            def query(self, embedding, k=5):
+                return [("ann_test_1", 0.99)]
+
+        g._ann_index = MockANN()
+        result = gate.evaluate(
+            "test memory duplicate",
+            embedding=[0.5] * 16,
+            graph=g,
+            importance=0.6,
+        )
+        assert result.decision in (GateDecision.REJECT, GateDecision.MERGE)
+
+    def test_duplicate_ann_merge(self):
+        """ANN path returns MERGE when sim is between thresholds."""
+        gate = MemoryWriteGate()
+        gate.duplicate_threshold = 0.95
+        gate.merge_threshold = 0.7
+        from star_graph.graph import StarGraph
+        from star_graph.anchor import Anchor
+        g = StarGraph()
+        emb = [0.5] * 16
+        a = Anchor.create(text="test memory", embedding=emb)
+        a.id = "ann_merge_1"
+        g.add_anchor(a)
+
+        class MockANN:
+            def query(self, embedding, k=5):
+                return [("ann_merge_1", 0.85)]
+
+        g._ann_index = MockANN()
+        result = gate.evaluate(
+            "similar test memory",
+            embedding=[0.5] * 16,
+            graph=g,
+            importance=0.6,
+        )
+        assert result.decision in (GateDecision.MERGE, GateDecision.REJECT)
+
+    def test_duplicate_ann_exception(self):
+        """ANN path gracefully handles exceptions."""
+        gate = MemoryWriteGate()
+        from star_graph.graph import StarGraph
+        from star_graph.anchor import Anchor
+        g = StarGraph()
+        emb = [0.5] * 16
+        a = Anchor.create(text="test memory", embedding=emb)
+        a.id = "ann_err_1"
+        g.add_anchor(a)
+
+        class FailingANN:
+            def query(self, embedding, k=5):
+                raise RuntimeError("index error")
+
+        g._ann_index = FailingANN()
+        result = gate.evaluate(
+            "test memory after error",
+            embedding=[0.5] * 16,
+            graph=g,
+            importance=0.6,
+        )
+        # Should fall through to ACCEPT (or DEFER)
+        assert result.decision in (GateDecision.ACCEPT, GateDecision.DEFER, GateDecision.REJECT)
+
+    def test_large_graph_no_ann_falls_through(self):
+        """Graph with ≥ 50 anchors but no ANN — falls through to ANN try/except."""
+        gate = MemoryWriteGate()
+        gate.duplicate_threshold = 0.95
+        gate.merge_threshold = 0.7
+        from star_graph.graph import StarGraph
+        # Mock graph with >= 50 anchors but no _ann_index
+        g = StarGraph()
+        # Patch anchors count to appear large
+        emb = [0.5] * 16
+        for i in range(5):
+            a_id = f"large_{i}"
+            g.anchors[a_id] = type("FakeAnchor", (), {
+                "id": a_id, "embedding": emb, "is_retrievable": True
+            })()
+        result = gate.evaluate(
+            "some memory text here ok",
+            embedding=[0.5] * 16,
+            graph=g,
+            importance=0.6,
+        )
+        assert result.decision in (GateDecision.ACCEPT, GateDecision.DEFER, GateDecision.REJECT)

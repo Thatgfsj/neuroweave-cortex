@@ -213,9 +213,9 @@ class ThermalStore:
             created_at=data.get("created_at", time.time()),
             last_activated_at=data.get("last_activated_at", time.time()),
             community_id=data.get("community_id", ""),
-            importance=data.get("importance", 0.5),
-            emotional_valence=data.get("emotional_valence", 0.0),
         )
+        anchor.vector.importance = data.get("importance", 0.5)
+        anchor.vector.emotional_valence = data.get("emotional_valence", 0.0)
         # Remove from cold/archive
         self._cold_store.remove(anchor_id)
         self._cold_ids.discard(anchor_id)

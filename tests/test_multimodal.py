@@ -370,3 +370,82 @@ class TestCrossModalResult:
         rep = repr(result)
         assert "CrossModalResult" in rep
         assert "0.55" in rep
+
+
+# ═══════════════════════════════════════════════════════════════
+# Multimodal Embedding Provider — compatibility aliases
+# ═══════════════════════════════════════════════════════════════
+
+class TestProviderAliases:
+    def test_dim_property(self):
+        provider = MultimodalEmbeddingProvider(text_dim=256, image_dim=512)
+        assert provider.dim == 256
+
+    def test_backend_property(self):
+        provider = MultimodalEmbeddingProvider()
+        assert provider.backend in ("clip", "sentence-transformers")
+
+    def test_encode_alias(self):
+        provider = MultimodalEmbeddingProvider()
+        emb = provider.encode("hello world")
+        assert len(emb) == provider.text_dim
+
+    def test_encode_batch_alias(self):
+        provider = MultimodalEmbeddingProvider()
+        embs = provider.encode_batch(["hello", "world"])
+        assert len(embs) == 2
+        assert all(len(e) == provider.text_dim for e in embs)
+
+    def test_encode_image_batch(self):
+        provider = MultimodalEmbeddingProvider()
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = os.path.join(tmp, "img1.png")
+            p2 = os.path.join(tmp, "img2.png")
+            _make_test_image(p1)
+            _make_test_image(p2)
+            embs = provider.encode_image_batch([p1, p2])
+            assert len(embs) == 2
+            assert all(len(e) == provider.image_dim for e in embs)
+
+    def test_derive_phase(self):
+        provider = MultimodalEmbeddingProvider()
+        phase = provider.derive_phase("test text", importance=0.7, emotional_valence=0.3)
+        assert isinstance(phase, float)
+
+    def test_derive_frequency(self):
+        provider = MultimodalEmbeddingProvider()
+        freq = provider.derive_frequency(importance=0.8, emotional_valence=0.5, text_length=20)
+        assert freq > 0
+
+    def test_derive_driving_phasor(self):
+        provider = MultimodalEmbeddingProvider()
+        freq, phase = provider.derive_driving_phasor("query text")
+        assert freq > 0
+        assert isinstance(phase, float)
+
+
+class TestCrossModalSimilarityEdge:
+    def test_similarity_empty_embeddings(self):
+        provider = MultimodalEmbeddingProvider()
+        assert provider.cross_modal_similarity([], [0.1]) == 0.0
+        assert provider.cross_modal_similarity([0.1], []) == 0.0
+
+    def test_image_similarity_empty(self):
+        provider = MultimodalEmbeddingProvider()
+        assert provider.image_similarity([], [0.1]) == 0.0
+        assert provider.image_similarity([0.1], []) == 0.0
+
+    def test_image_similarity_identical(self):
+        provider = MultimodalEmbeddingProvider()
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "img.png")
+            _make_test_image(p)
+            emb = provider.encode_image(p)
+            sim = provider.image_similarity(emb, emb)
+            assert 0.99 <= sim <= 1.01
+
+    def test_cross_modal_first_access_cached(self):
+        provider = MultimodalEmbeddingProvider()
+        first = provider.clip_available
+        second = provider.clip_available
+        assert first == second  # _checked_clip should be True after first call

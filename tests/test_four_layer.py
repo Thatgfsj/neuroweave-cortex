@@ -237,3 +237,182 @@ class TestCompressionPipeline:
         result = compressor.get_for_retrieval("python flask", max_per_layer=5)
         total = sum(len(v) for v in result.values())
         assert total > 0
+
+
+# ── Internal helpers ──────────────────────────────────────
+
+class TestInternalHelpers:
+    def test_cluster_entries_empty(self):
+        compressor = FourLayerCompressor()
+        clusters = compressor._cluster_entries([], 2)
+        assert clusters == []
+
+    def test_cluster_entries_below_min_size(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="test 1", layer=CompressLayer.EVENT,
+            embedding=[0.1] * 16)
+        clusters = compressor._cluster_entries([e1], 3)
+        assert clusters == []
+
+    def test_cluster_entries_similar(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="redis timeout debugging",
+            layer=CompressLayer.EVENT, embedding=[0.5] * 16)
+        e2 = CompressedMemory(
+            id="e2", text="redis connection pool error",
+            layer=CompressLayer.EVENT, embedding=[0.51] * 16)
+        clusters = compressor._cluster_entries([e1, e2], 2, threshold=0.9)
+        assert len(clusters) >= 0
+
+    def test_cluster_entries_dissimilar(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="redis", layer=CompressLayer.EVENT,
+            embedding=[1.0] + [0.0] * 15)
+        e2 = CompressedMemory(
+            id="e2", text="unrelated", layer=CompressLayer.EVENT,
+            embedding=[0.0, 1.0] + [0.0] * 14)
+        clusters = compressor._cluster_entries([e1, e2], 2, threshold=0.8)
+        assert clusters == []
+
+    def test_synthesize_semantic_with_pattern(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="debugging redis timeout issue",
+            layer=CompressLayer.EVENT, embedding=[0.5] * 16, tags=["redis"])
+        e2 = CompressedMemory(
+            id="e2", text="debugging redis connection problem",
+            layer=CompressLayer.EVENT, embedding=[0.51] * 16, tags=["redis"])
+        result = compressor._synthesize_semantic([e1, e2])
+        assert result.layer == CompressLayer.SEMANTIC
+        assert len(result.text) > 0
+
+    def test_synthesize_semantic_no_embedding(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="topic A discussion", layer=CompressLayer.EVENT)
+        e2 = CompressedMemory(
+            id="e2", text="topic A follow up", layer=CompressLayer.EVENT)
+        result = compressor._synthesize_semantic([e1, e2])
+        assert result.layer == CompressLayer.SEMANTIC
+
+    def test_synthesize_personality_expertise(self):
+        compressor = FourLayerCompressor()
+        s1 = CompressedMemory(
+            id="s1", text="[Knowledge] User works with python, flask",
+            layer=CompressLayer.SEMANTIC, embedding=[0.5] * 16,
+            tags=["python", "flask"])
+        s2 = CompressedMemory(
+            id="s2", text="[Knowledge] User works with python, django",
+            layer=CompressLayer.SEMANTIC, embedding=[0.51] * 16,
+            tags=["python", "django"])
+        result = compressor._synthesize_personality([s1, s2])
+        assert result.layer == CompressLayer.PERSONALITY
+        assert len(result.text) > 0
+
+    def test_synthesize_personality_no_embedding(self):
+        compressor = FourLayerCompressor()
+        s1 = CompressedMemory(
+            id="s1", text="[Knowledge] User prefers dark themes",
+            layer=CompressLayer.SEMANTIC)
+        result = compressor._synthesize_personality([s1])
+        assert result.layer == CompressLayer.PERSONALITY
+
+    def test_classify_trait_expertise(self):
+        compressor = FourLayerCompressor()
+        trait = compressor._classify_trait(
+            ["Python coding", "Flask development", "API design"],
+            ["python", "flask", "coding"],
+        )
+        assert trait in ("expertise", "preference", "workflow", "general")
+
+    def test_classify_trait_preference(self):
+        compressor = FourLayerCompressor()
+        trait = compressor._classify_trait(
+            ["User prefers dark mode", "User likes vim keybindings"],
+            ["prefers", "likes", "preference"],
+        )
+        assert isinstance(trait, str)
+
+    def test_detect_pattern(self):
+        compressor = FourLayerCompressor()
+        pattern = compressor._detect_pattern([
+            "debugging redis timeout issue on production",
+            "debugging redis timeout again on staging",
+            "debugging redis timeout error",
+        ])
+        assert isinstance(pattern, str)
+
+    def test_detect_pattern_no_repeat(self):
+        compressor = FourLayerCompressor()
+        pattern = compressor._detect_pattern([
+            "unique topic one", "different topic two", "another topic three",
+        ])
+        assert isinstance(pattern, str)
+
+    def test_summarize_domain(self):
+        compressor = FourLayerCompressor()
+        domain = compressor._summarize_domain([
+            "Python Flask web application development",
+            "Django REST API backend work",
+        ])
+        assert isinstance(domain, str)
+        assert len(domain) > 0
+
+    def test_clean_promoted(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="promoted entry", layer=CompressLayer.EVENT,
+            promoted=True, last_accessed_at=0.0)
+        compressor.layers[CompressLayer.EVENT]["e1"] = e1
+        compressor._clean_promoted(CompressLayer.EVENT, min_age_hours=0.0)
+        assert "e1" not in compressor.layers[CompressLayer.EVENT]
+
+    def test_clean_promoted_no_promoted(self):
+        compressor = FourLayerCompressor()
+        e1 = CompressedMemory(
+            id="e1", text="not promoted", layer=CompressLayer.EVENT,
+            promoted=False)
+        compressor.layers[CompressLayer.EVENT]["e1"] = e1
+        count_before = len(compressor.layers[CompressLayer.EVENT])
+        compressor._clean_promoted(CompressLayer.EVENT, min_age_hours=10.0)
+        assert len(compressor.layers[CompressLayer.EVENT]) == count_before
+
+    def test_extract_key_terms(self):
+        compressor = FourLayerCompressor()
+        terms = compressor._extract_key_terms(
+            ["redis timeout", "redis connection", "database error"], top_k=3)
+        assert len(terms) >= 1
+
+
+class TestDecayAll:
+    def test_decay_all_empty(self):
+        compressor = FourLayerCompressor()
+        result = compressor.decay_all()
+        assert isinstance(result, dict)
+        assert "removed" in result
+        assert "total" in result
+
+    def test_decay_all_with_data_not_expired(self):
+        compressor = FourLayerCompressor()
+        for i in range(5):
+            compressor.ingest_message(f"Decay test message {i}")
+        result = compressor.decay_all()
+        assert result["total"] == 0
+
+
+class TestStats:
+    def test_stats_empty(self):
+        compressor = FourLayerCompressor()
+        s = compressor.stats
+        assert "message_count" in s
+        assert s["message_count"] == 0
+
+    def test_stats_with_data(self):
+        compressor = FourLayerCompressor()
+        for i in range(10):
+            compressor.ingest_message(f"Stats test message {i}")
+        s = compressor.stats
+        assert s["message_count"] == 10

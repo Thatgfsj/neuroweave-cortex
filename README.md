@@ -271,9 +271,14 @@ python examples/memory_benchmark.py --full    # 12 sessions, ~5000 turns
 ## Running Tests
 
 ```bash
-pip install pytest
+pip install pytest pytest-cov
 pytest tests/ -v
+
+# With coverage report
+pytest tests/ --cov=star_graph --cov-report=term
 ```
+
+**Status:** 1,989 tests passing, 80% coverage (v1.6.0).
 
 ## Roadmap
 

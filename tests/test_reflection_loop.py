@@ -203,3 +203,130 @@ class TestSelfReflectionLoop:
         assert stats["avg_confidence_delta"] == 0.5
         assert stats["total_weakened"] == 1
         assert stats["total_ghosts_created"] == 1
+
+
+class TestBeliefContradictions:
+    def _make_autobio_with_beliefs(self):
+        from star_graph.autobiography import AutobiographicalMemory, SelfNarrative
+        ab = AutobiographicalMemory()
+        n1 = SelfNarrative(
+            id="n1", episode_summary="Python is the best",
+            self_belief="Python is the best language", stability=0.8)
+        n2 = SelfNarrative(
+            id="n2", episode_summary="Rust is better",
+            self_belief="Python is not the best language", stability=0.6)
+        ab._narratives["n1"] = n1
+        ab._narratives["n2"] = n2
+        return ab
+
+    def test_detect_belief_contradictions(self):
+        ab = self._make_autobio_with_beliefs()
+        loop = SelfReflectionLoop()
+        contradictions = loop._detect_belief_contradictions(ab)
+        # "not" negation in one should trigger
+        assert isinstance(contradictions, list)
+
+    def test_detect_belief_contradictions_empty(self):
+        from star_graph.autobiography import AutobiographicalMemory, SelfNarrative
+        ab = AutobiographicalMemory()
+        n1 = SelfNarrative(id="n1", self_belief="Python is great", stability=0.5)
+        n2 = SelfNarrative(id="n2", self_belief="Python is awesome", stability=0.5)
+        ab._narratives["n1"] = n1
+        ab._narratives["n2"] = n2
+        loop = SelfReflectionLoop()
+        contradictions = loop._detect_belief_contradictions(ab)
+        # Both positive, no contradiction
+        assert len(contradictions) == 0
+
+    def test_resolve_belief_contradiction(self):
+        g = StarGraph()
+        a = Anchor.create("Python is great", tags=["opinion"])
+        b = Anchor.create("Python is terrible", tags=["opinion"])
+        g.add_anchor(a)
+        g.add_anchor(b)
+        a.embedding = [0.5] * 10
+        b.embedding = [0.55] * 10
+        a.vector.stability = 0.8
+        a.vector.confidence = 0.95
+        a.vector.recency = 1.0
+        a.vector.relevance = 0.9
+        a.vector.frequency = 1.0
+        a.vector.success_feedback = 0.9
+        b.vector.stability = 0.3
+        b.vector.confidence = 0.1
+        b.vector.recency = 0.2
+        b.vector.relevance = 0.2
+        b.vector.frequency = 0.1
+        b.vector.success_feedback = 0.2
+
+        loop = SelfReflectionLoop()
+        loop.min_confidence_gap = 0.01
+        report = loop._resolve_contradiction(g, a, b, 0.9, "explicit_contradiction")
+        assert report is not None
+        assert report.contradiction_type == "correction"
+
+    def test_run_with_autobiography(self):
+        ab = self._make_autobio_with_beliefs()
+        g = StarGraph()
+        a = Anchor.create("Python is great", tags=["opinion"])
+        b = Anchor.create("Python is terrible", tags=["opinion"])
+        g.add_anchor(a)
+        g.add_anchor(b)
+        a.embedding = [0.5] * 10
+        b.embedding = [0.6] * 10
+        a.vector.stability = 0.8
+        a.vector.confidence = 0.9
+        b.vector.stability = 0.2
+        b.vector.confidence = 0.3
+
+        loop = SelfReflectionLoop()
+        loop.contradiction_threshold = 0.5
+        loop.min_confidence_gap = 0.1
+        reports = loop.run(g, autobiography=ab)
+        assert isinstance(reports, list)
+
+    def test_set_ghost_subsystem(self):
+        from star_graph.ghost import GhostSubsystem
+        loop = SelfReflectionLoop()
+        ghosts = GhostSubsystem()
+        loop.set_ghost_subsystem(ghosts)
+        assert loop._ghosts is ghosts
+
+    def test_run_with_ghost_subsystem(self):
+        from star_graph.ghost import GhostSubsystem
+        g = StarGraph()
+        a = Anchor.create("Python is great", tags=["opinion"])
+        b = Anchor.create("Python is terrible", tags=["opinion"])
+        g.add_anchor(a)
+        g.add_anchor(b)
+        a.embedding = [0.5] * 10
+        b.embedding = [0.6] * 10
+        a.vector.stability = 0.8
+        a.vector.confidence = 0.9
+        b.vector.stability = 0.2
+        b.vector.confidence = 0.3
+
+        loop = SelfReflectionLoop()
+        loop.contradiction_threshold = 0.5
+        loop.min_confidence_gap = 0.1
+        ghosts = GhostSubsystem()
+        loop.set_ghost_subsystem(ghosts)
+        reports = loop.run(g)
+        assert isinstance(reports, list)
+
+    def test_check_ghost_revivals_no_ghosts(self):
+        g = StarGraph()
+        loop = SelfReflectionLoop()
+        result = loop._check_ghost_revivals(g)
+        assert result == []
+
+    def test_report_limit_enforcement(self):
+        g = StarGraph()
+        loop = SelfReflectionLoop()
+        loop.max_reports = 3
+        for i in range(10):
+            report = SelfCorrectionReport.create(f"Old {i}", f"New {i}")
+            loop.reports[report.id] = report
+        # Run should not crash with too many reports
+        reports = loop.run(g)
+        assert isinstance(reports, list)

@@ -374,3 +374,153 @@ class TestPersonalizedPagerank:
         g.add_anchor(a)
         scores = personalized_pagerank(g, [1.0, 0.0])
         assert "a1" in scores
+
+    def test_with_edges(self):
+        g = StarGraph()
+        a1 = make_anchor("a1", "first", embedding=[1.0, 0.0])
+        a2 = make_anchor("a2", "second", embedding=[0.8, 0.2])
+        g.add_anchor(a1)
+        g.add_anchor(a2)
+        g.add_edge("a1", "a2", weight=0.5, edge_type="related")
+        scores = personalized_pagerank(g, [1.0, 0.0], damping=0.85, max_iter=5)
+        assert isinstance(scores, dict)
+
+    def test_no_seeds(self):
+        g = StarGraph()
+        scores = personalized_pagerank(g, [0.1, 0.2], damping=0.85, max_iter=2)
+        assert scores == {}
+
+    def test_with_precomputed_cache(self):
+        g = StarGraph()
+        a1 = make_anchor("a1", "test", embedding=[0.5, 0.5])
+        g.add_anchor(a1)
+        precomputed = {"a1": {"a1": 1.0}}
+        scores = personalized_pagerank(
+            g, query_embedding=[0.5, 0.5], precomputed=precomputed)
+        assert isinstance(scores, dict)
+
+    def test_with_multiple_nodes(self):
+        g = StarGraph()
+        for i in range(5):
+            a = make_anchor(f"a{i}", f"node {i}", embedding=[0.1 * i, 0.2 * i])
+            a.oscillator.natural_frequency = 0.1 * i
+            g.add_anchor(a)
+        for i in range(4):
+            g.add_edge(f"a{i}", f"a{i+1}", weight=0.5, edge_type="related")
+        scores = personalized_pagerank(g, [0.5, 0.5], damping=0.85, max_iter=3)
+        assert isinstance(scores, dict)
+
+
+# ── OscillationResonanceRetriever extended ───────────────
+
+class TestOscResonanceExtended:
+    def test_retrieve_auto_embedding(self):
+        g = StarGraph()
+        a = make_anchor("a1", "test memory", embedding=[0.5] * 384)
+        g.add_anchor(a)
+        retriever = OscillationResonanceRetriever(g)
+        result = retriever.retrieve("test memory", embedding=None, top_k=3)
+        assert len(result.constellations) >= 1
+
+    def test_retrieve_with_oscillator(self):
+        g = StarGraph()
+        a = make_anchor("a1", "oscillating memory", embedding=[0.5] * 384)
+        a.oscillator.natural_frequency = 0.3
+        g.add_anchor(a)
+        retriever = OscillationResonanceRetriever(g)
+        result = retriever.retrieve("oscillating", embedding=[0.5] * 384, top_k=3)
+        assert isinstance(result.constellations, list)
+
+    def test_retrieve_no_embedding_anchor(self):
+        g = StarGraph()
+        a = make_anchor("a1", "text only anchor")
+        g.add_anchor(a)
+        retriever = OscillationResonanceRetriever(g)
+        result = retriever.retrieve("text", embedding=[0.5] * 384, top_k=3)
+        assert isinstance(result.constellations, list)
+
+    def test_trace_components(self):
+        g = StarGraph()
+        a = make_anchor("a1", "test", embedding=[0.5] * 384)
+        a.oscillator.natural_frequency = 0.3
+        g.add_anchor(a)
+        retriever = OscillationResonanceRetriever(g)
+        comps = retriever._trace_components(complex(0.1, 0.2), 0.5, a)
+        assert "resonance" in comps
+        assert "phase_similarity" in comps
+        assert "frequency_similarity" in comps
+
+    def test_resonance_score_edge(self):
+        g = StarGraph()
+        a = make_anchor("a1", "test", embedding=[0.5] * 384)
+        g.add_anchor(a)
+        retriever = OscillationResonanceRetriever(g)
+        score = retriever._resonance_score(complex(0.0, 0.0), a)
+        assert score == 0.0
+
+
+# ── VectorSimilarityRetriever extended ────────────────────
+
+class TestVectorSimExtended:
+    def test_retrieve_auto_embedding(self):
+        g = StarGraph()
+        a = make_anchor("a1", "auto embed test", embedding=[0.5] * 384)
+        g.add_anchor(a)
+        retriever = VectorSimilarityRetriever(g)
+        result = retriever.retrieve("auto embed", embedding=None, top_k=3)
+        assert len(result.constellations) >= 1
+
+    def test_retrieve_with_ann(self):
+        g = StarGraph()
+        a = make_anchor("a1", "ann test", embedding=[0.5] * 384)
+        g.add_anchor(a)
+        # Ensure ANN index exists
+        g._get_ann_index()
+        retriever = VectorSimilarityRetriever(g)
+        result = retriever.retrieve("ann", embedding=[0.5] * 384, top_k=3)
+        assert isinstance(result.constellations, list)
+
+    def test_retrieve_text_overlap_fallback(self):
+        g = StarGraph()
+        a = make_anchor("a1", "no embedding text", embedding=None)
+        g.add_anchor(a)
+        retriever = VectorSimilarityRetriever(g)
+        result = retriever.retrieve("no embedding", embedding=[0.5] * 384, top_k=3)
+        assert isinstance(result.constellations, list)
+
+
+# ── HybridFusionRetriever ─────────────────────────────────
+
+class TestHybridFusion:
+    def test_init(self):
+        g = StarGraph()
+        hf = HybridFusionRetriever(g)
+        assert hf.graph is g
+
+    def test_retrieve_empty(self):
+        g = StarGraph()
+        hf = HybridFusionRetriever(g)
+        result = hf.retrieve("test", top_k=3)
+        assert result.constellations == []
+
+    def test_retrieve_with_anchor(self):
+        g = StarGraph()
+        a = make_anchor("a1", "hybrid test", embedding=[0.5] * 384)
+        a.oscillator.natural_frequency = 0.3
+        g.add_anchor(a)
+        hf = HybridFusionRetriever(g)
+        result = hf.retrieve("hybrid", embedding=[0.5] * 384, top_k=3)
+        assert len(result.constellations) >= 1
+
+
+# ── compare_retrievers extended ───────────────────────────
+
+class TestCompareRetrieversExtended:
+    def test_with_oscillator_anchors(self):
+        g = StarGraph()
+        a = make_anchor("a1", "osc test", embedding=[0.5] * 384)
+        a.oscillator.natural_frequency = 0.3
+        g.add_anchor(a)
+        results = compare_retrievers(
+            g, ["osc test"], embeddings=[[0.5] * 384])
+        assert len(results) == 1
