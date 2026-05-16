@@ -1,0 +1,101 @@
+{
+  "VectorSimilarity": {
+    "token_has_answer": 0.0,
+    "f1": 0.006288103980882439,
+    "llm_has_answer": 0.0,
+    "llm_judge_score": 0.025,
+    "latency_ms": 73.06919999537058,
+    "by_category": {
+      "2": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      },
+      "3": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.5
+      },
+      "1": {
+        "token_has_answer": 0.0,
+        "f1": 0.004385964912280702,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      },
+      "4": {
+        "token_has_answer": 0.0,
+        "f1": 0.049723145071982285,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      }
+    }
+  },
+  "OscillationResonance": {
+    "token_has_answer": 0.0,
+    "f1": 0.006288103980882439,
+    "llm_has_answer": 0.0,
+    "llm_judge_score": 0.075,
+    "latency_ms": 80.10469499276951,
+    "by_category": {
+      "2": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.045454545454545456
+      },
+      "3": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      },
+      "1": {
+        "token_has_answer": 0.0,
+        "f1": 0.004385964912280702,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      },
+      "4": {
+        "token_has_answer": 0.0,
+        "f1": 0.049723145071982285,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.5
+      }
+    }
+  },
+  "HybridFusion": {
+    "token_has_answer": 0.0,
+    "f1": 0.006764025448235974,
+    "llm_has_answer": 0.0,
+    "llm_judge_score": 0.05,
+    "latency_ms": 229.5136899978388,
+    "by_category": {
+      "2": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.045454545454545456
+      },
+      "3": {
+        "token_has_answer": 0.0,
+        "f1": 0.0,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      },
+      "1": {
+        "token_has_answer": 0.0,
+        "f1": 0.004385964912280702,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.08333333333333333
+      },
+      "4": {
+        "token_has_answer": 0.0,
+        "f1": 0.05448235974551764,
+        "llm_has_answer": 0.0,
+        "llm_judge_score": 0.0
+      }
+    }
+  }
+}
