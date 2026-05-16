@@ -1,7 +1,7 @@
 # NeuroWeave Cortex (NWC) — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.0.0"
+version: "1.0.1"
 
 # ── Memory Tiering (STM/MTM/LTM/Core) ──
 tier:
@@ -501,3 +501,33 @@ episodic_memory:
   auto_summarize_on_sleep: true      # summarize completed sessions during sleep
   max_episodes_per_session: 500      # cap episodes per session
   emotional_arc_window: 20           # episodes to consider for emotional arc
+
+# ── Embedding Provider (v1.0.1 multi-source) ──
+embedding:
+  provider: local                     # local | openai | zhipu | mixed
+  mixed:
+    primary: openai
+    fallback: local
+    timeout: 8                        # seconds before failover
+  openai:
+    model: text-embedding-3-small     # or text-embedding-3-large
+    api_key: ${OPENAI_API_KEY}
+    base_url: ""                      # optional proxy URL
+    dimensions: 512                   # only valid for text-embedding-3-* models
+  local:
+    model: all-MiniLM-L6-v2           # any sentence-transformers model
+    device: cpu                       # cpu | cuda
+    onnx: false                       # enable ONNX acceleration
+  zhipu:
+    model: embedding-2
+    api_key: ${ZHIPU_API_KEY}
+    max_concurrent: 3                 # semaphore limit for API rate limits
+
+# ── Feature Flags (v1.0.1 extras) ──
+extras:
+  resonance: true
+  autobiography: true
+  streaming: true
+  benchmark: false
+  mcp_server: false
+  symbolic_filter: true

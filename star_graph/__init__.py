@@ -16,10 +16,18 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import sys
 from typing import Any
+
+# ── Sub-packages (Phase 1: 5-core + abstraction + extras) ──────────────
+from . import memory_core       # noqa: F401 — memory primitives
+from . import retrieval_engine  # noqa: F401 — retrieval orchestration
+from . import embedding_provider # noqa: F401 — embedding abstraction
+from . import consolidation     # noqa: F401 — sleep-cycle maintenance
+from . import cortex_api        # noqa: F401 — agent-facing API
+from . import extras            # noqa: F401 — feature-gated modules
 
 # ── Lazy import registry ────────────────────────────────────────────────
 # Format: {name: (module_name, attr_name_or_None_to_import_module)}
