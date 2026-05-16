@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include star_graph/defaults.yaml
+recursive-include examples *.py

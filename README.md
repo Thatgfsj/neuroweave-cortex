@@ -233,11 +233,11 @@ See `star_graph/defaults.yaml` for all 300+ tunable parameters.
 ## Installation
 
 ```bash
-git clone https://github.com/Thatgfsj/neuroweave-cortex.git
-cd neuroweave-cortex
+# From PyPI
+pip install neuroweave-cortex
 
-# Install in editable mode
-pip install -e .
+# With sentence-transformers for semantic embeddings (~2GB model download on first use)
+pip install "neuroweave-cortex[embeddings]"
 
 # Optional: for SQLite storage backend
 pip install aiosqlite
@@ -246,7 +246,7 @@ pip install aiosqlite
 python examples/emergence_demo.py
 ```
 
-**Note:** NeuroWeave Cortex is not published on PyPI. Install from source as shown above.
+**Note:** Without `[embeddings]`, the system uses a lightweight TF-IDF fallback for text encoding. Install `sentence-transformers` only if you need semantic-quality embeddings.
 
 ## Interactive Demo
 
