@@ -329,8 +329,8 @@ class RuntimeLifecycle:
 
     def save(self, path: str | None = None) -> str:
         """Persist the entire memory system to disk."""
-        filepath = path or self.storage_path or "star_graph_memory.json"
         from .storage import JSONStorage
+        filepath = path or self.storage_path or str(JSONStorage.DEFAULT_PATH)
         storage = JSONStorage(filepath)
         storage.save(self.graph)
         if self._ghosts:

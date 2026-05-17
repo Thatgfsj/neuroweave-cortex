@@ -427,6 +427,23 @@ class Anchor:
             return False
         return True
 
+    def to_dict(self) -> dict:
+        """JSON-serializable representation for REST / API responses."""
+        return {
+            "id": self.id,
+            "text": self.text,
+            "tags": self.tags,
+            "importance": self.vector.importance if self.vector else 0.5,
+            "emotional_valence": self.vector.emotional_valence if self.vector else 0.0,
+            "state": self.state.name,
+            "created_at": self.created_at,
+            "last_activated_at": self.last_activated_at,
+            "replay_count": self.replay_count,
+            "source_session": self.source_session,
+            "cortex_path": self.cortex_path,
+            "stability": self.vector.stability if self.vector else 0.0,
+        }
+
     @property
     def is_plastic(self) -> bool:
         """Can this anchor be modified/updated?"""

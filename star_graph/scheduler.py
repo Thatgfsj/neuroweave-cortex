@@ -72,6 +72,19 @@ class MemoryItem:
     compression_level: int = 0  # 0=raw, 1=compressed, 2=abstract
     compressed_text: str = ""
 
+    def to_dict(self) -> dict:
+        """JSON-serializable representation for REST / API responses."""
+        d = {
+            "relevance_score": round(self.relevance_score, 4),
+            "confidence": round(self.confidence, 3),
+            "memory_type": str(self.memory_type),
+            "compression_level": self.compression_level,
+            "compressed_text": self.compressed_text,
+        }
+        if self.anchor is not None:
+            d["anchor"] = self.anchor.to_dict()
+        return d
+
 
 @dataclass
 class MemoryContext:
@@ -84,6 +97,19 @@ class MemoryContext:
     reflections: list[dict] = field(default_factory=list)     # meta-cognitive insights
     total_tokens: int = 0
     retrieval_latency_ms: float = 0.0
+
+    def to_dict(self) -> dict:
+        """JSON-serializable representation for REST / API responses."""
+        return {
+            "items": [item.to_dict() for item in self.items if item.anchor is not None],
+            "memory_summary": self.memory_summary,
+            "active_patterns": self.active_patterns,
+            "relevant_facts": self.relevant_facts,
+            "reasoning_traces": self.reasoning_traces,
+            "reflections": self.reflections,
+            "total_tokens": self.total_tokens,
+            "retrieval_latency_ms": round(self.retrieval_latency_ms, 3),
+        }
 
 
 # ── Scheduler ──────────────────────────────────────────

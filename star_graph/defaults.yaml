@@ -3,6 +3,16 @@
 
 version: "1.0.1"
 
+# ── Storage paths ──
+# Default save location is ~/.star_graph/memory.json (JSON)
+# or ~/.star_graph/memory.db (SQLite). Snapshots go to
+# ~/.star_graph/snapshots/. Override by passing a path to
+# MemoryManager(storage_path="...") or mgr.save("...").
+storage:
+  json: "~/.star_graph/memory.json"
+  sqlite: "~/.star_graph/memory.db"
+  snapshots: "~/.star_graph/snapshots"
+
 # ── Memory Tiering (STM/MTM/LTM/Core) ──
 tier:
   stm_max_items: 100

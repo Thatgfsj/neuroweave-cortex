@@ -25,3 +25,25 @@ class ManagerStats:
     anchors_since_micro: int = 0
     uptime_seconds: float = 0.0
     cognitive_health: dict | None = None
+
+    def to_dict(self) -> dict:
+        """JSON-serializable representation for REST / API responses."""
+        return {
+            "anchors": self.anchors,
+            "edges": self.edges,
+            "ghosts": self.ghosts,
+            "schemas": self.schemas,
+            "abstracts": self.abstracts,
+            "working_memory": self.working_memory,
+            "cortices": self.cortices,
+            "hubs": self.hubs,
+            "clusters": self.clusters,
+            "cold_anchors": self.cold_anchors,
+            "sleep_cycles": self.sleep_cycles,
+            "total_evolutions": self.total_evolutions,
+            "auto_micro_sleeps": self.auto_micro_sleeps,
+            "auto_full_sleeps": self.auto_full_sleeps,
+            "anchors_since_micro": self.anchors_since_micro,
+            "uptime_seconds": self.uptime_seconds,
+            "cognitive_health": self.cognitive_health,
+        }

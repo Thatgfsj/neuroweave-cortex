@@ -445,3 +445,19 @@ class AsyncMemoryManager:
         """Release resources."""
         self._mgr = None
         self._initialized = False
+
+    # ── async_* aliases for callers migrating from MemoryManager ──
+
+    def __getattr__(self, name: str):
+        """Route async_* alias calls to their native async methods.
+
+        Allows both ``await amgr.remember(...)`` and
+        ``await amgr.async_remember(...)`` to work identically.
+        """
+        if name.startswith("async_"):
+            native = name[6:]  # strip "async_" prefix
+            if native and hasattr(self, native):
+                return getattr(self, native)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )

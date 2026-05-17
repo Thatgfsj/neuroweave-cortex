@@ -42,6 +42,38 @@ class SleepReport:
     avg_retention_after: float = 0.0
     compression_ratio: float = 1.0
 
+    def to_dict(self) -> dict:
+        """JSON-serializable representation for REST / API responses."""
+        return {
+            "cycle": self.cycle,
+            "total_duration_ms": round(self.total_duration_ms, 2),
+            "phases": [
+                {
+                    "phase": p.phase,
+                    "duration_ms": round(p.duration_ms, 2),
+                    "items_processed": p.items_processed,
+                }
+                for p in (self.phases or [])
+            ],
+            "memories_replayed": self.memories_replayed,
+            "memories_merged": self.memories_merged,
+            "memories_pruned": self.memories_pruned,
+            "ghosts_created": self.ghosts_created,
+            "schemas_formed": self.schemas_formed,
+            "abstractions_formed": self.abstractions_formed,
+            "bridges_created": self.bridges_created,
+            "edges_pruned": self.edges_pruned,
+            "emotional_decoupled": self.emotional_decoupled,
+            "cortical_transferred": self.cortical_transferred,
+            "anchors_before": self.anchors_before,
+            "anchors_after": self.anchors_after,
+            "edges_before": self.edges_before,
+            "edges_after": self.edges_after,
+            "avg_retention_before": round(self.avg_retention_before, 4),
+            "avg_retention_after": round(self.avg_retention_after, 4),
+            "compression_ratio": round(self.compression_ratio, 3),
+        }
+
     def summary(self) -> str:
         """One-line summary of the sleep cycle."""
         parts = []
