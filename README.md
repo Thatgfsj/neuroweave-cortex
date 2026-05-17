@@ -233,11 +233,11 @@ See `star_graph/defaults.yaml` for all 300+ tunable parameters.
 ## Installation
 
 ```bash
-# From PyPI
-pip install neuroweave-cortex
+# From PyPI (package name: NWcortex, import as: star_graph)
+pip install NWcortex
 
 # With sentence-transformers for semantic embeddings (~2GB model download on first use)
-pip install "neuroweave-cortex[embeddings]"
+pip install "NWcortex[embeddings]"
 
 # Optional: for SQLite storage backend
 pip install aiosqlite
