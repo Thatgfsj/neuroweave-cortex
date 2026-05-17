@@ -2,3 +2,9 @@ include README.md
 include LICENSE
 include star_graph/defaults.yaml
 recursive-include examples *.py
+prune venv
+prune dist
+prune build
+prune .git
+prune __pycache__
+global-exclude *.pyc
