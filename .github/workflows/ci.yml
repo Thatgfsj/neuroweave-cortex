@@ -42,7 +42,7 @@ jobs:
           PYPROJECT_VERSION=$(grep -Po '(?<=version = ")[^"]+' pyproject.toml)
           INIT_VERSION=$(grep -Po '(?<=__version__ = ")[^"]+' star_graph/__init__.py)
           YAML_VERSION=$(grep -Po '(?<=version: ")[^"]+' star_graph/defaults.yaml)
-          MCP_VERSION=$(grep -Po '(?<=version=")[^"]+' star_graph/mcp_server.py)
+          MCP_VERSION=$(grep -Po '(?<=version=")[^"]+' star_graph/contrib/mcp_server.py)
 
           echo "pyproject.toml:          $PYPROJECT_VERSION"
           echo "star_graph/__init__.py:   $INIT_VERSION"
