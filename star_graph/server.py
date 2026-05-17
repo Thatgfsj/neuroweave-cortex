@@ -85,12 +85,20 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
         elif self.path == "/stats":
             stats = mgr.stats
             self._send_json({
-                "anchors": stats.anchor_count,
-                "edges": stats.edge_count,
-                "schemas": stats.schema_count,
-                "ghosts": stats.ghost_count,
-                "avg_stability": round(stats.avg_stability, 3),
-                "avg_importance": round(stats.avg_importance, 3),
+                "anchors": stats.anchors,
+                "edges": stats.edges,
+                "schemas": stats.schemas,
+                "ghosts": stats.ghosts,
+                "abstracts": stats.abstracts,
+                "working_memory": stats.working_memory,
+                "cortices": stats.cortices,
+                "hubs": stats.hubs,
+                "clusters": stats.clusters,
+                "cold_anchors": stats.cold_anchors,
+                "sleep_cycles": stats.sleep_cycles,
+                "total_evolutions": stats.total_evolutions,
+                "uptime_seconds": stats.uptime_seconds,
+                "cognitive_health": stats.cognitive_health,
             })
 
         else:
@@ -112,8 +120,11 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "missing 'text'"}, 400)
                 return
             tags = data.get("tags", [])
-            anchor_id = mgr.remember(text, tags=tags)
-            self._send_json({"anchor_id": anchor_id}, 201)
+            anchor = mgr.remember(text, tags=tags)
+            if anchor is None:
+                self._send_json({"error": "memory rejected by write gate"}, 422)
+                return
+            self._send_json({"anchor_id": anchor.id}, 201)
 
         elif self.path == "/recall":
             query = data.get("query", "")
@@ -121,6 +132,8 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
             ctx = mgr.recall(query, max_items=max_items)
             results = []
             for item in ctx.items:
+                if item.anchor is None:
+                    continue
                 results.append({
                     "text": item.anchor.text,
                     "relevance": round(item.relevance_score, 3),
@@ -130,16 +143,26 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"results": results, "count": len(results)})
 
         elif self.path == "/sleep":
-            report = mgr.sleep()
-            self._send_json({
-                "phases": report.phase_names,
-                "anchors_before": report.anchors_before,
-                "anchors_after": report.anchors_after,
-                "edges_pruned": report.edges_pruned,
-                "ghosts_created": report.ghosts_created,
-                "schemas_formed": report.schemas_formed,
-                "duration_seconds": round(report.duration_seconds, 2),
-            })
+            result = mgr.sleep()
+            global_rpt = result.get("global_report")
+            if global_rpt is not None:
+                phases = [{"name": p.phase, "duration_ms": p.duration_ms,
+                           "items_processed": p.items_processed}
+                          for p in (global_rpt.phases or [])]
+                self._send_json({
+                    "phases": phases,
+                    "anchors_before": global_rpt.anchors_before,
+                    "anchors_after": global_rpt.anchors_after,
+                    "edges_pruned": global_rpt.edges_pruned,
+                    "ghosts_created": global_rpt.ghosts_created,
+                    "schemas_formed": global_rpt.schemas_formed,
+                    "duration_seconds": round(global_rpt.total_duration_ms / 1000, 2),
+                    "memories_replayed": global_rpt.memories_replayed,
+                    "memories_pruned": global_rpt.memories_pruned,
+                    "memories_merged": global_rpt.memories_merged,
+                })
+            else:
+                self._send_json(result, 200)
 
         elif self.path == "/consolidate":
             result = mgr.micro_consolidate()

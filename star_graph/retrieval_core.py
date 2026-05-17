@@ -139,6 +139,13 @@ class RetrievalCore:
         )
         raw_ms = (time.time() - t0) * 1000
 
+        # Path A2: BM25 anchor search — keyword-first, always reliable
+        t0 = time.time()
+        bm25_items = self._bm25_anchor_search(
+            query=query, query_emb=query_emb,
+            max_items=max_items, context=context)
+        bm25_ms = (time.time() - t0) * 1000
+
         # Path B: Graph dimensional descent (L1-L5)
         t0 = time.time()
         graph_result = self.retrieve_with_descent(
@@ -151,11 +158,26 @@ class RetrievalCore:
             query_emb=query_emb, query=query, max_items=max_items)
         spreading_ms = (time.time() - t0) * 1000
 
-        # Merge: exact cache → cognitive cache → raw buffer → graph → spreading
+        # Merge: exact cache → BM25 anchor → cognitive cache → raw buffer → graph → spreading
         merged_items = list(exact_results)
         seen_texts = {self._rt._normalize_text(item.compressed_text) for item in merged_items
                       if hasattr(item, 'compressed_text') and item.compressed_text}
         seen_ids = {item.anchor.id for item in merged_items if item.anchor}
+
+        # Track BM25-matched anchor IDs for priority sorting
+        bm25_matched_ids: set[str] = {bm.anchor.id for bm in bm25_items if bm.anchor}
+
+        # Insert BM25 anchor results (keyword-strong, anchored)
+        for bm_item in bm25_items:
+            if bm_item.anchor and bm_item.anchor.id in seen_ids:
+                continue
+            if bm_item.anchor:
+                seen_ids.add(bm_item.anchor.id)
+            norm_text = self._rt._normalize_text(bm_item.compressed_text or bm_item.anchor.text[:120])
+            if norm_text and norm_text in seen_texts:
+                continue
+            seen_texts.add(norm_text)
+            merged_items.append(bm_item)
 
         # Insert cognitive cache hits
         for anchor, score, source in cache_hit_anchors:
@@ -223,7 +245,13 @@ class RetrievalCore:
             except Exception:
                 pass
 
-        merged_items.sort(key=lambda i: i.relevance_score, reverse=True)
+        # Sort: BM25-matched anchors first (keyword reliability), then
+        # by relevance score. This prevents graph-descent items with
+        # hardcoded 0.9 brain-hit scores from outranking keyword matches.
+        merged_items.sort(key=lambda i: (
+            not (i.anchor and i.anchor.id in bm25_matched_ids),
+            -i.relevance_score,
+        ))
 
         # Enforce retrieval budget — hard limits on node count + token budget (S-5)
         budget_state = self._rt.retrieval_budget.begin()
@@ -286,6 +314,110 @@ class RetrievalCore:
                 f"merged={len(merged_items)}",
             ],
         )
+
+    # ── BM25 anchor search ───────────────────────────────────
+
+    def _bm25_anchor_search(self, query: str, query_emb: list[float] | None,
+                             max_items: int, context: AgentContext | None) -> list[MemoryItem]:
+        """BM25 keyword search over graph anchors with composite scoring.
+
+        Uses the shared BM25Index on the runtime to find keyword-matching
+        anchors, then computes a composite relevance score from:
+          - BM25 term match (weight: 0.50)
+          - Tag overlap with query terms (weight: 0.20)
+          - Semantic cosine similarity (weight: 0.15)
+          - Recency (weight: 0.10)
+          - Importance (weight: 0.05)
+
+        When the embedder uses hash fallback (no real semantic model),
+        the semantic weight is redistributed to BM25.
+        """
+        if not query or not query.strip():
+            return []
+
+        bm25 = getattr(self._rt, 'bm25', None)
+        if bm25 is None or bm25.size == 0:
+            return []
+
+        # Fetch 2x candidates for reranking headroom
+        hits = bm25.search(query, top_k=max_items * 2)
+        if not hits:
+            return []
+
+        # Detect hash-embedding fallback (no real semantic signal)
+        embedder = self._rt._get_embedder()
+        is_hash = getattr(embedder, '_backend', '') == 'hash'
+
+        # Adjust weights: BM25 gets semantic weight when embeddings are degraded
+        if is_hash:
+            w_bm25, w_tag, w_sem, w_recency, w_importance = 0.80, 0.12, 0.00, 0.05, 0.03
+        else:
+            w_bm25, w_tag, w_sem, w_recency, w_importance = 0.55, 0.18, 0.15, 0.08, 0.04
+
+        # Normalize BM25 scores to [0, 1] via exponential saturation
+        max_bm25 = max(s for _, s in hits) if hits else 1.0
+
+        # Tokenize query once for tag matching
+        import re
+        _tokenize = getattr(bm25, '_tokenize', None)
+        if _tokenize is None:
+            from .bm25 import _tokenize
+        query_tokens = set(_tokenize(query))
+
+        now = time.time()
+        items: list[MemoryItem] = []
+        for anchor_id, bm25_score in hits:
+            anchor = self._rt.graph.anchors.get(anchor_id)
+            if anchor is None or not anchor.is_retrievable:
+                continue
+
+            # 1. BM25 normalized score — calibrated so a good keyword
+            #    match (BM25 ≥ 4) reaches ≥ 0.90, competing with the
+            #    brain-hit baseline of 0.9 used by graph descent path.
+            bm25_norm = 1.0 - math.exp(-bm25_score / 1.5)
+
+            # 2. Tag overlap score
+            tag_score = 0.0
+            if anchor.tags and query_tokens:
+                tag_tokens = set()
+                for t in anchor.tags:
+                    tag_tokens.update(_tokenize(t))
+                overlap = query_tokens & tag_tokens
+                if overlap:
+                    tag_score = min(1.0, len(overlap) / max(len(query_tokens), 1))
+
+            # 3. Semantic similarity
+            sem_score = 0.0
+            if not is_hash and query_emb and anchor.embedding:
+                sem_score = max(0.0, _cosine_sim(query_emb, anchor.embedding))
+
+            # 4. Recency (exponential decay, half-life ~7 days)
+            age_seconds = now - getattr(anchor, 'created_at', now)
+            half_life = 7 * 24 * 3600  # 7 days
+            recency = math.exp(-math.log(2) * age_seconds / half_life) if age_seconds > 0 else 1.0
+
+            # 5. Importance (from AnchorVector)
+            importance = anchor.vector.importance if anchor.vector else 0.5
+
+            # Composite score — scale to [0.82, 1.0] range so BM25
+            # items outrank graph-descent brain hits (fixed 0.9).
+            raw = (w_bm25 * bm25_norm +
+                   w_tag * tag_score +
+                   w_sem * sem_score +
+                   w_recency * recency +
+                   w_importance * importance)
+            composite = raw  # raw is already calibrated to compete with graph descent
+
+            items.append(MemoryItem(
+                anchor=anchor,
+                relevance_score=round(composite, 4),
+                memory_type=MemoryType.SEMANTIC,
+                compression_level=0,
+                compressed_text=anchor.text[:200],
+            ))
+
+        items.sort(key=lambda i: -i.relevance_score)
+        return items[:max_items]
 
     def _system2_recall(self, query: str, context: AgentContext,
                         max_items: int, trigger_reason: str) -> MemoryContext:

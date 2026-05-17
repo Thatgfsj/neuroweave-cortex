@@ -55,8 +55,11 @@ class EmbeddingProvider:
                 self._dim = self._model.get_sentence_embedding_dimension()
             self._backend = "sentence-transformers"
         except Exception:
-            # Fall back to hash-based embedding — stable per text
-            self._backend = "hash"
+            # Fall back to TF-IDF (meaningful bag-of-words), not hash
+            try:
+                self._init_tfidf()
+            except Exception:
+                self._backend = "hash"
 
     def _init_tfidf(self) -> None:
         from sklearn.feature_extraction.text import TfidfVectorizer
