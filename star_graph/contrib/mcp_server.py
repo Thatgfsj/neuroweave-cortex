@@ -63,7 +63,7 @@ def _get_manager():
 
 server = Server(
     "star-graph-memory",
-    version="1.0.1",
+    version="1.0.2",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
