@@ -76,11 +76,11 @@ class TestApplyDecay:
 
     def test_no_decay_recent_edge(self):
         mgr = EdgeDecayManager()
+        now = time.time()
         edge = Edge(source="a", target="b", weight=0.8, edge_type="causes",
-                    last_activated_at=time.time())  # just activated
-        old_weight = edge.weight
-        mgr.apply_decay(edge)
-        assert edge.weight == old_weight  # no time passed
+                    last_activated_at=now)
+        mgr.apply_decay(edge, now=now)
+        assert edge.weight == 0.8  # no time passed
 
     def test_causal_decays_slower_than_topical(self):
         mgr = EdgeDecayManager()

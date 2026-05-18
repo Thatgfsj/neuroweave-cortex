@@ -5,6 +5,14 @@ import tempfile
 
 import pytest
 
+try:
+    from PIL import Image as _PILImage
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+pytestmark = pytest.mark.skipif(not _HAS_PIL, reason="Pillow not installed — image encoding unavailable")
+
 from star_graph.multimodal import (
     MultimodalEmbeddingProvider,
     MultimodalAnchor,
