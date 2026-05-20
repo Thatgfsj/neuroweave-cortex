@@ -10,10 +10,16 @@
 - **2.1 Conflict detection & resolution** — `conflict_detection.py` module with `ConflictDetector`; `Anchor.invalid_at` + `Anchor.conflict_candidate` fields; overwrite/coexist/deprecate strategies; integrated as N2b phase in sleep cycle
 - **2.2 Memory tiering (Hot/Warm/Cold)** — `Anchor.memory_tier` property; Ghost Revival hook in `ThermalStore.thaw_anchor()`; `auto_archive()` scheduled task; `tier_thresholds` config in `defaults.yaml`
 - **2.3 Memory revision engine** — `memory_revision.py` module with `MemoryRevisionEngine`; template-based + optional LLM revision; surprise-prioritized candidate selection; integrated as N2c phase in sleep cycle
+- **3.1 Public benchmark suite** — `benchmarks/run_benchmarks.py`; LongMemEval/LoCoMo/BEAM-style benchmarks with Recall@K, MRR, NDCG metrics; terminal dashboard; configurable scale (quick/standard/large)
+- **3.2 Markdown export** — `markdown_export.py` module; operator-editable plain-text memory export (GBrain-aligned); timeline + topic organization; `nwc-export` CLI command; `MemoryManager.export_markdown()` API
+- **3.3 Batch vectorization** — `batch_vectorizer.py` module; deferred embedding writes (buffer ≥32 or >30s flush); SQLite WAL journal for crash recovery; `MemoryManager.batch_remember()` + `flush_vectorizer()` API
+- **4.1 Encrypted forgetting certificates** — `forget_certificate.py` module; Ed25519-signed JWS self-verifying certificates; GDPR Article 17 compliance; `nwc forget --certificate` + `nwc verify` CLI commands
+- **4.2 Zero-LLM ingestion pipeline** — `zero_llm_pipeline.py` module; 7-stage algorithmic pipeline (security → embed → dedup → entity → classify → score → link); optional LLM ambiguity gate; `MemoryManager.zero_llm_ingest()` API
+- **4.3 Multimodal support** — extended `multimodal.py`; `AudioEncoder` (Whisper/spectrogram) + `AudioAnchor`; `MemoryManager.remember_image()` + `remember_audio()`; unified graph for text/image/audio
 
 ## Current State
 
-- **84 modules** in `star_graph/`, **contrib/** with 6 extracted modules
+- **89 modules** in `star_graph/`, **contrib/** with 6 extracted modules
 - Full S/A/B implementation: Retrieval Budget, Versioned Memory, Cluster Memory, Causal Edge Types, Episodic Memory
 - Lazy imports (PEP 562) — all symbols loaded on first access
 - CI pipeline with version consistency checks

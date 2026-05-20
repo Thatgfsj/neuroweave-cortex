@@ -23,6 +23,7 @@ Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **
 | Explainable reasoning paths | no | no | yes |
 | Memory revision engine (sleep) | no | no | yes |
 | Hot/Warm/Cold memory tiering | no | no | yes |
+| Multimodal (text+image+audio) | no | no | yes |
 | Fuzzy recall ("I think I remember...") | no | no | yes |
 | Emergent abstraction (pattern discovery) | no | no | yes |
 | Temporal context (TimeSpine-indexed) | no | no | yes |
@@ -69,6 +70,9 @@ print(report)
 # Persist
 mgr.save("agent_memory.json")
 mgr.load("agent_memory.json")
+
+# Export to editable Markdown (GBrain-aligned)
+mgr.export_markdown("memories/")
 ```
 
 ## Architecture
@@ -145,6 +149,11 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 | `resonance.py` | Phase-locked oscillation resonance for temporal-coherent retrieval |
 | `streaming.py` | Streaming memory buffer with backpressure |
 | `benchmark.py` | Built-in benchmark suite (5 categories) |
+| `batch_vectorizer.py` | Deferred batch embedding writes (buffer >= 32 / >30s flush) with SQLite WAL crash recovery |
+| `zero_llm_pipeline.py` | 7-stage zero-LLM ingestion: security → embed → dedup → entity → classify → score → link |
+| `multimodal.py` | Cross-modal text/image/audio memory — CLIP image encoding, Whisper/spectrogram audio, unified embedding space |
+| `forget_certificate.py` | Ed25519-signed JWS deletion certificates — GDPR Article 17 provable erasure |
+| `markdown_export.py` | Operator-owned plain-text memory export (GBrain-aligned); timeline + topic Markdown |
 | `config.py` | Centralized YAML config with schema validation, dot-path access, overrides |
 
 ## Retrieval Benchmarks
@@ -358,6 +367,9 @@ python examples/emergence_demo.py
 # sg-query --trace "When did Alice visit Hawaii?"
 # sg-stats --schemas --ghosts
 # sg-sleep --retention 0.15 --edge-prune 0.1
+# nwc-export --output memories/ --organize both
+# nwc-forget <anchor_id> --certificate --reason gdpr_art17
+# nwc-verify certificates/forget-<id>.jws
 ```
 
 ## Benchmarks

@@ -44,6 +44,9 @@ sg-query = "star_graph.cli:query"
 sg-stats = "star_graph.cli:stats_cmd"
 nwc-mcp = "star_graph.mcp_server:entry"
 nwc-server = "star_graph.server:entry"
+nwc-export = "star_graph.cli:export_cmd"
+nwc-forget = "star_graph.cli:forget_cmd"
+nwc-verify = "star_graph.cli:verify_cmd"
 
 [tool.setuptools.packages.find]
 where = ["."]

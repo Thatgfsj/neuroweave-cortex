@@ -488,6 +488,13 @@ tier_thresholds:
   ghost_revive_to_tier: "warm"       # tier assigned on Ghost Revival (hot|warm)
   auto_archive_interval_hours: 6.0   # interval for auto-archive scan
 
+# ── Batch Vectorization ──
+batch_vectorization:
+  enabled: false                        # defer embedding to batch writes
+  batch_size: 32                        # flush when >= this many pending
+  flush_interval_seconds: 30.0          # flush after this many seconds idle
+  journal_path: ""                      # SQLite WAL path for crash recovery (empty = no journal)
+
 # ── Edge Decay (#54) ──
 edge_decay:
   base_multiplier: 1.0               # global decay speed multiplier

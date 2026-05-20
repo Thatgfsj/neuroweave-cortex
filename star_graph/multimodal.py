@@ -559,3 +559,157 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
     na = math.sqrt(sum(x**2 for x in a))
     nb = math.sqrt(sum(x**2 for x in b))
     return dot / (na * nb + 1e-8)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Audio Encoding Support (Whisper or spectrogram fallback)
+# ═══════════════════════════════════════════════════════════════
+
+class AudioEncoder:
+    """Audio embedding encoder. Uses Whisper when available, spectrogram fallback otherwise."""
+
+    def __init__(self, model_name: str = "openai/whisper-tiny"):
+        self._model_name = model_name
+        self._whisper_model = None
+        self._whisper_processor = None
+        self._whisper_available: bool = False
+        self._checked = False
+        self._dim = 512
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def encode(self, audio_path: str) -> list[float]:
+        """Encode audio file into embedding vector."""
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio not found: {audio_path}")
+
+        if self.whisper_available:
+            return self._encode_whisper(audio_path)
+        return self._encode_spectrogram(audio_path)
+
+    @property
+    def whisper_available(self) -> bool:
+        if not self._checked:
+            self._checked = True
+            try:
+                import torch
+                from transformers import WhisperModel, WhisperProcessor
+                import numpy as np
+                self._whisper_processor = WhisperProcessor.from_pretrained(self._model_name)
+                self._whisper_model = WhisperModel.from_pretrained(self._model_name)
+                # Determine embedding dim from a tiny dummy input
+                dummy = torch.zeros((1, 80, 3000))
+                with torch.no_grad():
+                    out = self._whisper_model.encoder(dummy).last_hidden_state
+                    self._dim = out.shape[-1]
+                self._whisper_available = True
+            except Exception:
+                self._whisper_available = False
+        return self._whisper_available
+
+    def _encode_whisper(self, audio_path: str) -> list[float]:
+        import torch
+        import numpy as np
+        try:
+            import librosa
+            audio, sr = librosa.load(audio_path, sr=16000, duration=30)
+        except Exception:
+            import wave
+            import struct
+            with wave.open(audio_path, 'rb') as wf:
+                n_frames = wf.getnframes()
+                sr = wf.getframerate()
+                frames = wf.readframes(min(n_frames, sr * 30))
+                audio = [struct.unpack_from('<h', frames, 2 * i)[0] / 32768.0
+                         for i in range(len(frames) // 2)]
+
+        inputs = self._whisper_processor(audio, sampling_rate=16000,
+                                          return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._whisper_model.encoder(inputs.input_features)
+            vec = outputs.last_hidden_state.mean(dim=1).squeeze()
+        arr = vec.cpu().numpy().flatten().tolist()
+        norm = math.sqrt(sum(x * x for x in arr))
+        return [x / norm for x in arr] if norm > 1e-8 else arr
+
+    def _encode_spectrogram(self, audio_path: str) -> list[float]:
+        """Fallback: compute mel-spectrogram features via numpy."""
+        import numpy as np
+        try:
+            import librosa
+            y, sr = librosa.load(audio_path, sr=16000, duration=10)
+            mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=64, n_fft=1024, hop_length=512)
+            mel_db = librosa.power_to_db(mel, ref=np.max)
+            vec = mel_db.flatten()[:self._dim]
+        except Exception:
+            # Minimal fallback: raw samples → zero-padded vector
+            try:
+                import wave
+                import struct
+                with wave.open(audio_path, 'rb') as wf:
+                    n_frames = min(wf.getnframes(), 16000 * 10)
+                    frames = wf.readframes(n_frames)
+                    samples = [struct.unpack_from('<h', frames, 2 * i)[0] / 32768.0
+                              for i in range(n_frames)]
+                vec = samples[:self._dim]
+            except Exception:
+                return [0.0] * self._dim
+
+        # Pad/truncate to target dim
+        if len(vec) < self._dim:
+            vec = list(vec) + [0.0] * (self._dim - len(vec))
+        vec = vec[:self._dim]
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec] if norm > 1e-8 else list(vec)
+
+
+@dataclass
+class AudioAnchor(Anchor):
+    """Anchor carrying audio modality data."""
+
+    audio_path: str = ""
+    audio_embedding: list[float] | None = None
+    audio_transcript: str = ""  # text transcript (set if Whisper is available)
+
+    @classmethod
+    def from_audio(cls, audio_path: str,
+                   encoder: AudioEncoder | None = None,
+                   transcript: str = "",
+                   tags: list[str] | None = None,
+                   importance: float = 0.5,
+                   source_session: str = "",
+                   emotional_valence: float = 0.0) -> AudioAnchor:
+        """Create an anchor from an audio file."""
+        if encoder is None:
+            encoder = AudioEncoder()
+
+        text = transcript or os.path.basename(audio_path)
+        audio_emb = encoder.encode(audio_path)
+
+        if encoder.whisper_available and not transcript:
+            try:
+                import whisper
+                model = whisper.load_model("tiny")
+                result = model.transcribe(audio_path, fp16=False)
+                transcript = result.get("text", "")
+            except Exception:
+                transcript = ""
+
+        anchor = cls(
+            id=hashlib.blake2b(
+                (text + audio_path + source_session).encode(), digest_size=8
+            ).hexdigest(),
+            text=text[:280],
+            vector=AnchorVector(importance=importance, emotional_valence=emotional_valence),
+            embedding=audio_emb,
+            audio_path=audio_path,
+            audio_embedding=audio_emb,
+            audio_transcript=transcript or text[:200],
+            source_session=source_session,
+            tags=tags or [],
+            state=MemoryState.ACTIVE,
+            state_history=[(MemoryState.ACTIVE, time.time())],
+        )
+        return anchor

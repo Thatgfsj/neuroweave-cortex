@@ -280,6 +280,12 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "BM25Index":               ("star_graph.bm25", "BM25Index"),
     "reciprocal_rank_fusion":  ("star_graph.bm25", "reciprocal_rank_fusion"),
 
+    # batch_vectorizer
+    "BatchVectorizer":         ("star_graph.batch_vectorizer", "BatchVectorizer"),
+
+    # zero_llm_pipeline
+    "ZeroLLMPipeline":         ("star_graph.zero_llm_pipeline", "ZeroLLMPipeline"),
+
     # logger
     "get_logger":              ("star_graph.logger", "get_logger"),
     "init_logging":            ("star_graph.logger", "init_logging"),

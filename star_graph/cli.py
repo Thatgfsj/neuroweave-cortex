@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from .anchor import Anchor
@@ -151,6 +152,45 @@ def sleep_cmd() -> None:
     print(f"Avg retention: {s['avg_retention']:.3f}  |  Cortical: {s['avg_hippocampal_dep']:.3f}")
 
 
+def export_cmd() -> None:
+    parser = argparse.ArgumentParser(
+        description="Export memories to operator-editable Markdown files")
+    parser.add_argument("--output", default="memories",
+                        help="Output directory (default: memories/)")
+    parser.add_argument("--organize", choices=["timeline", "topics", "both"],
+                        default="both", help="Organization mode (default: both)")
+    parser.add_argument("--single-file", action="store_true",
+                        help="Dump everything into a single file")
+    parser.add_argument("--graph", default=None, help="Graph file path")
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format for status (default: text)")
+    args = parser.parse_args()
+
+    from .storage import Storage
+    from .markdown_export import export_to_markdown
+
+    store = Storage(args.graph)
+    graph = store.load()
+
+    out_path = export_to_markdown(
+        graph,
+        output_dir=args.output,
+        organize_by=args.organize,
+        single_file=args.single_file,
+    )
+
+    if args.format == "json":
+        import json
+        print(json.dumps({
+            "status": "ok",
+            "output_dir": out_path,
+            "anchors": graph.stats()["anchors"],
+        }, ensure_ascii=False, indent=2))
+        return
+
+    print(f"Exported {graph.stats()['anchors']} memories to {out_path}/")
+
+
 def stats_cmd() -> None:
     parser = argparse.ArgumentParser(description="Show graph statistics")
     parser.add_argument("--graph", default=None)
@@ -208,3 +248,89 @@ def stats_cmd() -> None:
         print("\n── Ghosts ──")
         for ghost_id, ghost in graph._ghost_subsystem.ghosts.items():
             print(f"  {ghost_id[:16]}...  revivals: {ghost.revival_count}")
+
+
+def forget_cmd() -> None:
+    parser = argparse.ArgumentParser(
+        description="Forget a memory and optionally generate a deletion certificate")
+    parser.add_argument("anchor_id", help="Anchor ID to forget")
+    parser.add_argument("--certificate", action="store_true",
+                        help="Generate Ed25519-signed deletion certificate (GDPR Art. 17)")
+    parser.add_argument("--query", default="", help="The forget query used")
+    parser.add_argument("--reason", default="user_request",
+                        choices=["user_request", "gdpr_art17", "policy", "expired"],
+                        help="Reason for deletion")
+    parser.add_argument("--graph", default=None, help="Graph file path")
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format")
+    args = parser.parse_args()
+
+    from .storage import Storage
+    from .manager import MemoryManager
+
+    store = Storage(args.graph)
+    graph = store.load()
+    mgr = MemoryManager(graph=graph)
+
+    if args.certificate:
+        result = mgr.forget_with_certificate(
+            args.anchor_id, query=args.query, reason=args.reason)
+        if args.format == "json":
+            out = {
+                "deleted": result["deleted"],
+                "memory_id": result.get("memory_id", ""),
+                "certificate": result.get("certificate", ""),
+                "cert_path": result.get("cert_path", ""),
+            }
+            if not result["deleted"]:
+                out["error"] = result.get("error", "unknown")
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            if result["deleted"]:
+                print(f"Deleted: {result['memory_id']}")
+                print(f"Certificate saved: {result['cert_path']}")
+            else:
+                print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+    else:
+        anchor = mgr._rt.forget(args.anchor_id, create_ghost=True)
+        if args.format == "json":
+            print(json.dumps({
+                "deleted": anchor is not None,
+                "anchor_id": args.anchor_id,
+            }, ensure_ascii=False, indent=2))
+        elif anchor:
+            print(f"Forgotten: {args.anchor_id}")
+        else:
+            print(f"Anchor not found: {args.anchor_id}", file=sys.stderr)
+
+    store.save(mgr.graph)
+
+
+def verify_cmd() -> None:
+    parser = argparse.ArgumentParser(
+        description="Verify a forgetting certificate")
+    parser.add_argument("certificate", help="Path to .jws certificate file")
+    parser.add_argument("--public-key", default="", help="Public key (base64url) for full verification")
+    parser.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format")
+    args = parser.parse_args()
+
+    from .forget_certificate import ForgetCertificate
+
+    if args.public_key:
+        result = ForgetCertificate.verify_full(args.certificate, args.public_key)
+    else:
+        result = ForgetCertificate.verify(args.certificate)
+
+    if args.format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "VALID" if result["valid"] else "INVALID"
+        if result.get("error"):
+            status += f" ({result['error']})"
+        print(f"Certificate: {status}")
+        print(f"  Memory ID:  {result.get('memory_id', 'N/A')}")
+        print(f"  Query:      {result.get('query', 'N/A')}")
+        print(f"  Deleted at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(result.get('deleted_at', 0)))}")
+        print(f"  Reason:     {result.get('reason', 'N/A')}")
+        print(f"  Algorithm:  {result.get('algorithm', 'N/A')}")

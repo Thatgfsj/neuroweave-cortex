@@ -123,6 +123,7 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
         self._cross_encoder = None  # CrossEncoder reranker — lazy init
+        self._batch_vectorizer = None  # BatchVectorizer — lazy init
         self._tiered: TieredStorage | None = None
         self._hippocampus = None  # HippocampusBuffer — lazy init
         self._shard_manager = None  # MemoryShardManager — lazy init
@@ -384,6 +385,24 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
                 enabled=rerank_cfg.get('enabled', False),
             )
         return self._cross_encoder
+
+    @property
+    def batch_vectorizer(self):
+        if self._batch_vectorizer is None:
+            from .batch_vectorizer import BatchVectorizer
+            bv_cfg = getattr(self.cfg, 'batch_vectorization', None) or {}
+            journal_path = getattr(bv_cfg, 'journal_path', "") if hasattr(bv_cfg, 'get') else bv_cfg.get('journal_path', "")
+            if journal_path and self.storage_path:
+                import os
+                journal_path = os.path.join(os.path.dirname(self.storage_path) or ".", "pending_embeddings.db")
+            self._batch_vectorizer = BatchVectorizer(
+                self.graph,
+                self._get_embedder(),
+                batch_size=getattr(bv_cfg, 'batch_size', 32) if hasattr(bv_cfg, 'get') else bv_cfg.get('batch_size', 32),
+                flush_interval=getattr(bv_cfg, 'flush_interval_seconds', 30.0) if hasattr(bv_cfg, 'get') else bv_cfg.get('flush_interval_seconds', 30.0),
+                db_path=journal_path,
+            )
+        return self._batch_vectorizer
 
     @property
     def tiered(self) -> TieredStorage:
