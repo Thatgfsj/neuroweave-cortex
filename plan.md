@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing
+> Last updated: 2026-05-21 | **v1.0.3** | 1,989 tests passing
 
 ## Current State
 
@@ -116,3 +116,154 @@ Different providers output different dimensions (OpenAI 512/1536, Local 384/768,
 - **Async scope**: migrate I/O paths first (embedding, storage); keep compute in executor
 - **Backward compat**: re-export old paths, deprecate sync API over one major version
 - **Phase derivation**: current `embedding.py` phase/frequency logic (theta band) is core differentiator — preserve as mixin or standalone utility during provider refactor
+
+## Competitive Analysis & Optimization Roadmap (2026-05-21)
+
+行业对标: Mem0 / Hindsight / MemForge / Zep / MAGMA / Mnemosyne / ECHOFORM
+
+### NWC 的独特护城河（保持并强化）
+
+| 特性 | 地位 | 策略 |
+|------|------|------|
+| Ghost Revival（幽灵复苏/节省效应） | **业界唯一** | 宣传核心，考虑单独出 whitepaper |
+| 8-Phase Sleep Consolidation | MemForge 有 10-phase 但偏工程化；NWC 更生物化 | 强化 REM/NREM 阶段区分，匹配神经科学文献 |
+| Emotional Valence (-1~+1) | 除 Second-Me 外无竞品实现 | 情感驱动的记忆权重是差异化方向 |
+| Survival Decay（生存衰减） | 业界多用简单 TTL；NWC 的生存函数更深 | 保留并可视化衰减曲线 |
+| Emergent Abstraction（涌现抽象） | MAGMA/Hindsight 有类似但非自发生成 | 宣传"自学能力" |
+
+### 优先优化项
+
+#### 🔴 Priority 1 — 检索精度（短期收益最大）
+
+**1.1 多策略融合检索（对标 Hindsight TEMPR）**
+
+当前: 纯图谱检索
+目标: 四路并行 → RRF 融合 → Cross-Encoder 重排
+
+```
+查询 → ┌─ 语义向量 (embedding cosine)
+        ├─ BM25 关键词 (倒排索引)
+        ├─ 图谱多跳遍历 (Star Graph edges)
+        └─ 时序推理 (causal/temporal edges)
+          ↓
+        RRF (Reciprocal Rank Fusion) 融合
+          ↓
+        Cross-Encoder 重排序
+          ↓
+        最终结果 + 推理路径
+```
+
+新增模块: `star_graph/bm25_index.py`, `star_graph/retrieval_fusion.py`
+改动范围: `retrieval_pipeline.py` → 扩展为多通道入口
+预计收益: 检索精度 +20-30%
+
+**1.2 Cross-Encoder 重排序**
+
+- 初筛 top-N 后过一遍 lightweight cross-encoder (sentence-transformers 内置)
+- 可配置: `rerank_top_k`, `rerank_model`, `rerank_threshold`
+- 仅对用户查询 + 候选记忆对打分，开销可控
+
+**1.3 可解释推理路径（对标 MAGMA Adaptive Traversal）**
+
+- 每次 recall 返回 `retrieval_trace`: 哪些边被遍历、各通道的贡献分
+- `explain()` 新 API: "为什么这条记忆被召回"
+- 图谱路径可视化（CLI 输出 ASCII graph 或 JSON trace）
+
+#### 🔴 Priority 2 — 记忆质量（睡眠/巩固增强）
+
+**2.1 矛盾检测与冲突解决（对标 Hindsight Background Merging）**
+
+当前: sleep 期间做 consolidation，但没有显式冲突检测
+目标: 在 NREM 阶段增加冲突检测步骤
+
+- 新事实 vs 已有记忆的语义矛盾检测 (embedding similarity > 0.9 但 sentiment 相反)
+- 冲突记忆标记 `conflict_candidate`
+- 解决策略: `overwrite` (高置信度新事实) / `coexist` (观点分歧) / `deprecate` (旧事实标记 invalid_at)
+- 新增: `memory.invalid_at` 时间戳字段（对标 Zep 的图节点管理）
+
+**2.2 记忆三级分层（对标 MemForge Hot→Warm→Cold）**
+
+- **Hot**: 未整合的原始事件 (当前 working_memory)
+- **Warm**: 已 consolidate、可检索、有 score (当前长期记忆主体)
+- **Cold**: 低频访问归档 (不参与检索，但可通过 Ghost Revival 复活)
+- 新增: `tier_thresholds` 配置, `auto_archive` 定时任务
+- Ghost Revival 在 Cold → Warm 复活时触发，完美契合
+
+**2.3 记忆修订引擎（对标 MemForge Memory Revision）**
+
+- 睡眠中识别低置信度记忆 (score < threshold)
+- LLM 重新摘要/合并，提升记忆质量
+- 高"惊吓值"（surprise）记忆优先修订
+
+#### 🟡 Priority 3 — 工程化 & 生态
+
+**3.1 公开 Benchmark**
+
+- LongMemEval: 长期对话记忆保持率
+- LoCoMo: 多轮对话记忆一致性
+- BEAM: 大规模记忆检索精度
+- 目标: 至少达到 Mem0 2026 水平 (LongMemEval ~90%)
+
+**3.2 Markdown 导出**
+
+- `nwc export --format markdown --output memories/`
+- 按时间线或主题组织成 Markdown 文件
+- 用户可直接编辑、删除、补充
+- 对标 GBrain "operator-owned plain-text memory"
+
+**3.3 批量向量化延迟写入**
+
+- 已在 Phase 1 标记为 deferred → 提升优先级
+- 目标: 减少 embedding I/O 次数，支持 32+ 条批量处理
+- crash-recovery: SQLite pending queue + WAL
+
+#### 🟢 Priority 4 — 远期差异化
+
+**4.1 加密遗忘证书（对标 ECHOFORM）**
+
+- Ed25519 签名的 JWS 证书，证明某条记忆已被可证明地删除
+- GDPR Article 17 合规: "被遗忘权"的工程化实现
+- 生成: `nwc forget --certificate --query "xxx"` → 输出签名证书
+- 验证: `nwc verify --certificate <path>`
+
+**4.2 零 LLM 调用摄入管道（对标 Mnemosyne）**
+
+- 纯算法管线: 安全过滤 → embedding → 去重 → 实体提取 → 分类 → 评分 → 链接
+- 仅在"模糊判断"环节可选调用 LLM
+- 目标: 摄取成本降至 $0 / 条（当前如有 LLM 调用则 > 0）
+
+**4.3 多模态支持（对标 LATRACE）**
+
+- `remember_image()`, `remember_audio()` — 多模态 embedding → 统一图谱
+- CLIP / Whisper 嵌入 → 同一向量空间
+- 文本查询可召回相关图片/音频记忆
+
+### 实施优先级矩阵
+
+```
+                    高影响 ───┬─── 低影响
+                   ┌──────────┼──────────┐
+             高    │ 1.1 多策略检索  │ 3.1 Benchmark  │
+             难    │ 1.2 Cross-Encoder│ 4.1 加密遗忘    │
+             度    │ 2.1 矛盾检测    │ 4.3 多模态      │
+                   ├──────────┼──────────┤
+             低    │ 1.3 可解释路径  │ 3.2 Markdown导出│
+             难    │ 2.2 记忆分级    │ 3.3 批量向量化   │
+             度    │ 2.3 记忆修订    │ 4.2 零LLM摄入    │
+                   └──────────┴──────────┘
+```
+
+建议实施顺序: **1.1 → 1.2 → 1.3 → 2.1 → 2.2 → 3.1 → 其他**
+
+### 参考项目链接
+
+- **Mem0** (向量检索标杆): https://github.com/mem0ai/mem0 — LongMemEval 93.4%
+- **Hindsight** (多策略融合检索 SOTA): https://vectorize.io — BEAM 10M 64.1%
+- **MemForge** (神经科学睡眠周期): https://github.com/salishforge/memforge — LongMemEval 93.2%
+- **Zep/Graphiti** (知识图谱优先): https://github.com/getzep/graphiti — SOC 2 Type 2 合规
+- **Cognee** (向量+图谱混合): https://github.com/topoteretes/cognee — Memphis 算法
+- **MAGMA** (多图学术 SOTA): https://arxiv.org/abs/2601.03236 — 四正交关系图
+- **Mnemosyne** (5层认知OS): https://github.com/28naem-del/mnemosyne — 零LLM摄入
+- **ECHOFORM** (加密遗忘证书): https://github.com/OpenAgentic-Labs/echoform-ghost-memory
+- **GBrain** (Markdown-first 个人记忆): YC CEO Garry Tan 开源 — 面向 OpenClaw
+- **LATRACE** (多模态记忆): https://github.com/ZXXZ1000/LATRACE-AI
