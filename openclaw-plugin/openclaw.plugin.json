@@ -1,0 +1,54 @@
+{
+  "id": "nwcortex",
+  "name": "NeuroWeave Cortex (NWC)",
+  "commandAliases": [{ "name": "nwc" }],
+  "description": "Hippocampal-inspired cognitive memory runtime — remembers, forgets, consolidates, and evolves memories",
+  "activation": {
+    "onStartup": false,
+    "onCommands": ["nwc"]
+  },
+  "kind": "memory",
+  "contracts": {
+    "tools": ["memory_forget", "memory_store", "memory_stats"]
+  },
+  "uiHints": {
+    "storagePath": {
+      "label": "Storage Path",
+      "placeholder": "~/.openclaw/nwcortex/memory.json",
+      "advanced": true,
+      "help": "Path to the NWC memory file"
+    },
+    "pythonCommand": {
+      "label": "Python Command",
+      "placeholder": "nwc-mcp",
+      "advanced": true,
+      "help": "Command to launch the NWC MCP server (nwc-mcp or full path to Python)"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories into context before prompt build"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture important information from conversations"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "storagePath": {
+        "type": "string"
+      },
+      "pythonCommand": {
+        "type": "string"
+      },
+      "autoRecall": {
+        "type": "boolean"
+      },
+      "autoCapture": {
+        "type": "boolean"
+      }
+    }
+  }
+}
