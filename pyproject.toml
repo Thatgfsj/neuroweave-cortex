@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "NWcortex"
-version = "1.0.2"
+version = "1.0.3"
 description = "NeuroWeave Cortex (NWC) — Graph-first cognitive memory runtime for AI agents. Hippocampal-inspired architecture with domain routing, spreading activation, edge budget management, 4-layer compression, thermal storage, personality modeling, and 8-phase sleep consolidation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,12 +34,16 @@ dependencies = [
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.2.0"]
+mcp = ["mcp>=1.0.0"]
+all = ["sentence-transformers>=2.2.0", "mcp>=1.0.0"]
 
 [project.scripts]
 sg-sleep = "star_graph.cli:sleep_cmd"
 sg-add = "star_graph.cli:add"
 sg-query = "star_graph.cli:query"
 sg-stats = "star_graph.cli:stats_cmd"
+nwc-mcp = "star_graph.mcp_server:entry"
+nwc-server = "star_graph.server:entry"
 
 [tool.setuptools.packages.find]
 where = ["."]

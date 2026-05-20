@@ -15,14 +15,18 @@ Or from Claude Desktop / MCP client config:
     }
 
 Tools exposed:
-    remember     — store a memory
-    recall       — context-aware retrieval
-    forget       — remove a memory (with ghost trace)
-    sleep        — run sleep consolidation
-    stats        — memory system statistics
-    fuzzy_recall — low-confidence recall from ghost traces
-    get_profile  — inferred user profile from accumulated memories
-    evolve       — run memory evolution (decay, boost, conflict resolution)
+    remember         — store a memory
+    remember_working — store in fast ephemeral working-memory buffer
+    recall           — context-aware retrieval
+    forget           — remove a memory (with ghost trace)
+    sleep            — run 5-phase sleep consolidation
+    consolidate      — micro-consolidation (incremental, non-blocking)
+    stats            — memory system statistics
+    fuzzy_recall     — low-confidence recall from ghost traces
+    get_profile      — inferred user profile from accumulated memories
+    evolve           — run memory evolution (decay, boost, conflict resolution)
+    save             — persist memory graph to disk
+    load             — load memory graph from disk
 """
 
 from __future__ import annotations
@@ -63,7 +67,7 @@ def _get_manager():
 
 server = Server(
     "star-graph-memory",
-    version="1.0.2",
+    version="1.0.3",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
@@ -194,6 +198,66 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {},
+        },
+    ),
+    Tool(
+        name="remember_working",
+        description="Store a memory in the fast ephemeral working-memory buffer — "
+                    "shorter-lived than regular memory, high-priority for current "
+                    "task context. Use for active debugging state, current goal, "
+                    "recent observations that don't need long-term retention.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The memory content to hold in working memory",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags: 'debug', 'current-task', 'observation', etc.",
+                },
+            },
+            "required": ["text"],
+        },
+    ),
+    Tool(
+        name="consolidate",
+        description="Run a micro-consolidation cycle — incremental, non-blocking. "
+                    "Strengthens recent memories, prunes noise, and forms small "
+                    "abstractions without the full 8-phase sleep.",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
+        name="load",
+        description="Load a previously saved memory graph from disk.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the saved memory file (JSON format)",
+                },
+            },
+            "required": ["path"],
+        },
+    ),
+    Tool(
+        name="save",
+        description="Save the current memory graph to disk for persistence.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "File path to save to (JSON format)",
+                },
+            },
+            "required": ["path"],
         },
     ),
 ]
@@ -380,6 +444,61 @@ async def call_tool(name: str, arguments: dict):
                 }, ensure_ascii=False, indent=2),
             )]
 
+        elif name == "remember_working":
+            anchor = mgr.remember_working(
+                text=arguments["text"],
+                tags=arguments.get("tags", []),
+            )
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "status": "stored_working",
+                    "anchor_id": anchor.id,
+                    "text_preview": anchor.text[:120],
+                    "tags": anchor.tags,
+                    "tier": "working",
+                }, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "consolidate":
+            t0 = time.perf_counter()
+            result = mgr.micro_consolidate()
+            elapsed = time.perf_counter() - t0
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "status": "micro_consolidation_complete",
+                    "duration_seconds": round(elapsed, 3),
+                    "detail": str(result)[:500] if result else "ok",
+                }, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "load":
+            path = arguments["path"]
+            mgr.load(path)
+            s = mgr.stats
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "status": "loaded",
+                    "path": path,
+                    "anchors": s.anchors,
+                    "edges": s.edges,
+                    "ghosts": s.ghosts,
+                }, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "save":
+            path = arguments["path"]
+            mgr.save(path)
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "status": "saved",
+                    "path": path,
+                }, ensure_ascii=False, indent=2),
+            )]
+
         else:
             return [TextContent(
                 type="text",
@@ -398,8 +517,44 @@ async def call_tool(name: str, arguments: dict):
 
 # ── Entry point ─────────────────────────────────────────────
 
-def main():
-    """Run the MCP server on stdio."""
+
+def _parse_args(argv: list[str] | None = None):
+    """Parse CLI arguments for the MCP server entry point."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="nwc-mcp",
+        description="NeuroWeave Cortex MCP Server — cognitive memory runtime for AI agents",
+    )
+    parser.add_argument(
+        "--storage",
+        default=os.environ.get("STAR_GRAPH_STORAGE_PATH", ""),
+        help="Path to persistent storage file (default: env STAR_GRAPH_STORAGE_PATH or in-memory only)",
+    )
+    parser.add_argument(
+        "--load",
+        default="",
+        help="Load memory graph from file on startup",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None):
+    """Run the MCP server on stdio.
+
+    Entry point registered as ``nwc-mcp`` in pyproject.toml.
+    Supports ``--storage`` / ``--load`` flags for persistent memory
+    and ``STAR_GRAPH_STORAGE_PATH`` env var.
+    """
+    args = _parse_args(argv)
+
+    # Resolve storage path: --load > --storage > env > empty (in-memory)
+    storage_path = args.load or args.storage
+    if storage_path:
+        os.environ["STAR_GRAPH_STORAGE_PATH"] = storage_path
+
+    global _storage_path
+    _storage_path = storage_path
+
     from mcp.server.stdio import stdio_server
 
     async def _run():

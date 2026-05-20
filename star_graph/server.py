@@ -156,11 +156,15 @@ def start_server(host: str = "0.0.0.0", port: int = 8420):
         print("Server stopped.")
 
 
-if __name__ == "__main__":
-    import sys
+def entry():
+    """CLI entry point registered as ``nwc-server`` in pyproject.toml."""
     import argparse
     parser = argparse.ArgumentParser(description="NeuroWeave Cortex REST Server")
     parser.add_argument("--port", type=int, default=8420)
     parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
     start_server(host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    entry()

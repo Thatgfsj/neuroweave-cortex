@@ -236,17 +236,105 @@ See `star_graph/defaults.yaml` for all 300+ tunable parameters.
 # From PyPI (package name: NWcortex, import as: star_graph)
 pip install NWcortex
 
-# With sentence-transformers for semantic embeddings (~2GB model download on first use)
+# With sentence-transformers for semantic embeddings
 pip install "NWcortex[embeddings]"
 
-# Optional: for SQLite storage backend
-pip install aiosqlite
+# With MCP server support (for AI agent integration)
+pip install "NWcortex[mcp]"
+
+# Everything
+pip install "NWcortex[all]"
 
 # Run demo
 python examples/emergence_demo.py
 ```
 
 **Note:** Without `[embeddings]`, the system uses a lightweight TF-IDF fallback for text encoding. Install `sentence-transformers` only if you need semantic-quality embeddings.
+
+## MCP Server — AI Agent Integration
+
+NeuroWeave Cortex ships with a [Model Context Protocol](https://modelcontextprotocol.io) server. Connect any MCP-compatible AI agent (Claude Desktop, OpenClaw, Cursor, etc.) for persistent cognitive memory across conversations.
+
+### Quick start
+
+```bash
+# Install with MCP support
+pip install "NWcortex[mcp]"
+
+# Launch the MCP server on stdio
+nwc-mcp
+
+# With persistent storage
+nwc-mcp --storage agent_memory.json
+
+# Load a previously saved memory graph
+nwc-mcp --load my_memories.json
+```
+
+### Tool reference (12 tools)
+
+| Tool | Description |
+|------|-------------|
+| `remember` | Store a long-term memory (tags, importance, emotional valence) |
+| `remember_working` | Store in fast ephemeral working-memory buffer (current task context) |
+| `recall` | Context-aware semantic retrieval with task-type routing |
+| `forget` | Remove a memory, creating a ghost trace for potential fuzzy recall |
+| `sleep` | Run 5-phase sleep consolidation — merges, prunes, forms schemas |
+| `consolidate` | Micro-consolidation — incremental, non-blocking |
+| `stats` | Memory system statistics (anchors, edges, ghosts, schemas, cognitive health) |
+| `fuzzy_recall` | Low-confidence recall from ghost traces ("I seem to remember...") |
+| `get_profile` | Inferred user profile from accumulated memories |
+| `evolve` | Memory evolution cycle (decay, boost, conflict resolution) |
+| `save` | Persist memory graph to disk (JSON) |
+| `load` | Load memory graph from disk (JSON) |
+
+### Claude Desktop config
+
+```json
+{
+  "mcpServers": {
+    "neuroweave-cortex": {
+      "command": "nwc-mcp",
+      "args": ["--storage", "/path/to/agent_memory.json"]
+    }
+  }
+}
+```
+
+### OpenClaw config
+
+```json
+{
+  "mcpServers": {
+    "neuroweave-cortex": {
+      "command": "nwc-mcp",
+      "args": ["--storage", "/path/to/agent_memory.json"]
+    }
+  }
+}
+```
+
+## REST API Server
+
+```bash
+# Start the REST server
+nwc-server --port 8420
+
+# Or via module
+python -m star_graph.server --port 8420
+```
+
+Endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check with anchor/edge counts |
+| GET | `/metrics` | Prometheus-format metrics |
+| GET | `/stats` | Full memory system statistics |
+| POST | `/remember` | Store a memory `{"text": "...", "tags": [...]}` |
+| POST | `/recall` | Retrieve memories `{"query": "...", "max_items": 10}` |
+| POST | `/sleep` | Run sleep consolidation |
+| POST | `/consolidate` | Run micro-consolidation |
 
 ## Interactive Demo
 

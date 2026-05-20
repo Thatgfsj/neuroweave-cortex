@@ -1,6 +1,7 @@
 include README.md
 include LICENSE
 include star_graph/defaults.yaml
+recursive-include star_graph/contrib *.py
 recursive-include examples *.py
 prune venv
 prune dist

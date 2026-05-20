@@ -194,29 +194,73 @@ cfg = load_config("my_params.yaml")
 ## 安装
 
 ```bash
+# 从 PyPI 安装（包名：NWcortex，导入名：star_graph）
+pip install NWcortex
+
+# 包含语义嵌入支持（首次使用需下载约 2GB 模型）
+pip install "NWcortex[embeddings]"
+
+# 包含 MCP 服务支持（AI 代理集成）
+pip install "NWcortex[mcp]"
+
+# 全部功能
+pip install "NWcortex[all]"
+
+# 或从源码安装
 git clone https://github.com/Thatgfsj/neuroweave-cortex.git
 cd neuroweave-cortex
-
-# 可编辑模式安装
 pip install -e .
-
-# 可选：SQLite 存储后端
-pip install aiosqlite
 
 # 运行演示
 python examples/emergence_demo.py
 ```
 
-**注意：** NeuroWeave Cortex 未发布到 PyPI，请从源码安装。
-
 ## CLI
 
 ```bash
+# 旧版 CLI
 sg-add "讨论了微服务部署模式" --tags 架构 --emotional 0.6
 sg-query "数据库连接池最佳实践"
-sg-query --trace "用户住在哪里？"
 sg-stats --schemas --ghosts
 sg-sleep --retention 0.15 --edge-prune 0.1
+
+# MCP 服务（AI 代理集成）
+nwc-mcp                          # 启动 MCP 服务（内存模式）
+nwc-mcp --storage agent_memory.json   # 持久化存储
+nwc-mcp --load saved_memory.json      # 加载已保存的记忆
+
+# REST API 服务
+nwc-server --port 8420           # 启动 REST 服务
+```
+
+### MCP 工具列表（12 个）
+
+| 工具 | 说明 |
+|------|------|
+| `remember` | 存储长期记忆（标签、重要性、情感效价） |
+| `remember_working` | 存储到快速工作记忆缓冲区（当前任务上下文） |
+| `recall` | 上下文感知语义检索 |
+| `forget` | 遗忘记忆并创建幽灵痕迹 |
+| `sleep` | 5 阶段睡眠巩固（合并、修剪、模式形成） |
+| `consolidate` | 微巩固——增量式、非阻塞 |
+| `stats` | 记忆系统统计 |
+| `fuzzy_recall` | 幽灵痕迹低置信度召回 |
+| `get_profile` | 推断用户画像 |
+| `evolve` | 记忆进化周期（衰减、增强、冲突解决） |
+| `save` | 持久化记忆图到磁盘 |
+| `load` | 从磁盘加载记忆图 |
+
+### Claude Desktop / OpenClaw 配置
+
+```json
+{
+  "mcpServers": {
+    "neuroweave-cortex": {
+      "command": "nwc-mcp",
+      "args": ["--storage", "/path/to/agent_memory.json"]
+    }
+  }
+}
 ```
 
 ## 运行测试
