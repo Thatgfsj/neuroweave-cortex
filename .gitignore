@@ -12,3 +12,4 @@ dist/
 *.pyc
 .pytest_cache/
 htmlcov/
+certificates/

@@ -34,18 +34,18 @@ from . import extras            # noqa: F401 — feature-gated modules
 
 _LAZY: dict[str, tuple[str, str | None]] = {
     # anchor / graph core
-    "Anchor":                  ("star_graph.anchor", "Anchor"),
-    "AnchorVector":            ("star_graph.anchor", "AnchorVector"),
-    "Oscillator":              ("star_graph.anchor", "Oscillator"),
-    "MemoryState":             ("star_graph.anchor", "MemoryState"),
-    "ThermalState":            ("star_graph.anchor", "ThermalState"),
-    "EmbedderRegistry":        ("star_graph.anchor", "EmbedderRegistry"),
-    "StarGraph":               ("star_graph.graph", "StarGraph"),
-    "Edge":                    ("star_graph.graph", "Edge"),
-    "RichEdge":                ("star_graph.graph", "RichEdge"),
-    "Constellation":           ("star_graph.graph", "Constellation"),
-    "Schema":                  ("star_graph.graph", "Schema"),
-    "ReflectionNode":          ("star_graph.graph", "ReflectionNode"),
+    "Anchor":                  ("star_graph.memory_core.anchor", "Anchor"),
+    "AnchorVector":            ("star_graph.memory_core.anchor", "AnchorVector"),
+    "Oscillator":              ("star_graph.memory_core.anchor", "Oscillator"),
+    "MemoryState":             ("star_graph.memory_core.anchor", "MemoryState"),
+    "ThermalState":            ("star_graph.memory_core.anchor", "ThermalState"),
+    "EmbedderRegistry":        ("star_graph.memory_core.anchor", "EmbedderRegistry"),
+    "StarGraph":               ("star_graph.memory_core.graph", "StarGraph"),
+    "Edge":                    ("star_graph.memory_core.graph", "Edge"),
+    "RichEdge":                ("star_graph.memory_core.graph", "RichEdge"),
+    "Constellation":           ("star_graph.memory_core.graph", "Constellation"),
+    "Schema":                  ("star_graph.memory_core.graph", "Schema"),
+    "ReflectionNode":          ("star_graph.memory_core.graph", "ReflectionNode"),
 
     # config
     "Config":                  ("star_graph.config", "Config"),
@@ -59,66 +59,66 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "get_embedder":            ("star_graph.embedding", "get_embedder"),
 
     # runtime / manager (primary entry points)
-    "MemoryManager":           ("star_graph.manager", "MemoryManager"),
-    "MemoryRuntime":           ("star_graph.runtime", "MemoryRuntime"),
-    "ManagerStats":            ("star_graph.manager_stats", "ManagerStats"),
-    "RetrievalPipeline":       ("star_graph.retrieval_pipeline", "RetrievalPipeline"),
+    "MemoryManager":           ("star_graph.cortex_api.manager", "MemoryManager"),
+    "MemoryRuntime":           ("star_graph.cortex_api.runtime", "MemoryRuntime"),
+    "ManagerStats":            ("star_graph.cortex_api.manager_stats", "ManagerStats"),
+    "RetrievalPipeline":       ("star_graph.retrieval_engine.retrieval_pipeline", "RetrievalPipeline"),
 
     # scheduler
-    "CognitiveMemoryScheduler": ("star_graph.scheduler", "CognitiveMemoryScheduler"),
-    "AgentContext":            ("star_graph.scheduler", "AgentContext"),
-    "MemoryType":              ("star_graph.scheduler", "MemoryType"),
-    "MemoryItem":              ("star_graph.scheduler", "MemoryItem"),
-    "MemoryContext":           ("star_graph.scheduler", "MemoryContext"),
+    "CognitiveMemoryScheduler": ("star_graph.cortex_api.scheduler", "CognitiveMemoryScheduler"),
+    "AgentContext":            ("star_graph.cortex_api.scheduler", "AgentContext"),
+    "MemoryType":              ("star_graph.cortex_api.scheduler", "MemoryType"),
+    "MemoryItem":              ("star_graph.cortex_api.scheduler", "MemoryItem"),
+    "MemoryContext":           ("star_graph.cortex_api.scheduler", "MemoryContext"),
 
     # sleep
-    "SleepCycle":              ("star_graph.sleep", "SleepCycle"),
-    "SleepReport":             ("star_graph.sleep_report", "SleepReport"),
-    "PhaseMetrics":            ("star_graph.sleep_report", "PhaseMetrics"),
+    "SleepCycle":              ("star_graph.consolidation.sleep", "SleepCycle"),
+    "SleepReport":             ("star_graph.consolidation.sleep_report", "SleepReport"),
+    "PhaseMetrics":            ("star_graph.consolidation.sleep_report", "PhaseMetrics"),
 
     # retrieval
-    "RetrievalResult":         ("star_graph.retriever", "RetrievalResult"),
-    "RetrievalTrace":          ("star_graph.retriever", "RetrievalTrace"),
-    "RetrievalTraceEntry":     ("star_graph.retriever", "RetrievalTraceEntry"),
-    "Retriever":               ("star_graph.retriever", "Retriever"),
-    "OscillationResonanceRetriever": ("star_graph.retriever", "OscillationResonanceRetriever"),
-    "VectorSimilarityRetriever": ("star_graph.retriever", "VectorSimilarityRetriever"),
-    "HybridFusionRetriever":   ("star_graph.retriever", "HybridFusionRetriever"),
-    "ExplainableScore":        ("star_graph.retriever", "ExplainableScore"),
-    "personalized_pagerank":   ("star_graph.retriever", "personalized_pagerank"),
-    "compare_retrievers":      ("star_graph.retriever", "compare_retrievers"),
+    "RetrievalResult":         ("star_graph.retrieval_engine.retriever", "RetrievalResult"),
+    "RetrievalTrace":          ("star_graph.retrieval_engine.retriever", "RetrievalTrace"),
+    "RetrievalTraceEntry":     ("star_graph.retrieval_engine.retriever", "RetrievalTraceEntry"),
+    "Retriever":               ("star_graph.retrieval_engine.retriever", "Retriever"),
+    "OscillationResonanceRetriever": ("star_graph.retrieval_engine.retriever", "OscillationResonanceRetriever"),
+    "VectorSimilarityRetriever": ("star_graph.retrieval_engine.retriever", "VectorSimilarityRetriever"),
+    "HybridFusionRetriever":   ("star_graph.retrieval_engine.retriever", "HybridFusionRetriever"),
+    "ExplainableScore":        ("star_graph.retrieval_engine.retriever", "ExplainableScore"),
+    "personalized_pagerank":   ("star_graph.retrieval_engine.retriever", "personalized_pagerank"),
+    "compare_retrievers":      ("star_graph.retrieval_engine.retriever", "compare_retrievers"),
 
     # index
-    "ANNIndex":                ("star_graph.index", "ANNIndex"),
+    "ANNIndex":                ("star_graph.memory_core.index", "ANNIndex"),
 
     # seed
     "seed_everything":         ("star_graph.seed", "seed_everything"),
     "is_deterministic":        ("star_graph.seed", "is_deterministic"),
 
     # ghost
-    "GhostNode":               ("star_graph.ghost", "GhostNode"),
-    "NegativeGhost":           ("star_graph.ghost", "NegativeGhost"),
-    "GhostSubsystem":          ("star_graph.ghost", "GhostSubsystem"),
+    "GhostNode":               ("star_graph.consolidation.ghost", "GhostNode"),
+    "NegativeGhost":           ("star_graph.consolidation.ghost", "NegativeGhost"),
+    "GhostSubsystem":          ("star_graph.consolidation.ghost", "GhostSubsystem"),
 
     # abstraction
-    "AbstractNode":            ("star_graph.abstraction", "AbstractNode"),
-    "AbstractionEngine":       ("star_graph.abstraction", "AbstractionEngine"),
-    "PatternMemory":           ("star_graph.abstraction", "PatternMemory"),
-    "AbstractiveMemoryEngine": ("star_graph.abstraction", "AbstractiveMemoryEngine"),
+    "AbstractNode":            ("star_graph.consolidation.abstraction", "AbstractNode"),
+    "AbstractionEngine":       ("star_graph.consolidation.abstraction", "AbstractionEngine"),
+    "PatternMemory":           ("star_graph.consolidation.abstraction", "PatternMemory"),
+    "AbstractiveMemoryEngine": ("star_graph.consolidation.abstraction", "AbstractiveMemoryEngine"),
 
     # community
-    "Community":               ("star_graph.community", "Community"),
-    "CommunityHealth":         ("star_graph.community", "CommunityHealth"),
-    "CommunityDetection":      ("star_graph.community", "CommunityDetection"),
+    "Community":               ("star_graph.consolidation.community", "Community"),
+    "CommunityHealth":         ("star_graph.consolidation.community", "CommunityHealth"),
+    "CommunityDetection":      ("star_graph.consolidation.community", "CommunityDetection"),
 
     # raw buffer
     "RawBuffer":               ("star_graph.raw_buffer", "RawBuffer"),
     "RawChunk":                ("star_graph.raw_buffer", "RawChunk"),
 
     # dual channel
-    "DualChannelRetriever":    ("star_graph.dual_channel", "DualChannelRetriever"),
-    "DualChannelOutput":       ("star_graph.dual_channel", "DualChannelOutput"),
-    "ChannelResult":           ("star_graph.dual_channel", "ChannelResult"),
+    "DualChannelRetriever":    ("star_graph.retrieval_engine.dual_channel", "DualChannelRetriever"),
+    "DualChannelOutput":       ("star_graph.retrieval_engine.dual_channel", "DualChannelOutput"),
+    "ChannelResult":           ("star_graph.retrieval_engine.dual_channel", "ChannelResult"),
 
     # other subsystems
     "FactExtractor":           ("star_graph.atom_facts", "FactExtractor"),
@@ -126,23 +126,23 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ExtractionResult":        ("star_graph.atom_facts", "ExtractionResult"),
     "check_llm_availability":  ("star_graph.atom_facts", "check_llm_availability"),
     "CognitiveMetrics":        ("star_graph.metrics", "CognitiveMetrics"),
-    "MemoryCompetition":       ("star_graph.competition", "MemoryCompetition"),
+    "MemoryCompetition":       ("star_graph.consolidation.competition", "MemoryCompetition"),
     "OnlineConsolidator":      ("star_graph.online", "OnlineConsolidator"),
 
     # storage
-    "Storage":                 ("star_graph.storage", "Storage"),
-    "JSONStorage":             ("star_graph.storage", "JSONStorage"),
-    "StorageBackend":          ("star_graph.storage_backend", "StorageBackend"),
-    "SQLiteStorage":           ("star_graph.sqlite_storage", "SQLiteStorage"),
+    "Storage":                 ("star_graph.memory_core.storage", "Storage"),
+    "JSONStorage":             ("star_graph.memory_core.storage", "JSONStorage"),
+    "StorageBackend":          ("star_graph.memory_core.storage_backend", "StorageBackend"),
+    "SQLiteStorage":           ("star_graph.memory_core.sqlite_storage", "SQLiteStorage"),
 
     # evolution
-    "MemoryEvolutionEngine":   ("star_graph.evolution", "MemoryEvolutionEngine"),
-    "EvolutionEvent":          ("star_graph.evolution", "EvolutionEvent"),
-    "BeliefTransition":        ("star_graph.evolution", "BeliefTransition"),
+    "MemoryEvolutionEngine":   ("star_graph.consolidation.evolution", "MemoryEvolutionEngine"),
+    "EvolutionEvent":          ("star_graph.consolidation.evolution", "EvolutionEvent"),
+    "BeliefTransition":        ("star_graph.consolidation.evolution", "BeliefTransition"),
 
     # working memory
-    "WorkingMemory":           ("star_graph.working_memory", "WorkingMemory"),
-    "WorkingMemoryEntry":      ("star_graph.working_memory", "WorkingMemoryEntry"),
+    "WorkingMemory":           ("star_graph.cortex_api.working_memory", "WorkingMemory"),
+    "WorkingMemoryEntry":      ("star_graph.cortex_api.working_memory", "WorkingMemoryEntry"),
 
     # cortex
     "MemoryCortex":            ("star_graph.cortex", "MemoryCortex"),
@@ -154,8 +154,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     # router / gate
     "CortexRouter":            ("star_graph.router", "CortexRouter"),
     "RouteResult":             ("star_graph.router", "RouteResult"),
-    "MemoryGate":              ("star_graph.gate", "MemoryGate"),
-    "GateScore":               ("star_graph.gate", "GateScore"),
+    "MemoryGate":              ("star_graph.cortex_api.gate", "MemoryGate"),
+    "GateScore":               ("star_graph.cortex_api.gate", "GateScore"),
 
     # timespine
     "TimeSpine":               ("star_graph.timespine", "TimeSpine"),
@@ -169,19 +169,19 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ActivatedNode":           ("star_graph.spreading", "ActivatedNode"),
 
     # cognitive cache
-    "QueryCache":              ("star_graph.cognitive_cache", "QueryCache"),
-    "SessionCache":            ("star_graph.cognitive_cache", "SessionCache"),
-    "TopicCache":              ("star_graph.cognitive_cache", "TopicCache"),
-    "ActivationCache":         ("star_graph.cognitive_cache", "ActivationCache"),
-    "CognitiveCacheManager":   ("star_graph.cognitive_cache", "CognitiveCacheManager"),
-    "QueryCacheEntry":         ("star_graph.cognitive_cache", "QueryCacheEntry"),
+    "QueryCache":              ("star_graph.retrieval_engine.cognitive_cache", "QueryCache"),
+    "SessionCache":            ("star_graph.retrieval_engine.cognitive_cache", "SessionCache"),
+    "TopicCache":              ("star_graph.retrieval_engine.cognitive_cache", "TopicCache"),
+    "ActivationCache":         ("star_graph.retrieval_engine.cognitive_cache", "ActivationCache"),
+    "CognitiveCacheManager":   ("star_graph.retrieval_engine.cognitive_cache", "CognitiveCacheManager"),
+    "QueryCacheEntry":         ("star_graph.retrieval_engine.cognitive_cache", "QueryCacheEntry"),
 
     # compiler / reflection
     "CognitiveCompiler":       ("star_graph.compiler", "CognitiveCompiler"),
     "WorldviewNode":           ("star_graph.compiler", "WorldviewNode"),
     "UserProfile":             ("star_graph.compiler", "UserProfile"),
-    "SelfReflectionLoop":      ("star_graph.reflection_loop", "SelfReflectionLoop"),
-    "SelfCorrectionReport":    ("star_graph.reflection_loop", "SelfCorrectionReport"),
+    "SelfReflectionLoop":      ("star_graph.consolidation.reflection_loop", "SelfReflectionLoop"),
+    "SelfCorrectionReport":    ("star_graph.consolidation.reflection_loop", "SelfCorrectionReport"),
 
     # topology
     "topology_rank":           ("star_graph.topology", "topology_rank"),
@@ -189,12 +189,12 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "EDGE_TYPE_RICHNESS_WEIGHTS": ("star_graph.topology", "EDGE_TYPE_RICHNESS_WEIGHTS"),
 
     # domain / write / edge
-    "DomainRouter":            ("star_graph.domain_router", "DomainRouter"),
-    "DomainNode":              ("star_graph.domain_router", "DomainNode"),
-    "DEFAULT_DOMAIN_TREE":     ("star_graph.domain_router", "DEFAULT_DOMAIN_TREE"),
-    "MemoryWriteGate":         ("star_graph.write_gate", "MemoryWriteGate"),
-    "GateDecision":            ("star_graph.write_gate", "GateDecision"),
-    "GateResult":              ("star_graph.write_gate", "GateResult"),
+    "DomainRouter":            ("star_graph.consolidation.domain_router", "DomainRouter"),
+    "DomainNode":              ("star_graph.consolidation.domain_router", "DomainNode"),
+    "DEFAULT_DOMAIN_TREE":     ("star_graph.consolidation.domain_router", "DEFAULT_DOMAIN_TREE"),
+    "MemoryWriteGate":         ("star_graph.cortex_api.write_gate", "MemoryWriteGate"),
+    "GateDecision":            ("star_graph.cortex_api.write_gate", "GateDecision"),
+    "GateResult":              ("star_graph.cortex_api.write_gate", "GateResult"),
     "EdgeBudgetManager":       ("star_graph.edge_management", "EdgeBudgetManager"),
     "EDGE_TYPE_RETENTION_PRIORITY": ("star_graph.edge_management", "EDGE_TYPE_RETENTION_PRIORITY"),
 
@@ -209,8 +209,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "EdgeDecayManager":        ("star_graph.edge_management", "EdgeDecayManager"),
 
     # self-org / personality / goals
-    "SelfOrganization":        ("star_graph.self_org", "SelfOrganization"),
-    "EmergentTopic":           ("star_graph.self_org", "EmergentTopic"),
+    "SelfOrganization":        ("star_graph.consolidation.self_org", "SelfOrganization"),
+    "EmergentTopic":           ("star_graph.consolidation.self_org", "EmergentTopic"),
     "PersonalityModel":        ("star_graph.personality", "PersonalityModel"),
     "PersonalityProfile":      ("star_graph.personality", "PersonalityProfile"),
     "GoalTree":                ("star_graph.goal_tree", "GoalTree"),
@@ -218,8 +218,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "GoalStatus":              ("star_graph.goal_tree", "GoalStatus"),
 
     # retrieval budget
-    "RetrievalBudget":         ("star_graph.retrieval_budget", "RetrievalBudget"),
-    "BudgetState":             ("star_graph.retrieval_budget", "BudgetState"),
+    "RetrievalBudget":         ("star_graph.retrieval_engine.retrieval_budget", "RetrievalBudget"),
+    "BudgetState":             ("star_graph.retrieval_engine.retrieval_budget", "BudgetState"),
 
     # versioned memory
     "CognitiveTrajectory":     ("star_graph.versioned_memory", "CognitiveTrajectory"),
@@ -239,10 +239,10 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "SessionSummary":          ("star_graph.episodic_memory", "SessionSummary"),
 
     # hubs
-    "HubLayer":                ("star_graph.hub", "HubLayer"),
-    "HubNode":                 ("star_graph.hub", "HubNode"),
-    "HubEdge":                 ("star_graph.hub", "HubEdge"),
-    "HubShard":                ("star_graph.hub", "HubShard"),
+    "HubLayer":                ("star_graph.consolidation.hub", "HubLayer"),
+    "HubNode":                 ("star_graph.consolidation.hub", "HubNode"),
+    "HubEdge":                 ("star_graph.consolidation.hub", "HubEdge"),
+    "HubShard":                ("star_graph.consolidation.hub", "HubShard"),
 
     # hippocampus / shard
     "HippocampusBuffer":       ("star_graph.hippocampus", "HippocampusBuffer"),
@@ -252,15 +252,15 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "DOMAIN_DIRS":             ("star_graph.shard", "DOMAIN_DIRS"),
 
     # tier
-    "MemoryTier":              ("star_graph.tier", "MemoryTier"),
-    "TierEntry":               ("star_graph.tier", "TierEntry"),
-    "ShortTermMemory":         ("star_graph.tier", "ShortTermMemory"),
-    "MiddleTermMemory":        ("star_graph.tier", "MiddleTermMemory"),
-    "LongTermMemory":          ("star_graph.tier", "LongTermMemory"),
-    "CoreMemory":              ("star_graph.tier", "CoreMemory"),
-    "MemoryTierManager":       ("star_graph.tier", "MemoryTierManager"),
-    "TIER_DECAY_HALF_LIFE":    ("star_graph.tier", "TIER_DECAY_HALF_LIFE"),
-    "TIER_MAX_ITEMS":          ("star_graph.tier", "TIER_MAX_ITEMS"),
+    "MemoryTier":              ("star_graph.memory_core.tier", "MemoryTier"),
+    "TierEntry":               ("star_graph.memory_core.tier", "TierEntry"),
+    "ShortTermMemory":         ("star_graph.memory_core.tier", "ShortTermMemory"),
+    "MiddleTermMemory":        ("star_graph.memory_core.tier", "MiddleTermMemory"),
+    "LongTermMemory":          ("star_graph.memory_core.tier", "LongTermMemory"),
+    "CoreMemory":              ("star_graph.memory_core.tier", "CoreMemory"),
+    "MemoryTierManager":       ("star_graph.memory_core.tier", "MemoryTierManager"),
+    "TIER_DECAY_HALF_LIFE":    ("star_graph.memory_core.tier", "TIER_DECAY_HALF_LIFE"),
+    "TIER_MAX_ITEMS":          ("star_graph.memory_core.tier", "TIER_MAX_ITEMS"),
 
     # brain sphere
     "BrainSphere":             ("star_graph.brain_sphere", "BrainSphere"),
@@ -277,8 +277,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "sigmoid":                 ("star_graph.math_utils", "sigmoid"),
 
     # bm25
-    "BM25Index":               ("star_graph.bm25", "BM25Index"),
-    "reciprocal_rank_fusion":  ("star_graph.bm25", "reciprocal_rank_fusion"),
+    "BM25Index":               ("star_graph.retrieval_engine.bm25", "BM25Index"),
+    "reciprocal_rank_fusion":  ("star_graph.retrieval_engine.bm25", "reciprocal_rank_fusion"),
 
     # batch_vectorizer
     "BatchVectorizer":         ("star_graph.batch_vectorizer", "BatchVectorizer"),
@@ -291,20 +291,20 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "init_logging":            ("star_graph.logger", "init_logging"),
 
     # compression
-    "CompressionLevel":        ("star_graph.compression", "CompressionLevel"),
-    "SummaryAnchor":           ("star_graph.compression", "SummaryAnchor"),
-    "SessionCompressor":       ("star_graph.compression", "SessionCompressor"),
-    "MultiLevelCompressor":    ("star_graph.compression", "MultiLevelCompressor"),
+    "CompressionLevel":        ("star_graph.consolidation.compression", "CompressionLevel"),
+    "SummaryAnchor":           ("star_graph.consolidation.compression", "SummaryAnchor"),
+    "SessionCompressor":       ("star_graph.consolidation.compression", "SessionCompressor"),
+    "MultiLevelCompressor":    ("star_graph.consolidation.compression", "MultiLevelCompressor"),
 
     # exact cache
-    "ExactMatchCache":         ("star_graph.exact_cache", "ExactMatchCache"),
-    "ExactMatchEntry":         ("star_graph.exact_cache", "ExactMatchEntry"),
-    "extract_entity_keys":     ("star_graph.exact_cache", "extract_entity_keys"),
+    "ExactMatchCache":         ("star_graph.retrieval_engine.exact_cache", "ExactMatchCache"),
+    "ExactMatchEntry":         ("star_graph.retrieval_engine.exact_cache", "ExactMatchEntry"),
+    "extract_entity_keys":     ("star_graph.retrieval_engine.exact_cache", "extract_entity_keys"),
 
     # micro sleep
-    "MicroSleepScheduler":     ("star_graph.micro_sleep", "MicroSleepScheduler"),
-    "MicroSleepProgress":      ("star_graph.micro_sleep", "MicroSleepProgress"),
-    "MicroSleepResult":        ("star_graph.micro_sleep", "MicroSleepResult"),
+    "MicroSleepScheduler":     ("star_graph.consolidation.micro_sleep", "MicroSleepScheduler"),
+    "MicroSleepProgress":      ("star_graph.consolidation.micro_sleep", "MicroSleepProgress"),
+    "MicroSleepResult":        ("star_graph.consolidation.micro_sleep", "MicroSleepResult"),
 
     # cost estimator
     "SleepCostEstimator":      ("star_graph.cost_estimator", "SleepCostEstimator"),
@@ -315,8 +315,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "SnapshotMeta":            ("star_graph.contrib.snapshot", "SnapshotMeta"),
 
     # async
-    "AsyncMemoryManager":      ("star_graph.async_manager", "AsyncMemoryManager"),
-    "AsyncManagerStats":       ("star_graph.async_manager", "AsyncManagerStats"),
+    "AsyncMemoryManager":      ("star_graph.cortex_api.async_manager", "AsyncMemoryManager"),
+    "AsyncManagerStats":       ("star_graph.cortex_api.async_manager", "AsyncManagerStats"),
 
     # tracing
     "MemoryTracer":            ("star_graph.tracing", "MemoryTracer"),
@@ -326,14 +326,14 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "trace_recall":            ("star_graph.tracing", "trace_recall"),
 
     # survival
-    "SurvivalFunction":        ("star_graph.survival", "SurvivalFunction"),
-    "EbbinghausSurvival":      ("star_graph.survival", "EbbinghausSurvival"),
-    "PowerLawSurvival":        ("star_graph.survival", "PowerLawSurvival"),
-    "ExponentialSurvival":     ("star_graph.survival", "ExponentialSurvival"),
-    "CustomSurvival":          ("star_graph.survival", "CustomSurvival"),
-    "SurvivalRegistry":        ("star_graph.survival", "SurvivalRegistry"),
-    "SurvivalState":           ("star_graph.survival", "SurvivalState"),
-    "derive_strength":         ("star_graph.survival", "derive_strength"),
+    "SurvivalFunction":        ("star_graph.consolidation.survival", "SurvivalFunction"),
+    "EbbinghausSurvival":      ("star_graph.consolidation.survival", "EbbinghausSurvival"),
+    "PowerLawSurvival":        ("star_graph.consolidation.survival", "PowerLawSurvival"),
+    "ExponentialSurvival":     ("star_graph.consolidation.survival", "ExponentialSurvival"),
+    "CustomSurvival":          ("star_graph.consolidation.survival", "CustomSurvival"),
+    "SurvivalRegistry":        ("star_graph.consolidation.survival", "SurvivalRegistry"),
+    "SurvivalState":           ("star_graph.consolidation.survival", "SurvivalState"),
+    "derive_strength":         ("star_graph.consolidation.survival", "derive_strength"),
 
     # resonance
     "Resonator":               ("star_graph.resonance", "Resonator"),

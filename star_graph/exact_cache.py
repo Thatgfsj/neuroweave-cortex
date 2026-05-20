@@ -1,4 +1,2 @@
-"""Exact Match Cache — re-exported from cognitive_cache.py (merged module)."""
-from .cognitive_cache import ExactMatchCache, ExactMatchEntry, extract_entity_keys
-
-__all__ = ["ExactMatchCache", "ExactMatchEntry", "extract_entity_keys"]
+"""Exact Cache — re-exported from retrieval_engine/ (Phase 1 architecture slimdown)."""
+from .retrieval_engine.exact_cache import *

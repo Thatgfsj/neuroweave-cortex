@@ -1,4 +1,2 @@
-"""Tiered storage — re-exported from tier.py (merged module)."""
-from .tier import TieredStorage, offload_anchor_to_cold
-
-__all__ = ["TieredStorage", "offload_anchor_to_cold"]
+"""Tiered Storage — re-exported from memory_core/ (Phase 1 architecture slimdown)."""
+from .memory_core.tiered import *
