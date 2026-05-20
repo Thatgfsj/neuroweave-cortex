@@ -122,6 +122,7 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
         self._reflection_loop: SelfReflectionLoop | None = None
         self._hublayer: HubLayer | None = None
         self._bm25 = None  # BM25 keyword index — lazy init
+        self._cross_encoder = None  # CrossEncoder reranker — lazy init
         self._tiered: TieredStorage | None = None
         self._hippocampus = None  # HippocampusBuffer — lazy init
         self._shard_manager = None  # MemoryShardManager — lazy init
@@ -369,6 +370,20 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
             for aid, a in self.graph.anchors.items():
                 self._bm25.add(aid, a.text)
         return self._bm25
+
+    @property
+    def cross_encoder(self):
+        if self._cross_encoder is None:
+            from .cross_encoder import CrossEncoderReranker
+            cfg = self.cfg
+            rerank_cfg = cfg.get_path('retrieval.rerank', {}) if hasattr(cfg, 'get_path') else {}
+            self._cross_encoder = CrossEncoderReranker(
+                model_name=rerank_cfg.get('model', 'cross-encoder/ms-marco-MiniLM-L-6-v2'),
+                top_k=rerank_cfg.get('top_k', 10),
+                threshold=rerank_cfg.get('threshold', 0.0),
+                enabled=rerank_cfg.get('enabled', False),
+            )
+        return self._cross_encoder
 
     @property
     def tiered(self) -> TieredStorage:

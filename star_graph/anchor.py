@@ -300,6 +300,9 @@ class Anchor:
     # v0.8: exact match cache fields
     exact_match_keys: list[str] = field(default_factory=list)  # deterministic lookup keys
     salience: float = 0.0          # 0..1 how salient/easily-recallable this memory is
+    # v1.0.4: lifecycle management
+    invalid_at: float | None = None    # timestamp when this memory was deprecated
+    conflict_candidate: bool = False   # flagged for conflict resolution during sleep
 
     @classmethod
     def create(cls, text: str, source_session: str = "",
@@ -419,13 +422,45 @@ class Anchor:
     def is_retrievable(self) -> bool:
         """Can this anchor be returned in retrieval results?
 
-        Ghosts and FROZEN/DEAD memories are not retrievable unless revived.
+        Ghosts, FROZEN/DEAD, and deprecated (invalid_at) memories are not
+        retrievable unless revived.
         """
         if self.state == MemoryState.GHOST:
             return False
         if self.thermal_state in (ThermalState.FROZEN, ThermalState.DEAD):
             return False
+        if self.invalid_at is not None:
+            return False
         return True
+
+    @property
+    def memory_tier(self) -> str:
+        """Hot/Warm/Cold tier based on retention score and idle time.
+
+        Hot  — high retention (>0.40), recently active (within 24h)
+        Warm — moderate retention (>0.15), consolidated, retrievable
+        Cold — low retention or idle > 30 days (archive candidate)
+
+        Thresholds are configurable via tier_thresholds in defaults.yaml.
+        """
+        import time
+        from .config import Config
+        if self.invalid_at is not None:
+            return "cold"
+        rs = self.retention_score
+        idle_hours = (time.time() - self.last_activated_at) / 3600
+        cfg = Config.get()
+        tt = getattr(cfg, 'tier_thresholds', None)
+        hot_min = getattr(tt, 'hot_retention_min', 0.40) if tt else 0.40
+        warm_min = getattr(tt, 'warm_retention_min', 0.15) if tt else 0.15
+        cold_idle_days = getattr(tt, 'cold_idle_days', 30) if tt else 30
+        cold_idle_hours = cold_idle_days * 24
+        if rs > hot_min and idle_hours < 24:
+            return "hot"
+        elif rs > warm_min and idle_hours < cold_idle_hours:
+            return "warm"
+        else:
+            return "cold"
 
     def to_dict(self) -> dict:
         """JSON-serializable representation for REST / API responses."""
@@ -442,6 +477,8 @@ class Anchor:
             "source_session": self.source_session,
             "cortex_path": self.cortex_path,
             "stability": self.vector.stability if self.vector else 0.0,
+            "invalid_at": self.invalid_at,
+            "conflict_candidate": self.conflict_candidate,
         }
 
     @property

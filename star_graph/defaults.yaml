@@ -155,6 +155,13 @@ sleep:
     emotion_weight_boost: 0.3
 
 retrieval:
+  # ── Cross-Encoder Reranking ──
+  rerank:
+    enabled: false                    # opt-in; adds ~50ms for 10 pairs on CPU
+    model: cross-encoder/ms-marco-MiniLM-L-6-v2
+    top_k: 10                         # max candidates to rerank from RRF fusion
+    threshold: 0.0                    # min cross-encoder score (0=keep all)
+
   oscillation:
     phase_weight: 0.3
     default_frequency: 0.5
@@ -379,6 +386,22 @@ compression:
   summary_initial_stability: 0.85
   summary_hippocampal_dependency: 0.1
 
+# ── Memory Revision Engine (#65) ──
+revision:
+  confidence_threshold: 0.35         # max confidence to flag for revision
+  surprise_threshold: 0.7            # min surprise to flag for revision
+  max_candidates: 50                 # max anchors to revise per sleep cycle
+  similarity_threshold: 0.75         # cosine threshold for similar-anchor search
+  strengthen_boost: 0.15             # stability boost for revised anchors
+  llm_provider: template             # template | openai | anthropic (template=offline)
+
+# ── Conflict Detection & Resolution (#63) ──
+conflict:
+  similarity_threshold: 0.85        # cosine threshold for semantic overlap
+  sentiment_threshold: 0.3          # min |valence| to consider as biased
+  overwrite_confidence: 0.7         # min confidence+stability for overwrite
+  deprecate_retention: 0.2          # max retention to auto-deprecate old facts
+
 # ── Cognitive Compiler (#45) ──
 compiler:
   episodic_ratio: 0.20
@@ -456,6 +479,14 @@ thermal_store:
   cold_to_archive_hours: 720.0       # idle hours before cold→archive
   promote_accesses: 2                # access count to trigger promotion
   promote_window_hours: 24.0         # time window for access count tracking
+
+# ── Memory Tier Thresholds (#64) ──
+tier_thresholds:
+  hot_retention_min: 0.40            # min retention to stay Hot (below → Warm)
+  warm_retention_min: 0.15           # min retention to stay Warm (below → Cold)
+  cold_idle_days: 30                 # idle days before Cold archiving
+  ghost_revive_to_tier: "warm"       # tier assigned on Ghost Revival (hot|warm)
+  auto_archive_interval_hours: 6.0   # interval for auto-archive scan
 
 # ── Edge Decay (#54) ──
 edge_decay:

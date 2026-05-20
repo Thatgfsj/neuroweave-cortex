@@ -198,8 +198,36 @@ class ThermalStore:
             self.touch(anchor_id)
         return data
 
-    def thaw_anchor(self, anchor_id: str, graph) -> Anchor | None:
-        """Full thaw: cold/archive → hot. Returns reconstructed Anchor or None."""
+    def thaw_anchor(self, anchor_id: str, graph,
+                    ghost_manager=None) -> Anchor | None:
+        """Full thaw: cold/archive → warm (graph). Returns reconstructed Anchor or None.
+
+        When a ghost_manager is provided, checks if a ghost exists for this ID
+        and revives it instead of constructing a fresh anchor — this triggers
+        Ghost Revival on Cold→Warm promotion (#64).
+        """
+        # Ghost Revival: if ghost exists, revive it into Warm tier
+        if ghost_manager is not None:
+            ghost = ghost_manager.ghosts.get(anchor_id)
+            if ghost is not None:
+                data = self.load_cold(anchor_id) or self.load_archive(anchor_id)
+                if data is not None:
+                    anchor = ghost.revive(
+                        new_text=data.get("text", ""),
+                        new_embedding=data.get("embedding"),
+                        new_tags=data.get("tags", []),
+                    )
+                    anchor.last_activated_at = time.time()
+                    anchor.source_session = data.get("source_session", "")
+                    anchor.community_id = data.get("community_id", "")
+                    self._cold_store.remove(anchor_id)
+                    self._cold_ids.discard(anchor_id)
+                    self._archive_store.remove(anchor_id)
+                    self._archive_ids.discard(anchor_id)
+                    graph.add_anchor(anchor)
+                    self._total_promotions += 1
+                    return anchor
+
         data = self.load_cold(anchor_id) or self.load_archive(anchor_id)
         if data is None:
             return None
@@ -221,12 +249,61 @@ class ThermalStore:
         self._cold_ids.discard(anchor_id)
         self._archive_store.remove(anchor_id)
         self._archive_ids.discard(anchor_id)
-        # Add to graph (hot)
+        # Add to graph (warm)
         graph.add_anchor(anchor)
         self._total_promotions += 1
         return anchor
 
-    # ── Helpers ──────────────────────────────────────────────
+    # ── Auto-archive scheduled task (#64) ──────────────────────
+
+    def auto_archive(self, graph, ghost_manager=None) -> dict:
+        """Scheduled task: scan graph for Cold-tier anchors and archive them.
+
+        Cold anchors (retention < 0.3 or idle > 30 days) are demoted to
+        cold storage and eventually to archive. Ghost Revival-capable:
+        cold anchors can be revived when accessed again.
+
+        Returns stats dict with tier transition counts.
+        """
+        now = time.time()
+        stats = {"hot_to_cold": 0, "cold_to_archive": 0, "cold_ids": []}
+
+        # Scan graph anchors for Cold-tier candidates
+        for aid, anchor in list(graph.anchors.items()):
+            tier = anchor.memory_tier
+            if tier == "cold":
+                # Demote: remove from graph, store in cold tier
+                data = self._serialize_anchor(anchor)
+                self._cold_store.offload(aid, data)
+                self._cold_ids.add(aid)
+                del graph.anchors[aid]
+                stats["hot_to_cold"] += 1
+                stats["cold_ids"].append(aid)
+
+        # Scan existing cold items for archive demotion
+        cold_to_demote = []
+        for aid in list(self._cold_store.ids()):
+            data = self._cold_store.load(aid)
+            if data is None:
+                continue
+            last_accessed = data.get("last_activated_at", 0)
+            idle_hours = (now - last_accessed) / 3600
+            if idle_hours >= self.cold_to_archive_hours:
+                cold_to_demote.append(aid)
+
+        for aid in cold_to_demote:
+            data = self._cold_store.load(aid)
+            if data is None:
+                continue
+            data["text"] = data.get("text", "")[:200]
+            data["archived_at"] = now
+            self._archive_store.offload(aid, data)
+            self._cold_store.remove(aid)
+            self._cold_ids.discard(aid)
+            self._archive_ids.add(aid)
+            stats["cold_to_archive"] += 1
+
+        return stats
 
     @staticmethod
     def _serialize_anchor(anchor: Anchor) -> dict:

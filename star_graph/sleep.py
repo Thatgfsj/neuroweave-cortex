@@ -360,6 +360,33 @@ class SleepCycle(SleepNREM, SleepREM, SleepConsolidate):
         report.memories_merged = merged
         report.bridges_created = bridges
 
+        # ── N2b: Conflict Detection & Resolution ──
+        t0 = time.time()
+        conflict_result = self._detect_and_resolve_conflicts()
+        report.phases.append(PhaseMetrics(
+            phase="N2b_ConflictDetection",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=conflict_result.get("conflicts_detected", 0),
+            details=conflict_result.get("resolutions", {}),
+        ))
+        report.conflicts_detected = conflict_result.get("conflicts_detected", 0)
+        report.conflicts_resolved = {
+            k: v for k, v in conflict_result.get("resolutions", {}).items()
+            if k != "total"
+        }
+
+        # ── N2c: Memory Revision ──
+        t0 = time.time()
+        revision_result = self._revise_memories()
+        report.phases.append(PhaseMetrics(
+            phase="N2c_MemoryRevision",
+            duration_ms=(time.time() - t0) * 1000,
+            items_processed=revision_result.get("revised", 0) + revision_result.get("merged", 0),
+            details=revision_result,
+        ))
+        report.memories_revised = revision_result.get("revised", 0)
+        report.memories_revision_merged = revision_result.get("merged", 0)
+
         # ── N3: Compression ──
         t0 = time.time()
         self._systems_consolidation()

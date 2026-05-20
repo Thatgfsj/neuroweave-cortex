@@ -32,6 +32,10 @@ class SleepReport:
     edges_pruned: int = 0
     emotional_decoupled: int = 0
     cortical_transferred: int = 0
+    conflicts_detected: int = 0
+    conflicts_resolved: dict = field(default_factory=dict)
+    memories_revised: int = 0
+    memories_revision_merged: int = 0
 
     # Before/after
     anchors_before: int = 0
@@ -65,6 +69,10 @@ class SleepReport:
             "edges_pruned": self.edges_pruned,
             "emotional_decoupled": self.emotional_decoupled,
             "cortical_transferred": self.cortical_transferred,
+            "conflicts_detected": self.conflicts_detected,
+            "conflicts_resolved": self.conflicts_resolved,
+            "memories_revised": self.memories_revised,
+            "memories_revision_merged": self.memories_revision_merged,
             "anchors_before": self.anchors_before,
             "anchors_after": self.anchors_after,
             "edges_before": self.edges_before,
@@ -121,5 +129,23 @@ class SleepReport:
             lines.append(f"║  Cortical: {self.cortical_transferred} memories transferred")
         if self.bridges_created:
             lines.append(f"║  Bridges:  {self.bridges_created} cross-constellation links")
+        if self.memories_revised:
+            parts = []
+            if self.memories_revised:
+                parts.append(f"Revised {self.memories_revised}")
+            if self.memories_revision_merged:
+                parts.append(f"Merged {self.memories_revision_merged}")
+            lines.append(f"║  Revision:  {', '.join(parts)}")
+        if self.conflicts_detected:
+            cr = self.conflicts_resolved
+            parts = []
+            if cr.get("overwrite"):
+                parts.append(f"{cr['overwrite']} overwritten")
+            if cr.get("coexist"):
+                parts.append(f"{cr['coexist']} coexisting")
+            if cr.get("deprecate"):
+                parts.append(f"{cr['deprecate']} deprecated")
+            lines.append(f"║  Conflicts: {self.conflicts_detected} detected → "
+                         f"{', '.join(parts)}")
         lines.append(f"╚{'═' * 50}╝")
         return "\n".join(lines)

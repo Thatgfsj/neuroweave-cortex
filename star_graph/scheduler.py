@@ -97,10 +97,11 @@ class MemoryContext:
     reflections: list[dict] = field(default_factory=list)     # meta-cognitive insights
     total_tokens: int = 0
     retrieval_latency_ms: float = 0.0
+    retrieval_trace: dict | None = None  # RRF fusion explainability trace
 
     def to_dict(self) -> dict:
         """JSON-serializable representation for REST / API responses."""
-        return {
+        d = {
             "items": [item.to_dict() for item in self.items if item.anchor is not None],
             "memory_summary": self.memory_summary,
             "active_patterns": self.active_patterns,
@@ -110,6 +111,9 @@ class MemoryContext:
             "total_tokens": self.total_tokens,
             "retrieval_latency_ms": round(self.retrieval_latency_ms, 3),
         }
+        if self.retrieval_trace is not None:
+            d["retrieval_trace"] = self.retrieval_trace
+        return d
 
 
 # ── Scheduler ──────────────────────────────────────────

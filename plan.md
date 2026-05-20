@@ -1,16 +1,27 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-21 | **v1.0.3** | 1,989 tests passing
+> Last updated: 2026-05-21 | **v1.0.4-dev** | 1,989 tests passing
+
+## Recently Completed (2026-05-21)
+
+- **1.1 Multi-strategy RRF fusion** — `recall()` now uses `weighted_reciprocal_rank_fusion()` to fuse exact cache, BM25, cognitive cache, graph descent, and spreading activation (replaced sequential merge)
+- **1.2 Cross-Encoder reranking** — `cross_encoder.py` module + `CrossEncoderReranker` class; lazy-loads sentence-transformers CrossEncoder; integrated into `recall()` after RRF fusion; config in `defaults.yaml` under `retrieval.rerank`
+- **1.3 Explainable reasoning paths** — `explain()` API on `RetrievalCore`; `retrieval_trace` field on `MemoryContext`; per-pathway rank tracking in RRF fusion traces
+- **2.1 Conflict detection & resolution** — `conflict_detection.py` module with `ConflictDetector`; `Anchor.invalid_at` + `Anchor.conflict_candidate` fields; overwrite/coexist/deprecate strategies; integrated as N2b phase in sleep cycle
+- **2.2 Memory tiering (Hot/Warm/Cold)** — `Anchor.memory_tier` property; Ghost Revival hook in `ThermalStore.thaw_anchor()`; `auto_archive()` scheduled task; `tier_thresholds` config in `defaults.yaml`
+- **2.3 Memory revision engine** — `memory_revision.py` module with `MemoryRevisionEngine`; template-based + optional LLM revision; surprise-prioritized candidate selection; integrated as N2c phase in sleep cycle
 
 ## Current State
 
-- **81 modules** in `star_graph/`, **contrib/** with 6 extracted modules
+- **84 modules** in `star_graph/`, **contrib/** with 6 extracted modules
 - Full S/A/B implementation: Retrieval Budget, Versioned Memory, Cluster Memory, Causal Edge Types, Episodic Memory
 - Lazy imports (PEP 562) — all symbols loaded on first access
 - CI pipeline with version consistency checks
 - `sqlite_storage.py` exists, `async_manager.py` uses `asyncio.to_thread` as transition layer
 - `embedding.py` limited to sentence-transformers + hash fallback only
-- **Critical blockers**: `sleep.py` (81KB), `runtime.py` (78KB), `retrieval_pipeline.py` (39KB) — too large to modify safely
+- **New**: `cross_encoder.py` — CrossEncoder reranking module
+- **New**: `bm25.py` — `weighted_reciprocal_rank_fusion()` for weighted multi-path fusion
+- **Resolved**: `sleep.py`/`runtime.py`/`retrieval_pipeline.py` monoliths tracked for Phase 1 splitting
 
 ## Architecture Target
 

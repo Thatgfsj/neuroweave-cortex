@@ -19,6 +19,152 @@ class SleepNREM:
         self._synaptic_homeostasis()
         self._refresh_cortical_index()
 
+    # ── Phase N2b: Conflict Detection & Resolution (#63) ────
+
+    def _detect_and_resolve_conflicts(self) -> dict:
+        """Detect semantic contradictions between similar memories.
+
+        Finds anchor pairs with high embedding similarity (>0.85) but
+        opposing emotional valences (one positive, one negative) — these
+        represent potential contradictions. Resolves using one of:
+          overwrite, coexist, deprecate.
+
+        Returns a dict with conflict counts and resolution breakdown.
+        """
+        from .conflict_detection import ConflictDetector
+
+        cfg = self.cfg
+        cc_cfg = cfg.get_path('conflict', {}) if hasattr(cfg, 'get_path') else {}
+
+        detector = ConflictDetector(
+            similarity_threshold=cc_cfg.get('similarity_threshold', 0.85),
+            sentiment_threshold=cc_cfg.get('sentiment_threshold', 0.3),
+            overwrite_confidence=cc_cfg.get('overwrite_confidence', 0.7),
+            deprecate_retention=cc_cfg.get('deprecate_retention', 0.2),
+        )
+        all_anchors = list(self.graph.anchors.values())
+        result = detector.detect_and_resolve(all_anchors)
+
+        if result["conflicts_detected"]:
+            self._log_event(
+                f"Conflict Detection: {result['conflicts_detected']} conflicts "
+                f"(overwrite={result['resolutions']['overwrite']}, "
+                f"coexist={result['resolutions']['coexist']}, "
+                f"deprecate={result['resolutions']['deprecate']})"
+            )
+        return result
+
+    # ── Phase N2c: Memory Revision (#65) ─────────────────────
+
+    def _revise_memories(self) -> dict:
+        """Revise low-confidence / high-surprise memories during sleep.
+
+        Identifies anchors with confidence below threshold or surprise
+        above threshold, then re-summarizes or merges them to improve
+        memory quality. Uses template-based revision by default, with
+        optional LLM-assisted re-summarization.
+
+        Returns a dict with revision stats.
+        """
+        from .memory_revision import MemoryRevisionEngine
+
+        cfg = self.cfg
+        rev_cfg = cfg.get_path('revision', {}) if hasattr(cfg, 'get_path') else {}
+
+        # Build LLM function if provider is configured
+        llm_fn = None
+        provider = rev_cfg.get('llm_provider', 'template')
+        if provider in ('openai', 'anthropic'):
+            try:
+                llm_fn = self._build_revision_llm(provider, rev_cfg)
+            except Exception:
+                pass
+
+        engine = MemoryRevisionEngine(
+            confidence_threshold=rev_cfg.get('confidence_threshold', 0.35),
+            surprise_threshold=rev_cfg.get('surprise_threshold', 0.7),
+            max_candidates=rev_cfg.get('max_candidates', 50),
+            similarity_threshold=rev_cfg.get('similarity_threshold', 0.75),
+            strengthen_boost=rev_cfg.get('strengthen_boost', 0.15),
+            llm_fn=llm_fn,
+        )
+        all_anchors = list(self.graph.anchors.values())
+        result = engine.revise(all_anchors)
+
+        if result.revised or result.merged_into_existing:
+            self._log_event(
+                f"Memory Revision: {result.candidates_scanned} candidates scanned, "
+                f"{result.revised} revised, "
+                f"{result.merged_into_existing} merged into existing"
+            )
+        return {
+            "candidates_scanned": result.candidates_scanned,
+            "revised": result.revised,
+            "merged": result.merged_into_existing,
+            "skipped": result.skipped,
+        }
+
+    def _build_revision_llm(self, provider: str, rev_cfg: dict):
+        """Build an LLM callable for memory revision."""
+        import os
+        if provider == "openai":
+            import openai
+            client = openai.OpenAI(
+                api_key=rev_cfg.get('api_key', os.getenv('OPENAI_API_KEY', '')),
+                base_url=rev_cfg.get('base_url', os.getenv('OPENAI_BASE_URL', '')),
+            )
+            model = rev_cfg.get('model', 'gpt-4o-mini')
+
+            def _openai_revise(anchor, similar):
+                similar_texts = "\n".join(
+                    f"- [{a.id[:8]}] {a.text[:100]}" for a in similar[:3]
+                )
+                prompt = (
+                    f"Revise this low-quality memory into a clear, factual statement "
+                    f"(max 280 chars).\n\n"
+                    f"Memory: {anchor.text}\n\n"
+                    f"Related context:\n{similar_texts}\n\n"
+                    f"Revised statement:"
+                )
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=100,
+                    temperature=0.3,
+                )
+                return resp.choices[0].message.content.strip()[:280]
+
+            return _openai_revise
+
+        elif provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(
+                api_key=rev_cfg.get('api_key', os.getenv('ANTHROPIC_API_KEY', '')),
+            )
+            model = rev_cfg.get('model', 'claude-haiku-4-5')
+
+            def _anthropic_revise(anchor, similar):
+                similar_texts = "\n".join(
+                    f"- [{a.id[:8]}] {a.text[:100]}" for a in similar[:3]
+                )
+                prompt = (
+                    f"Revise this low-quality memory into a clear, factual statement "
+                    f"(max 280 chars).\n\n"
+                    f"Memory: {anchor.text}\n\n"
+                    f"Related context:\n{similar_texts}\n\n"
+                    f"Revised statement:"
+                )
+                resp = client.messages.create(
+                    model=model,
+                    max_tokens=100,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return resp.content[0].text.strip()[:280]
+
+            return _anthropic_revise
+
+        return None
+
     # ── Phase 1: Prioritized SWR Replay ──────────────────
 
     def _constrained_candidates(self, anchor: Anchor, existing: Anchor,

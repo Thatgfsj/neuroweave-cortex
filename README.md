@@ -18,6 +18,11 @@ Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **
 | Automatic forgetting (survival decay) | no | no | yes |
 | Memory strengthening (rehearsal) | no | no | yes |
 | Conflict detection (contradiction edges) | no | no | yes |
+| Multi-strategy RRF retrieval fusion | no | no | yes |
+| Cross-Encoder reranking | no | no | yes |
+| Explainable reasoning paths | no | no | yes |
+| Memory revision engine (sleep) | no | no | yes |
+| Hot/Warm/Cold memory tiering | no | no | yes |
 | Fuzzy recall ("I think I remember...") | no | no | yes |
 | Emergent abstraction (pattern discovery) | no | no | yes |
 | Temporal context (TimeSpine-indexed) | no | no | yes |
@@ -81,12 +86,15 @@ Layer 3: Behavior    │  Cortex routing, memory gating, working memory,
                      │
 Layer 2: Cognitive   │  Hub abstraction, cascade recall, TimeSpine temporal index,
     (retriever.py,   │  sleep consolidation, evolution, ghost revival,
-     sleep.py,       │  abstraction, community detection, competition
-     evolution.py,   │  "How do memories connect, strengthen, and fade?"
-     ghost.py,       │
+     sleep.py,       │  abstraction, community detection, competition,
+     evolution.py,   │  conflict detection, memory revision, cross-encoder
+     ghost.py,       │  "How do memories connect, strengthen, and fade?"
      abstraction.py, │
      community.py,   │
      competition.py, │
+     conflict_detection.py,│
+     memory_revision.py,   │
+     cross_encoder.py,     │
      timespine.py,   │
      cascade.py,     │
      hub.py)         │
@@ -111,11 +119,14 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 | `retrieval_pipeline.py` | 5-layer dimensional descent (L0→L4) with automatic degradation |
 | `scheduler.py` | Context-aware retrieval with memory type selection |
 | `working_memory.py` | Short-term buffer (15-item, 1h TTL) — auto-promotes to long-term |
-| `sleep.py` | 8-phase sleep: N1_Replay → N2_Merge → N3_Compression → N3b_AtomFacts → REM_Emotion → N4_Prune → N5_HubConnect → N6_IndexRebuild |
+| `sleep.py` | 10-phase sleep: N1_Replay → N2_Merge → N2b_ConflictDetection → N2c_MemoryRevision → N3_Compression → N3d_SleepRebuild → REM_Emotion → N4_Prune (v1.0.4) |
 | `evolution.py` | Survival-based decay (Ebbinghaus/Power-law/Exponential), belief transitions, interference |
 | `retriever.py` | HybridFusion + OscillationResonance + VectorSimilarity + Personalized PageRank + explainable scores |
 | `dual_channel.py` | System-1 (fast) + System-2 (deep) dual-channel retrieval with auto-trigger |
-| `bm25.py` | Sparse keyword retrieval (BM25) with reciprocal rank fusion for hybrid search |
+| `bm25.py` | Sparse keyword retrieval (BM25) with weighted reciprocal rank fusion for hybrid search |
+| `cross_encoder.py` | Post-retrieval Cross-Encoder reranking (sentence-transformers) for precision improvement |
+| `conflict_detection.py` | Semantic contradiction detection with overwrite/coexist/deprecate resolution strategies |
+| `memory_revision.py` | Sleep-phase memory revision engine — surprise-prioritized, template/LLM re-summarization |
 | `ghost.py` | Latent memory traces with fuzzy recall and contradiction tracking (NegativeGhost) |
 | `abstraction.py` | Emergent category discovery from anchor clusters |
 | `community.py` | Louvain community detection with centroid routing |
@@ -366,7 +377,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** 1,989 tests passing, 80% coverage (v1.0.0).
+**Status:** 1,989 tests passing, 84 modules (v1.0.4-dev).
 
 ## Roadmap
 

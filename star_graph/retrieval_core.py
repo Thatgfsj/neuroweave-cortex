@@ -32,6 +32,7 @@ from .dual_channel import DualChannelOutput
 from .multimodal import CrossModalResult
 from .math_utils import cosine_sim as _cosine_sim
 from .topology import graph_first_recall, topology_rank
+from .retriever import RetrievalTrace, RetrievalTraceEntry
 
 
 class RetrievalCore:
@@ -158,77 +159,132 @@ class RetrievalCore:
             query_emb=query_emb, query=query, max_items=max_items)
         spreading_ms = (time.time() - t0) * 1000
 
-        # Merge: exact cache → BM25 anchor → cognitive cache → raw buffer → graph → spreading
-        merged_items = list(exact_results)
-        seen_texts = {self._rt._normalize_text(item.compressed_text) for item in merged_items
-                      if hasattr(item, 'compressed_text') and item.compressed_text}
-        seen_ids = {item.anchor.id for item in merged_items if item.anchor}
+        # ── RRF Fusion: multi-path reciprocal rank fusion ──
+        # Collect anchored, independently-ranked lists from each retrieval
+        # path. Reciprocal Rank Fusion rewards items that appear highly in
+        # multiple paths, naturally boosting consensus results and
+        # suppressing single-path noise.
+        from .bm25 import weighted_reciprocal_rank_fusion
 
-        # Track BM25-matched anchor IDs for priority sorting
-        bm25_matched_ids: set[str] = {bm.anchor.id for bm in bm25_items if bm.anchor}
+        ranked_lists: list[list[tuple[str, float]]] = []
+        path_weights: list[float] = []
+        # id → (anchor, text, mem_type, comp_level, pathway_label)
+        id_meta: dict[str, tuple] = {}
 
-        # Insert BM25 anchor results (keyword-strong, anchored)
-        for bm_item in bm25_items:
-            if bm_item.anchor and bm_item.anchor.id in seen_ids:
-                continue
-            if bm_item.anchor:
-                seen_ids.add(bm_item.anchor.id)
-            norm_text = self._rt._normalize_text(bm_item.compressed_text or bm_item.anchor.text[:120])
-            if norm_text and norm_text in seen_texts:
-                continue
-            seen_texts.add(norm_text)
-            merged_items.append(bm_item)
+        # Path 0: Exact cache — deterministic, highest weight
+        exact_anchored = [(item.anchor.id, item.relevance_score)
+                          for item in exact_results if item.anchor]
+        if exact_anchored:
+            ranked_lists.append(exact_anchored)
+            path_weights.append(1.5)
+            for item in exact_results:
+                if item.anchor:
+                    id_meta[item.anchor.id] = (
+                        item.anchor, item.compressed_text or item.anchor.text[:200],
+                        item.memory_type, item.compression_level, "exact_cache")
 
-        # Insert cognitive cache hits
-        for anchor, score, source in cache_hit_anchors:
-            if anchor.id in seen_ids:
+        # Path A2: BM25 keyword — reliable for entity/term matching
+        if bm25_items:
+            ranked_lists.append([(item.anchor.id, item.relevance_score)
+                                 for item in bm25_items if item.anchor])
+            path_weights.append(1.3)
+            for item in bm25_items:
+                if item.anchor and item.anchor.id not in id_meta:
+                    id_meta[item.anchor.id] = (
+                        item.anchor, item.compressed_text or item.anchor.text[:200],
+                        item.memory_type, item.compression_level, "bm25_keyword")
+
+        # Path 0.5: Cognitive cache — session/query/topic cache hits
+        if cache_hit_anchors:
+            ranked_lists.append([(anchor.id, score)
+                                 for anchor, score, _ in cache_hit_anchors])
+            path_weights.append(1.1)
+            for anchor, score, source in cache_hit_anchors:
+                if anchor.id not in id_meta:
+                    id_meta[anchor.id] = (
+                        anchor, anchor.text[:200], MemoryType.SEMANTIC, 1,
+                        f"cognitive_{source}")
+
+        # Path B: Graph dimensional descent — L1-L5 structural retrieval
+        graph_items = graph_result.get("items", [])
+        if graph_items:
+            ranked_lists.append([(item.anchor.id, item.relevance_score)
+                                 for item in graph_items if item.anchor])
+            path_weights.append(0.9)
+            for item in graph_items:
+                if item.anchor and item.anchor.id not in id_meta:
+                    id_meta[item.anchor.id] = (
+                        item.anchor,
+                        getattr(item, 'compressed_text', '') or item.anchor.text[:200],
+                        item.memory_type, item.compression_level, "graph_descent")
+
+        # Path C: Spreading activation — BFS graph walk with edge-type weighting
+        if spreading_items:
+            ranked_lists.append([(item.anchor.id, item.relevance_score)
+                                 for item in spreading_items if item.anchor])
+            path_weights.append(0.8)
+            for item in spreading_items:
+                if item.anchor and item.anchor.id not in id_meta:
+                    id_meta[item.anchor.id] = (
+                        item.anchor,
+                        getattr(item, 'compressed_text', '') or item.anchor.text[:200],
+                        item.memory_type, item.compression_level, "spreading_activation")
+
+        # Execute weighted RRF fusion
+        fused = weighted_reciprocal_rank_fusion(ranked_lists, path_weights)
+
+        # Normalize RRF scores to [0, 1] range
+        theoretical_max = sum(w / 61.0 for w in path_weights) if path_weights else 1.0
+
+        # Build MemoryItems from fused ranking
+        merged_items: list[MemoryItem] = []
+        seen_ids: set[str] = set()
+
+        for anchor_id, rrf_score in fused:
+            if anchor_id in seen_ids:
                 continue
-            seen_ids.add(anchor.id)
-            norm_text = self._rt._normalize_text(anchor.text[:120])
-            seen_texts.add(norm_text)
+            seen_ids.add(anchor_id)
+            meta = id_meta.get(anchor_id)
+            if meta is None:
+                anchor = self._rt.graph.anchors.get(anchor_id)
+                if anchor is None or not anchor.is_retrievable:
+                    continue
+                text = anchor.text[:200]
+                mem_type = MemoryType.SEMANTIC
+                comp_level = 1
+            else:
+                anchor, text, mem_type, comp_level, _ = meta
+
+            norm_score = min(1.0, rrf_score / theoretical_max) if theoretical_max > 0 else 0.0
             merged_items.append(MemoryItem(
                 anchor=anchor,
-                relevance_score=score,
-                memory_type=MemoryType.SEMANTIC,
-                compression_level=1,
-                compressed_text=anchor.text[:200],
+                relevance_score=round(norm_score, 4),
+                memory_type=mem_type,
+                compression_level=comp_level,
+                compressed_text=text or (anchor.text[:200] if anchor else ""),
             ))
 
+        # Append unanchored items (raw buffer chunks + WM exact hits —
+        # these have no stable graph ID so can't participate in RRF)
+        seen_texts = {self._rt._normalize_text(item.compressed_text)
+                      for item in merged_items
+                      if hasattr(item, 'compressed_text') and item.compressed_text}
         for chunk, score in raw_results:
             norm_text = self._rt._normalize_text(chunk.text[:120])
             if norm_text and norm_text in seen_texts:
                 continue
             seen_texts.add(norm_text)
             merged_items.append(MemoryItem(
-                anchor=None,
-                relevance_score=score,
-                memory_type=MemoryType.WORKING,
-                compression_level=0,
+                anchor=None, relevance_score=score * 0.7,
+                memory_type=MemoryType.WORKING, compression_level=0,
                 compressed_text=chunk.text[:200],
             ))
-
-        for item in graph_result.get("items", []):
-            text = getattr(item, 'compressed_text', '') or ''
-            norm_text = self._rt._normalize_text(text)
-            if norm_text and norm_text in seen_texts:
-                continue
-            seen_texts.add(norm_text)
-            merged_items.append(item)
-
-        # Insert spreading activation results (#52)
-        for item in spreading_items:
-            text = getattr(item, 'compressed_text', '') or ''
-            norm_text = self._rt._normalize_text(text)
-            if norm_text and norm_text in seen_texts:
-                # Boost existing item when spreading agrees with other paths
-                for existing in merged_items:
-                    existing_text = getattr(existing, 'compressed_text', '') or ''
-                    if self._rt._normalize_text(existing_text) == norm_text:
-                        existing.relevance_score = min(1.0, existing.relevance_score + 0.05)
-                        break
-                continue
-            seen_texts.add(norm_text)
-            merged_items.append(item)
+        for item in exact_results:
+            if not item.anchor:
+                norm_text = self._rt._normalize_text(item.compressed_text or "")
+                if norm_text not in seen_texts:
+                    seen_texts.add(norm_text)
+                    merged_items.append(item)
 
         # ── Domain-based re-ranking (#48) ──
         dr_enabled = True
@@ -237,7 +293,7 @@ class RetrievalCore:
             dr_enabled = getattr(dr_cfg, 'enabled', True)
         if dr_enabled and query:
             try:
-                domain_ids, domain_path = self._rt.domain_router.get_candidate_scope(query)
+                domain_ids, _ = self._rt.domain_router.get_candidate_scope(query)
                 if domain_ids:
                     for item in merged_items:
                         if item.anchor and item.anchor.id in domain_ids:
@@ -245,19 +301,48 @@ class RetrievalCore:
             except Exception:
                 pass
 
-        # Sort: BM25-matched anchors first (keyword reliability), then
-        # by relevance score. This prevents graph-descent items with
-        # hardcoded 0.9 brain-hit scores from outranking keyword matches.
-        merged_items.sort(key=lambda i: (
-            not (i.anchor and i.anchor.id in bm25_matched_ids),
-            -i.relevance_score,
-        ))
+        # Sort by fused relevance score (RRF already weights paths, no
+        # need for manual BM25-first bias)
+        merged_items.sort(key=lambda i: -i.relevance_score)
 
         # Enforce retrieval budget — hard limits on node count + token budget (S-5)
         budget_state = self._rt.retrieval_budget.begin()
         merged_items = self._rt.retrieval_budget.enforce_nodes(merged_items, budget_state)
         merged_items = self._rt.retrieval_budget.enforce_tokens(merged_items, budget_state)
         merged_items = merged_items[:max_items]
+
+        # ── Cross-Encoder rerank (#62) ──
+        ce = self._rt.cross_encoder
+        if ce.enabled and query and len(merged_items) > 1:
+            t_ce = time.time()
+            # Prepare candidates: (anchor_id, text) for anchored items
+            ce_candidates: list[tuple[str, str]] = []
+            for item in merged_items:
+                text = (item.compressed_text or
+                        (item.anchor.text[:200] if item.anchor else ""))
+                if text.strip():
+                    key = item.anchor.id if item.anchor else text[:40]
+                    ce_candidates.append((key, text))
+            if len(ce_candidates) > 1:
+                try:
+                    ce_scored = ce.rerank(query, ce_candidates)
+                    ce_scores = dict(ce_scored)
+                    for item in merged_items:
+                        key = item.anchor.id if item.anchor else (
+                            (item.compressed_text or "")[:40])
+                        if key in ce_scores:
+                            # Blend: 60% cross-encoder, 40% original RRF
+                            ce_score = ce_scores[key]
+                            item.relevance_score = round(
+                                0.6 * ce_score + 0.4 * item.relevance_score, 4)
+                    merged_items.sort(key=lambda i: -i.relevance_score)
+                    ce_ms = (time.time() - t_ce) * 1000
+                except Exception:
+                    ce_ms = 0
+            else:
+                ce_ms = 0
+        else:
+            ce_ms = 0
 
         # Auto-trigger System-2 if System-1 confidence is low
         s1_confidence = graph_result.get("confidence", 1.0)
@@ -280,6 +365,52 @@ class RetrievalCore:
         layers_visited.extend(graph_result.get("layers_visited", []))
         total_ms = (time.time() - t_start) * 1000
 
+        # Build retrieval trace for explainability — track which pathways
+        # contributed to each result and at what rank
+        pathway_labels = ["exact_cache", "bm25_keyword", "cognitive_cache",
+                          "graph_descent", "spreading_activation"]
+        pathway_ranked = [exact_anchored,
+                          [(item.anchor.id, item.relevance_score) for item in bm25_items if item.anchor],
+                          [(anchor.id, score) for anchor, score, _ in cache_hit_anchors],
+                          [(item.anchor.id, item.relevance_score) for item in graph_items if item.anchor],
+                          [(item.anchor.id, item.relevance_score) for item in spreading_items if item.anchor]]
+        # Build id → {pathway: rank} lookup
+        id_pathways: dict[str, dict[str, int]] = {}
+        for label, ranked in zip(pathway_labels, pathway_ranked):
+            if not ranked:
+                continue
+            for rank, (doc_id, _) in enumerate(ranked, start=1):
+                if doc_id not in id_pathways:
+                    id_pathways[doc_id] = {}
+                id_pathways[doc_id][label] = rank
+
+        rrf_trace_entries: list[RetrievalTraceEntry] = []
+        for item in merged_items[:max_items]:
+            anchor_id = item.anchor.id if item.anchor else None
+            pathways = id_pathways.get(anchor_id, {}) if anchor_id else {}
+            pathway_str = "+".join(sorted(pathways.keys())) if pathways else "unanchored"
+            reason_parts = []
+            if "exact_cache" in pathways:
+                reason_parts.append(f"exact_hit(#{pathways['exact_cache']})")
+            if "bm25_keyword" in pathways:
+                reason_parts.append(f"bm25(#{pathways['bm25_keyword']})")
+            if "cognitive_cache" in pathways:
+                reason_parts.append(f"cache(#{pathways['cognitive_cache']})")
+            if "graph_descent" in pathways:
+                reason_parts.append(f"graph(#{pathways['graph_descent']})")
+            if "spreading_activation" in pathways:
+                reason_parts.append(f"spread(#{pathways['spreading_activation']})")
+            if not reason_parts:
+                reason_parts.append("unanchored")
+
+            rrf_trace_entries.append(RetrievalTraceEntry(
+                memory_id=anchor_id or "unanchored",
+                score=item.relevance_score,
+                reason=", ".join(reason_parts),
+                pathway=pathway_str,
+                components={p: round(1.0 / max(r, 1), 3) for p, r in pathways.items()},
+            ))
+
         self._rt.tracer.record("recall", attributes={
             "query": query[:200],
             "max_items": max_items,
@@ -287,14 +418,18 @@ class RetrievalCore:
             "cache_hits": len(cache_hit_anchors),
             "raw_chunks": len(raw_results),
             "graph_items": len(graph_result.get("items", [])),
+            "spreading_items": len(spreading_items),
             "final_count": len(merged_items),
             "layers_visited": str(layers_visited)[:300],
-            "channel": "system1",
+            "channel": "system1_rrf",
+            "rrf_paths_fused": len(ranked_lists),
+            "rrf_path_weights": str([round(w, 1) for w in path_weights])[:80],
             "exact_ms": round(exact_ms, 3),
             "cache_ms": round(cache_ms, 3),
             "raw_ms": round(raw_ms, 3),
             "graph_ms": round(graph_ms, 3),
             "spreading_ms": round(spreading_ms, 3),
+            "ce_ms": round(ce_ms, 3),
             "budget_nodes": budget_state.nodes_activated,
             "budget_tokens": budget_state.tokens_used,
             "budget_truncated": budget_state.truncated,
@@ -303,17 +438,61 @@ class RetrievalCore:
 
         return MemoryContext(
             items=merged_items,
-            memory_summary=f"System-1 | Layer: {graph_result.get('layer_used', 'graph')}, visited: {layers_visited}",
+            memory_summary=f"System-1 RRF | {len(ranked_lists)} paths fused, visited: {layers_visited}",
             active_patterns=[],
             relevant_facts=[],
             reasoning_traces=[
+                f"rrf_paths={len(ranked_lists)}",
                 f"exact_hits={len(exact_results)}",
                 f"cache_hits={len(cache_hit_anchors)}",
-                f"raw_chunks={len(raw_results)}",
+                f"bm25_items={len(bm25_items)}",
                 f"graph_items={len(graph_result.get('items', []))}",
+                f"spreading_items={len(spreading_items)}",
+                f"rrf_fused={len(fused)}",
                 f"merged={len(merged_items)}",
             ],
+            retrieval_trace=RetrievalTrace(
+                query=query[:200],
+                method="weighted_rrf",
+                retrieved_memories=rrf_trace_entries,
+            ).to_dict(),
         )
+
+    # ── Explainability API (#62) ──────────────────────────────────
+
+    def explain(self, query: str = "",
+                context: AgentContext | None = None,
+                max_items: int = 10,
+                memory_id: str | None = None) -> dict:
+        """Return a human-readable explanation of WHY each memory was retrieved.
+
+        Args:
+            query: The recall query to explain.
+            context: Optional agent context.
+            max_items: Max results to retrieve and explain.
+            memory_id: Optional specific memory ID to explain in detail.
+
+        Returns:
+            Dict with 'query', 'method', and 'retrieved_memories' list,
+            each entry containing memory_id, score, reason, pathway, and
+            per-channel component scores.
+        """
+        result = self.recall(query=query, context=context, max_items=max_items)
+        trace = result.retrieval_trace or {}
+
+        if memory_id:
+            # Filter to just the requested memory
+            memories = trace.get("retrieved_memories", [])
+            filtered = [m for m in memories if m.get("memory_id") == memory_id]
+            return {
+                "query": query[:200],
+                "method": "weighted_rrf_explain",
+                "target_memory": memory_id,
+                "retrieved_memories": filtered,
+                "total_memories": len(memories),
+            }
+
+        return trace
 
     # ── BM25 anchor search ───────────────────────────────────
 

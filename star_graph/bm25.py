@@ -127,3 +127,30 @@ def reciprocal_rank_fusion(result_lists: list[list[tuple[str, float]]],
             rrf[doc_id] += 1.0 / (k + rank)
     fused = sorted(rrf.items(), key=lambda x: -x[1])
     return fused
+
+
+def weighted_reciprocal_rank_fusion(
+    result_lists: list[list[tuple[str, float]]],
+    weights: list[float] | None = None,
+    k: int = 60,
+) -> list[tuple[str, float]]:
+    """Fuse multiple ranked lists with per-path weight multipliers.
+
+    weighted_RRF(d) = Σ w_i / (k + rank_i(d))
+
+    Args:
+        result_lists: List of [(id, score), ...] ranked lists.
+        weights: Per-list weight multipliers (default: all 1.0).
+        k: Damping constant (default 60).
+
+    Returns:
+        Fused [(id, weighted_rrf_score), ...] sorted descending.
+    """
+    if weights is None:
+        weights = [1.0] * len(result_lists)
+    rrf: dict[str, float] = defaultdict(float)
+    for ranked_list, weight in zip(result_lists, weights):
+        for rank, (doc_id, _) in enumerate(ranked_list, start=1):
+            rrf[doc_id] += weight / (k + rank)
+    fused = sorted(rrf.items(), key=lambda x: -x[1])
+    return fused
