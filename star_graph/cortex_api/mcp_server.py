@@ -10,12 +10,12 @@ Usage:
 
 def entry():
     """CLI entry point registered as ``nwc-mcp`` in pyproject.toml."""
-    from .contrib.mcp_server import main
+    from ..contrib.mcp_server import main
     main()
 
 
 # Legacy import support
-from .contrib.mcp_server import server as mcp_server
+from ..contrib.mcp_server import server as mcp_server
 
 __all__ = ["mcp_server", "entry"]
 
