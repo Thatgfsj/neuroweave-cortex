@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-22 | **v1.0.6** | Phase 1-4 complete, Phase 5 planning
+> Last updated: 2026-05-22 | **v1.0.7** | Phase 1-5 complete
 
 ## Recently Completed (2026-05-21)
 
@@ -18,11 +18,12 @@
 - **4.3 Multimodal support** — extended `multimodal.py`; `AudioEncoder` (Whisper/spectrogram) + `AudioAnchor`; `MemoryManager.remember_image()` + `remember_audio()`; unified graph for text/image/audio
 - **Phase 1 Architecture Slimdown (2026-05-21)** — 49 flat modules merged into 5 core subpackages (`memory_core/`, `retrieval_engine/`, `consolidation/`, `cortex_api/`, `embedding_provider/`) via git mv; backward-compat root stubs `from .subpkg.mod import *`; cross-package imports fixed
 - **MCP Server 稳定性修复 (2026-05-21)** — import fix (`.contrib` → `..contrib` after subpackage move) + embedder warmup on startup to prevent first-call timeout
+- **Phase 5 Cognitive Depth (2026-05-22)** — 12 new modules across 4 priority areas: memory budget, quality score, stability control, 4-layer memory pyramid, typed memory, abstraction chain, domain graph, context routing, Hebbian edge learning, agent state memory, cognitive closure, cognitive priority layer | 2,000+ lines of new production code | all 12 modules verified in integration test
 
 ## Current State
 
-- **89 modules** in `star_graph/` (49 in 5 subpackages + 40 root), **contrib/** with 7 extracted modules
-- Phase 1-4 complete: RRF fusion, cross-encoder, explainability, conflict detection, memory tiering, revision engine, benchmarks, markdown export, batch vectorizer, forget certificates, zero-LLM pipeline, multimodal, architecture slimdown, MCP stability fixes
+- **101 modules** in `star_graph/` (49 in 5 subpackages + 52 root), **contrib/** with 7 extracted modules
+- Phase 1-5 complete: RRF fusion, cross-encoder, explainability, conflict detection, memory tiering, revision engine, benchmarks, markdown export, batch vectorizer, forget certificates, zero-LLM pipeline, multimodal, architecture slimdown, MCP stability fixes, **12 new Phase 5 cognitive depth modules**
 - Full S/A/B implementation: Retrieval Budget, Versioned Memory, Cluster Memory, Causal Edge Types, Episodic Memory
 - Lazy imports (PEP 562) — all symbols loaded on first access
 - `sqlite_storage.py` exists, `async_manager.py` uses `asyncio.to_thread` as transition layer

@@ -370,6 +370,71 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 
     # MCP server (optional)
     "mcp_server":              ("star_graph.contrib.mcp_server", "server"),
+
+    # ── Phase 5: Cognitive Depth (2026-05-22) ──
+    # memory budget & token budget
+    "MemoryBudgetConfig":      ("star_graph.memory_budget", "MemoryBudgetConfig"),
+    "TokenBudgetConfig":       ("star_graph.memory_budget", "TokenBudgetConfig"),
+    "MemoryBudget":            ("star_graph.memory_budget", "MemoryBudget"),
+    "TokenBudget":             ("star_graph.memory_budget", "TokenBudget"),
+    "infer_memory_layer":      ("star_graph.memory_budget", "infer_memory_layer"),
+
+    # quality score
+    "MemoryQualityScore":      ("star_graph.quality_score", "MemoryQualityScore"),
+    "QualityScorer":           ("star_graph.quality_score", "QualityScorer"),
+
+    # stability control
+    "StabilityConfig":         ("star_graph.stability_control", "StabilityConfig"),
+    "StabilityScore":          ("star_graph.stability_control", "StabilityScore"),
+    "StabilityController":     ("star_graph.stability_control", "StabilityController"),
+
+    # cognitive priority
+    "PriorityLevel":           ("star_graph.cognitive_priority", "PriorityLevel"),
+    "CognitivePriority":       ("star_graph.cognitive_priority", "CognitivePriority"),
+    "PriorityEngine":          ("star_graph.cognitive_priority", "PriorityEngine"),
+
+    # memory layers (4-layer pyramid)
+    "MemoryLayer":             ("star_graph.memory_layers", "MemoryLayer"),
+    "LayerPolicy":             ("star_graph.memory_layers", "LayerPolicy"),
+    "LayerManager":            ("star_graph.memory_layers", "LayerManager"),
+
+    # typed memory
+    "MemoryType":              ("star_graph.typed_memory", "MemoryType"),
+    "TypeStrategy":            ("star_graph.typed_memory", "TypeStrategy"),
+    "TypeManager":             ("star_graph.typed_memory", "TypeManager"),
+
+    # abstraction chain
+    "AbstractionLevel":        ("star_graph.abstraction_chain", "AbstractionLevel"),
+    "AbstractionNode":         ("star_graph.abstraction_chain", "AbstractionNode"),
+    "AbstractionChainConfig":  ("star_graph.abstraction_chain", "AbstractionChainConfig"),
+    "AbstractionChain":        ("star_graph.abstraction_chain", "AbstractionChain"),
+
+    # domain graph
+    "Domain":                  ("star_graph.domain_graph", "Domain"),
+    "DomainConfig":            ("star_graph.domain_graph", "DomainConfig"),
+    "DomainManager":           ("star_graph.domain_graph", "DomainManager"),
+
+    # context routing
+    "RoutingContext":          ("star_graph.context_routing", "RoutingContext"),
+    "RoutingWeights":          ("star_graph.context_routing", "RoutingWeights"),
+    "ContextRouter":           ("star_graph.context_routing", "ContextRouter"),
+
+    # hebbian learning
+    "HebbianConfig":           ("star_graph.hebbian_learning", "HebbianConfig"),
+    "CoActivationTracker":     ("star_graph.hebbian_learning", "CoActivationTracker"),
+    "HebbianLearner":          ("star_graph.hebbian_learning", "HebbianLearner"),
+
+    # agent state memory
+    "AgentState":              ("star_graph.agent_state", "AgentState"),
+    "GoalNode":                ("star_graph.agent_state", "GoalNode"),
+    "ToolCallRecord":          ("star_graph.agent_state", "ToolCallRecord"),
+    "Checkpoint":              ("star_graph.agent_state", "Checkpoint"),
+    "AgentStateManager":       ("star_graph.agent_state", "AgentStateManager"),
+
+    # cognitive closure
+    "FeedbackRecord":          ("star_graph.cognitive_closure", "FeedbackRecord"),
+    "ClosureConfig":           ("star_graph.cognitive_closure", "ClosureConfig"),
+    "CognitiveClosure":        ("star_graph.cognitive_closure", "CognitiveClosure"),
 }
 
 
