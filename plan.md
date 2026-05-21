@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-21 | **v1.0.4-dev** | 1,989 tests passing
+> Last updated: 2026-05-22 | **v1.0.6** | Phase 1-4 complete, Phase 5 planning
 
 ## Recently Completed (2026-05-21)
 
@@ -16,18 +16,18 @@
 - **4.1 Encrypted forgetting certificates** — `forget_certificate.py` module; Ed25519-signed JWS self-verifying certificates; GDPR Article 17 compliance; `nwc forget --certificate` + `nwc verify` CLI commands
 - **4.2 Zero-LLM ingestion pipeline** — `zero_llm_pipeline.py` module; 7-stage algorithmic pipeline (security → embed → dedup → entity → classify → score → link); optional LLM ambiguity gate; `MemoryManager.zero_llm_ingest()` API
 - **4.3 Multimodal support** — extended `multimodal.py`; `AudioEncoder` (Whisper/spectrogram) + `AudioAnchor`; `MemoryManager.remember_image()` + `remember_audio()`; unified graph for text/image/audio
+- **Phase 1 Architecture Slimdown (2026-05-21)** — 49 flat modules merged into 5 core subpackages (`memory_core/`, `retrieval_engine/`, `consolidation/`, `cortex_api/`, `embedding_provider/`) via git mv; backward-compat root stubs `from .subpkg.mod import *`; cross-package imports fixed
+- **MCP Server 稳定性修复 (2026-05-21)** — import fix (`.contrib` → `..contrib` after subpackage move) + embedder warmup on startup to prevent first-call timeout
 
 ## Current State
 
-- **89 modules** in `star_graph/`, **contrib/** with 6 extracted modules
+- **89 modules** in `star_graph/` (49 in 5 subpackages + 40 root), **contrib/** with 7 extracted modules
+- Phase 1-4 complete: RRF fusion, cross-encoder, explainability, conflict detection, memory tiering, revision engine, benchmarks, markdown export, batch vectorizer, forget certificates, zero-LLM pipeline, multimodal, architecture slimdown, MCP stability fixes
 - Full S/A/B implementation: Retrieval Budget, Versioned Memory, Cluster Memory, Causal Edge Types, Episodic Memory
 - Lazy imports (PEP 562) — all symbols loaded on first access
-- CI pipeline with version consistency checks
 - `sqlite_storage.py` exists, `async_manager.py` uses `asyncio.to_thread` as transition layer
-- `embedding.py` limited to sentence-transformers + hash fallback only
-- **New**: `cross_encoder.py` — CrossEncoder reranking module
-- **New**: `bm25.py` — `weighted_reciprocal_rank_fusion()` for weighted multi-path fusion
-- **Resolved**: `sleep.py`/`runtime.py`/`retrieval_pipeline.py` monoliths tracked for Phase 1 splitting
+- `embedding.py` limited to sentence-transformers + TF-IDF + hash fallback (3-tier)
+- **Phase 5 planned**: 17-item cognitive depth optimization (long-term stability, 4-layer memory, context routing, agent autonomy)
 
 ## Architecture Target
 
@@ -271,6 +271,214 @@ Different providers output different dimensions (OpenAI 512/1536, Local 384/768,
 ```
 
 建议实施顺序: **1.1 → 1.2 → 1.3 → 2.1 → 2.2 → 3.1 → 其他**
+
+## Phase 5 — 认知深度优化 (2026-05-22)
+
+基于 17 项深度审查，以下按优先级分类。已覆盖项标注状态，新项纳入实施队列。
+
+### 已在 Phase 1-4 完成的项
+
+| # | 项目 | 对应实现 | 状态 |
+|---|------|----------|------|
+| 6 | 记忆冲突检测 | 2.1 Conflict Detection & Resolution (`conflict_detection.py`) | done |
+| 9 | 睡眠整理机制 | 8-Phase Sleep Consolidation (`consolidation/sleep*.py`) | done |
+| 11 | 可解释性 | 1.3 Explainable reasoning paths (`retrieval_trace`, `explain()`) | done |
+| 1 | 批量向量化 | 3.3 Batch Vectorizer (`batch_vectorizer.py`) | done (distillation 未实现) |
+| 7 | 检索多策略融合 | 1.1 RRF fusion (`bm25.py`, `dual_channel.py`) | done (context routing 未实现) |
+| 2 | 记忆分层 | 2.2 Hot/Warm/Cold tiering (`tier.py`, `tiered.py`) | done (4-layer identity 未实现) |
+
+### 🔴 Priority 5.1 — 长期稳定性（防退化）
+
+#### 5.1.1 Memory Budget & Token Budget
+
+**问题**: 记忆无限增长 → 检索延迟上升、token 消耗失控、噪声累积
+
+**方案**:
+- `MemoryBudget`: 总量上限 + 各层配额 (Working/Episodic/Semantic/Core)
+- `TokenBudget`: 单次 recall 最大 token 消耗 + 每日 LLM 调用上限
+- 动态上下文裁剪: 低价值记忆在注入 prompt 前截断
+- 与现有 `edge_budget.py` / `retrieval_budget.py` 统一
+
+```
+MemoryBudget:
+  total_anchors: 50,000
+  working_memory: 200
+  episodic: 30,000
+  semantic: 15,000
+  core_identity: 5,000
+```
+
+#### 5.1.2 Memory Quality Score
+
+**问题**: 无法区分高价值记忆 vs 噪声记忆 vs 错误记忆
+
+**方案**:
+- `MemoryQualityScore`: 使用频率 × 推理贡献 × 用户反馈 × 任务命中率
+- 低分记忆自动归档 Cold tier → 定期清理
+- 高分记忆强化保护（跳过 pruner）
+- 质量阈值可配置
+
+#### 5.1.3 Long-Term Stability Control
+
+**问题**: 长期运行后记忆污染、Agent 人格漂移、召回失真
+
+**方案**:
+- `MemoryDecayCurve`: 基于 importance × recency × repetition × emotion × task_relevance
+- 自动衰减（指数/线性可配）
+- 自动归档到 Cold tier
+- Core Identity 层记忆豁免衰减
+- 定期稳定性报告: 人格漂移度 / 记忆一致性 / 检索退化率
+
+### 🟡 Priority 5.2 — 认知结构深化
+
+#### 5.2.1 四层记忆金字塔 (4-Layer Memory)
+
+**当前**: Hot/Warm/Cold 三级（按温度）
+
+**目标**: 四级认知分层:
+
+| 层级 | 用途 | 生命周期 | 召回策略 | 压缩策略 |
+|------|------|----------|----------|----------|
+| Working Memory | 当前任务上下文 | 分钟~小时 | 全量注入 prompt | 不压缩 |
+| Episodic Memory | 用户事件/对话 | 天~月 | 语义 + 时序检索 | 摘要压缩 |
+| Semantic Memory | 长期知识/规律 | 月~年 | 图谱遍历 + 概念检索 | 递归摘要 |
+| Core Identity | 人格/偏好/价值观 | 永久 | 强权重注入 | 仅人工修改 |
+
+**新增字段**: `Anchor.memory_layer`, `Anchor.layer_ttl`
+
+#### 5.2.2 Event → Pattern → Identity 抽象链
+
+**问题**: 系统记录内容，不"理解"用户
+
+**方案**:
+```
+1000条事件 ──→ 100条摘要 ──→ 10条长期规律 ──→ 1个认知画像
+(episodic)    (semantic)     (pattern)          (identity)
+```
+
+- **Event → Pattern**: 多次相同话题 → 推导"偏好系统级开发"
+- **Pattern → Identity**: 多个关联 Pattern → "全栈工程师偏向后端"
+- LLM 辅助抽象（可选），纯统计初见
+- 新增 `abstraction_chain.py`，扩展现有 `abstraction.py`
+
+#### 5.2.3 Typed Memory（多类型记忆结构）
+
+**问题**: 代码/对话/文档/任务/工具调用本质不同，但统一存储
+
+**方案**:
+
+| 类型 | embedding | 压缩策略 | 检索逻辑 |
+|------|-----------|----------|----------|
+| `code` | 专用 code embedder | 文件级去重 | 函数/类签名索引 |
+| `task` | 目标导向 embedding | 状态机压缩 | 任务状态检索 |
+| `dialogue` | 通用 embedder | 对话摘要 | 时序+语义 |
+| `tool_call` | 操作路径 embedding | 模式去重 | 工具链匹配 |
+| `knowledge` | 概念级 embedding | 合并相似 | 概念图谱遍历 |
+
+**改动**: `Anchor.memory_type` 字段（已有 `memory_type` 枚举，扩展即可）
+
+#### 5.2.4 Domain-based Graph（图区域化与子图隔离）
+
+**问题**: 图谱无限增长 → 弱连接污染 → 跨域检索噪声
+
+**方案**:
+- 按领域自动分区: 开发 / 生活 / 情感 / 项目 / 世界知识
+- 每个 domain 独立 embedding subspace + 独立检索
+- 跨域边自动降权（软隔离）
+- Domain Router 扩展现有 `domain_router.py`
+- 与现有 cortices 体系整合
+
+### 🟡 Priority 5.3 — 检索智能化
+
+#### 5.3.1 Context Routing Engine（上下文路由）
+
+**问题**: "最相似" ≠ "当前任务最需要"
+
+**方案**: 检索维度扩展，不单依赖 embedding similarity:
+
+```
+检索权重 = W1·similarity + W2·task_relevance + W3·domain_match 
+          + W4·recency + W5·user_intent + W6·agent_state
+```
+
+- 当前任务目标（debugging/coding/planning）决定 W1-W6 权重分配
+- 用户意图检测（问句类型、关键词信号）
+- Agent 状态感知: 当前 tool 链、推理阶段
+- Domain 标签: 优先检索同域记忆
+
+#### 5.3.2 Hebbian Edge Learning（赫布边权学习）
+
+**问题**: 图边固定，不随使用动态强化/衰减
+
+**方案**:
+- **Edge Reinforcement**: 经常一起激活的记忆对 → 边权增强
+- **Edge Decay**: 长期不遍历的边 → 衰减至剪枝
+- **Hebbian Rule**: `Δw = η × (激活频率) × (共现概率)`
+- 与现有 `Edge` 的 `used_at` / `access_count` 字段整合
+- 新增 `edge_learning.py`，扩展现有 `edges.py`
+
+### 🟢 Priority 5.4 — Agent 自主性
+
+#### 5.4.1 Agent State Memory
+
+**问题**: 系统只记用户，不记 Agent 自身状态
+
+**方案**:
+- 当前任务树（goal → subgoal → action）
+- Tool 调用历史 + 结果
+- 推理阶段（exploration / validation / execution）
+- 长任务中断恢复（checkpoint）
+- 新增 `agent_state.py` 模块
+
+#### 5.4.2 Cognitive Closure（认知闭环）
+
+**问题**: 系统只 `存储 → 检索`，不 `学习 → 修正 → 演化`
+
+**方案**:
+```
+recall → use → feedback → learn → future_recall_improved
+```
+- `RetrievalFeedback`: 用户是否引用了被召回的记忆
+- `RecallSuccessRate`: 召回记忆被实际使用的比例
+- `SelfReflection`: 定期反思——"哪些记忆应该被修订/删除/强化"
+- `MemoryCorrection`: LLM 辅助修正低质量记忆
+- 长期自优化: 每 N 个 sleep cycle 运行一次 reflection
+
+#### 5.4.3 Cognitive Priority Layer（认知优先级）
+
+**问题**: 所有记忆地位接近，但核心人格应远高于普通聊天
+
+**方案**:
+
+```
+优先级排序:
+1. 当前任务目标 (active_goals)
+2. 用户长期目标 (long_term_goals)  
+3. 核心人格/价值观 (core_identity)
+4. 高频知识/技能 (frequent_knowledge)
+5. 普通事件 (general_events)
+```
+
+- 优先级决定: 检索权重、衰减速度、压缩保护级别
+- Core Identity 强制注入 prompt（不受 token budget 限制）
+- 新增 `cognitive_priority.py`
+
+### 实施优先级矩阵 (Phase 5)
+
+```
+                    高影响 ───┬─── 低影响
+                   ┌──────────┼──────────┐
+             高    │ 5.1.1 Memory Budget │ 5.2.2 抽象链    │
+             难    │ 5.1.2 Quality Score │ 5.3.1 Context路由│
+             度    │ 5.2.1 四层记忆     │ 5.2.3 Typed Mem │
+                   ├──────────┼──────────┤
+             低    │ 5.1.3 长期稳定性   │ 5.2.4 Domain图   │
+             难    │ 5.3.2 Hebbian学习  │ 5.4.1 Agent状态  │
+             度    │ 5.4.2 认知闭环     │ 5.4.3 认知优先级 │
+                   └──────────┴──────────┘
+```
+
+建议实施顺序: **5.1.1 → 5.1.2 → 5.2.1 → 5.1.3 → 5.3.1 → 5.3.2 → 5.2.2 → 其他**
 
 ### 参考项目链接
 
