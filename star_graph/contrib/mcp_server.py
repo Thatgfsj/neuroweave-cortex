@@ -60,7 +60,35 @@ def _get_manager():
         if _storage_path and os.path.exists(_storage_path):
             _mgr.load(_storage_path)
             sys.stderr.write(f"[star-graph] Loaded from {_storage_path}\n")
+        _warmup_embedder()
+        sys.stderr.write("[star-graph] Embedder warmup complete\n")
     return _mgr
+
+
+def _warmup_embedder():
+    """Pre-load the embedding model + warm up retrieval indices.
+
+    SentenceTransformer takes 5-15 s to load even with local_files_only=True.
+    BM25/DomainRouter indices also have first-call setup cost.
+    Without warmup, the first remember/recall call hits MCP client timeouts.
+    """
+    try:
+        embedder = _mgr._rt._get_embedder()
+        embedder.encode("warmup")
+        sys.stderr.write(f"[star-graph] Embedder backend: {embedder.backend}, dim={embedder.dim}\n")
+    except Exception:
+        sys.stderr.write("[star-graph] Embedder warmup failed (will retry on first call)\n")
+        return
+
+    # Pre-warm retrieval path: ingest a dummy memory then recall it,
+    # so BM25 index, domain router, cognitive cache, etc. are all initialized.
+    try:
+        anchor = _mgr.remember("__warmup__", tags=["system"], skip_gate=True)
+        if anchor:
+            _mgr.recall("__warmup__", max_items=1)
+            _mgr.forget(anchor.id, create_ghost=False)  # don't leave trash
+    except Exception:
+        pass  # retrieval warmup best-effort
 
 
 # ── Server ──────────────────────────────────────────────────
