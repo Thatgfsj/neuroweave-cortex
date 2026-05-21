@@ -1,6 +1,44 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> Last updated: 2026-05-22 | **v1.0.7** | Phase 1-5 complete
+> Last updated: 2026-05-22 | **v1.0.7** | Phase 1-5 complete | **Phase 6: Cognitive Cortex Roadmap**
+
+---
+
+## 定位升级: Memory System → Cognitive Cortex
+
+### 旧定位
+- Memory System / RAG Memory / Graph Memory / Long Context Enhancement
+- 本质: 为 LLM 提供更多上下文
+
+### 新定位（目标）
+- **External Cognitive Cortex** — LLM 外置思维皮层
+- **Cognitive Runtime System** — 认知运行时系统
+- **Thought Operating Layer** — 思维操作层
+- **Semantic Cortex Infrastructure** — 语义皮层基础设施
+
+NWC 不再只是 "给模型更多记忆"，而是 "为模型提供外置认知系统"。
+
+### 核心哲学
+
+1. **长上下文 ≠ 智能** — 无限上下文不是未来。真正高级系统: 大量沉睡记忆 → 少量激活概念 → 动态工作记忆 → 稀疏认知激活 → 概念竞争机制
+2. **认知状态比原始记忆更重要** — 重点不是 "记住了什么"，而是 "当前认知状态是什么"
+3. **LLM 不再直接负责完整思考** — NWC 先形成认知状态，LLM 只负责语言表达、局部推理、自然语言生成
+
+### 目标架构
+
+```
+User Input → Perception Layer → Cortex Cognitive Engine → Working Memory Workspace
+                                                              ↓
+                                                     Cognitive State Formation
+                                                              ↓
+                                                             LLM
+                                                              ↓
+                                                     Natural Language Output
+```
+
+**关键: LLM 在系统最下层，不是最上层。** 推理发生在 Working Memory，不是长期记忆。
+
+---
 
 ## Recently Completed (2026-05-21)
 
@@ -480,6 +518,166 @@ recall → use → feedback → learn → future_recall_improved
 ```
 
 建议实施顺序: **5.1.1 → 5.1.2 → 5.2.1 → 5.1.3 → 5.3.1 → 5.3.2 → 5.2.2 → 其他**
+
+---
+
+## Phase 6 — Cognitive Cortex (认知皮层下一代)
+
+从 "记忆系统" 进化为 "LLM 外置认知皮层"。
+
+### 6.0 核心概念: Thought Object (思维对象)
+
+未来 NWC 节点不应只是静态 Memory Node，而应是活化的 Thought Object:
+
+```json
+{
+  "type": "thought",
+  "state": "active",
+  "confidence": 0.82,
+  "activation_energy": 0.76,
+  "goal_relation": [],
+  "derived_from": [],
+  "ttl": 120,
+  "priority": 0.91
+}
+```
+
+节点开始 "活化"，而不是静态存储。
+
+### 6.1 Perception Layer (感知层) — P0
+
+**输入**: 原始用户文本
+**输出**: 结构化认知输入
+
+功能:
+- 输入解析 → 意图识别 → 情绪检测 → 目标提取 → 概念提取 → 隐式需求分析
+- 输出结构化认知输入，不是普通 embedding
+- 与现有 `gate.py` / `write_gate.py` 整合
+
+### 6.2 Working Memory Workspace (工作记忆区) — P0
+
+这是未来最核心模块。没有 WM，系统永远只是高级 RAG。
+
+功能:
+- 暂存当前思维、形成意识区
+- 承载推理链、目标冲突、思维过程
+- 动态激活/衰减（TTL 管理）
+- 多轮推理缓存
+
+核心机制:
+```
+长期记忆 → 激活 → 工作记忆 → 推理循环 → 状态更新
+```
+
+与现有 `working_memory.py` / `scheduler.py` 整合、升级。
+
+### 6.3 Concept Cortex (概念皮层) — P1
+
+核心任务: 从 "句子记忆" 转向 "概念网络"
+
+功能:
+- 激活相关概念 → 概念扩散 → 概念融合 → 概念竞争 → 动态权重调整
+- 概念节点: `技术探索`, `长期主义`, `控制欲`, `安全感`, `社交认同`, `创造欲`
+- 与现有 `abstraction.py` / `abstraction_chain.py` / `domain_router.py` 整合
+
+### 6.4 Spreading Activation Engine (激活扩散引擎) — P1
+
+从 "检索" 变成 "联想":
+
+```
+概念激活 → 关联扩散 → 语义升温 → 动态竞争 → 形成思维链
+```
+
+- 多跳联想、动态概念升温、语义路径形成
+- 扩展现有 spreading activation 机制 (currently `retrieval.spreading` in defaults.yaml)
+- 与现有 graph traversal 整合
+
+### 6.5 Goal System (目标系统) — P2
+
+系统必须持续维护: 长期目标 / 短期目标 / 隐式目标 / 冲突目标 / 情绪驱动目标
+
+- 目标驱动推理 — 没有目标系统无法形成真正推理
+- 与现有 `agent_state.py` (GoalNode tree) / `cognitive_priority.py` 整合
+
+### 6.6 Salience Engine (显著性引擎) — P2
+
+决定 "什么值得进入意识区":
+- 注意力竞争、动态显著性、认知权重变化、概念优先级
+- 原则: 少激活、强关联、高权重、动态变化
+- 解决认知熵增 — 防止信息爆炸、图谱污染、上下文坍塌
+
+### 6.7 Cognitive Compression (认知压缩) — P3
+
+从 "高级数据库" 变成 "认知系统":
+
+```
+大量事件 → 抽象 → 概念形成 → 人格形成 → 世界模型形成
+```
+
+- 与现有 compression pipeline (`compression.py`, `four_layer` 压缩)、`abstraction_chain.py` 整合
+
+### 6.8 Self Model (自我模型) — P3
+
+维护系统自身认知状态:
+- 当前状态 / 当前目标 / 当前偏向 / 当前不确定性 / 当前推理阶段
+- 输出 Cognitive State:
+
+```json
+{
+  "focus": [],
+  "goals": [],
+  "uncertainties": [],
+  "emotional_bias": [],
+  "active_concepts": []
+}
+```
+
+这是未来真正送给 LLM 的东西，不是原始 memory。
+
+### 6.9 Autonomous Reasoning Loop (自主推理循环) — P4
+
+最终阶段:
+```
+发现矛盾 → 激活思考 → 形成推理 → 更新认知
+```
+
+- 系统自动运行推理循环
+- 与现有 `reflection_loop.py` / `cognitive_closure.py` 升级整合
+
+### 6.10 Memory Lifecycle (记忆全生命周期)
+
+```
+短期记忆 → 工作记忆 → 长期记忆 → 冷记忆 → 休眠 → 死亡
+```
+
+- 与现有 tier 系统 (Hot/Warm/Cold) + 4-layer pyramid + stability_control 统一
+
+---
+
+### Phase 6 实施优先级矩阵
+
+```
+                    高影响 ───┬─── 低影响
+                   ┌──────────┼──────────┐
+             高    │ 6.2 Working  │ 6.3 Concept  │
+             难    │ Memory       │ Cortex       │
+             度    │ 6.4 Spreading│ 6.8 Self     │
+                   │ Activation   │ Model        │
+                   ├──────────┼──────────┤
+             低    │ 6.1 Perception│ 6.9 Auto     │
+             难    │ 6.5 Goal     │ Reasoning    │
+             度    │ 6.6 Salience │ 6.7 Compress │
+                   │ 6.10 Lifecycle│              │
+                   └──────────┴──────────┘
+```
+
+建议实施顺序: **6.2 (Working Memory) → 6.4 (Spreading Activation) → 6.1 (Perception) → 6.3 (Concept) → 6.5 (Goal) → 6.6 (Salience) → 6.7 (Compression) → 6.8 (Self Model) → 6.9 (Auto Reasoning)**
+
+### 绝对不能走的错误路线
+
+- 不要: 无限 memory / 无限 embedding / 无限 graph 连接 / 无限上下文 / 全部信息激活
+- 否则: 变成巨型语义沼泽 — 什么都能关联，什么都推理不了
+- 正确方向: 高压缩 / 低激活 / 强概念 / 动态工作记忆 / 持续认知状态 / 目标驱动推理
 
 ### 参考项目链接
 
