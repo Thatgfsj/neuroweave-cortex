@@ -50,19 +50,30 @@ from mcp.types import Tool, TextContent
 
 _mgr = None
 _storage_path = os.environ.get("STAR_GRAPH_STORAGE_PATH", "")
+_warmup_done = False
 
 
 def _get_manager():
-    global _mgr
+    global _mgr, _warmup_done
     if _mgr is None:
         from star_graph import MemoryManager
         _mgr = MemoryManager()
         if _storage_path and os.path.exists(_storage_path):
             _mgr.load(_storage_path)
             sys.stderr.write(f"[star-graph] Loaded from {_storage_path}\n")
-        _warmup_embedder()
-        sys.stderr.write("[star-graph] Embedder warmup complete\n")
+        # Warmup only on first actual memory operation, NOT on stats
+        _warmup_done = False
     return _mgr
+
+
+def _do_warmup():
+    """Run embedder + retrieval warmup. Called lazily on first memory operation."""
+    global _warmup_done
+    if _warmup_done:
+        return
+    _warmup_done = True
+    _warmup_embedder()
+    sys.stderr.write("[star-graph] Embedder warmup complete\n")
 
 
 def _warmup_embedder():
@@ -298,6 +309,9 @@ async def list_tools():
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
+    # stats does NOT trigger warmup — it only reads counters, no embedder needed
+    if name != "stats":
+        _do_warmup()
     mgr = _get_manager()
 
     try:
