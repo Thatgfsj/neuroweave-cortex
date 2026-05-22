@@ -146,8 +146,9 @@ class McpServer:
             return [{"type": "text", "text": json.dumps({"id": anchor_id, "status": "stored"}, ensure_ascii=False)}]
 
         elif name == "remember_working":
-            anchor_id = ctx.remember_working(args["text"], tags=args.get("tags", []))
-            return [{"type": "text", "text": json.dumps({"id": anchor_id, "status": "stored_working"}, ensure_ascii=False)}]
+            # remember_working returns a dict with pseudo-id (WorkingMemoryEntry has no .id)
+            result = ctx.remember_working(args["text"], tags=args.get("tags", []))
+            return [{"type": "text", "text": json.dumps({**result, "status": "stored_working"}, ensure_ascii=False)}]
 
         elif name == "recall":
             result = ctx.recall(args["query"], max_items=args.get("max_items", 8))
@@ -189,7 +190,15 @@ class McpServer:
 
         elif name == "stats":
             s = ctx.stats()
-            return [{"type": "text", "text": json.dumps(s, ensure_ascii=False, default=str)}]
+            # ManagerStats has cognitive_health that may be slow to compute;
+            # only include if already loaded (not on first access)
+            if hasattr(s, 'to_dict'):
+                d = s.to_dict()
+            else:
+                d = dict(s) if isinstance(s, dict) else {"error": "stats unavailable"}
+            # Remove cognitive_health to avoid slow snapshot computation on first access
+            d.pop("cognitive_health", None)
+            return [{"type": "text", "text": json.dumps(d, ensure_ascii=False, default=str)}]
 
         elif name == "get_profile":
             profile = ctx.get_profile()

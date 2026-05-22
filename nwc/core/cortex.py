@@ -118,14 +118,21 @@ class Cortex:
                  importance: float = 0.5, emotional_valence: float = 0.0) -> str:
         """Store a memory. Returns anchor ID."""
         self._ensure_loaded()
-        anchor_id = self._manager.remember(text, tags=tags or [])
-        return anchor_id
+        anchor = self._manager.remember(text, tags=tags or [])
+        return getattr(anchor, 'id', '') if anchor else ''
 
-    def remember_working(self, text: str, tags: list[str] | None = None) -> str:
-        """Store in working memory buffer (short-term, high-activation)."""
+    def remember_working(self, text: str, tags: list[str] | None = None) -> dict:
+        """Store in working memory buffer (short-term, high-activation).
+
+        Returns a dict with pseudo-id, text, tags, importance, created_at.
+        WorkingMemoryEntry has no .id (it's ephemeral, not persisted).
+        """
         self._ensure_loaded()
-        anchor_id = self._manager.remember_working(text, tags=tags or [])
-        return anchor_id
+        entry = self._manager.remember_working(text, tags=tags or [])
+        import hashlib
+        pseudo_id = f"wm_{hashlib.md5(entry.text.encode()).hexdigest()[:8]}"
+        return {"id": pseudo_id, "text": entry.text[:200], "tags": entry.tags,
+                "importance": entry.importance, "created_at": entry.created_at}
 
     def recall(self, query: str, max_items: int | None = None,
                context: dict | None = None) -> RecallResult:
@@ -139,17 +146,23 @@ class Cortex:
         relations = []
         if hasattr(result, 'memories'):
             for m in result.memories:
-                item = {"id": getattr(m, 'id', ''), "content": getattr(m, 'content', str(m)),
-                        "score": getattr(m, 'score', 0.0), "tags": getattr(m, 'tags', [])}
+                if getattr(m, 'anchor', None) is None:
+                    continue
+                item = {"id": getattr(m, 'id', '') or getattr(m.anchor, 'id', ''),
+                        "content": getattr(m, 'content', '') or getattr(m.anchor, 'text', ''),
+                        "score": getattr(m, 'score', 0.0), "tags": getattr(m, 'tags', []) or getattr(m.anchor, 'tags', [])}
                 memories.append(item)
-                if hasattr(m, 'tags'):
-                    for t in m.tags:
+                if hasattr(m.anchor, 'tags'):
+                    for t in m.anchor.tags:
                         entities.add(t)
         elif isinstance(result, list):
             for m in result:
-                if hasattr(m, 'content'):
-                    memories.append({"id": getattr(m, 'id', ''), "content": m.content,
-                                     "score": getattr(m, 'score', 0.0)})
+                if getattr(m, 'content', None) is None and getattr(m, 'text', None) is None:
+                    continue
+                item = {"id": getattr(m, 'id', '') or getattr(getattr(m, 'anchor', None), 'id', ''),
+                        "content": getattr(m, 'content', '') or getattr(m, 'text', ''),
+                        "score": getattr(m, 'score', 0.0)}
+                memories.append(item)
         return RecallResult(
             memory=memories,
             entities=list(entities),
@@ -550,7 +563,16 @@ class Cortex:
     def stats(self) -> dict:
         """Memory system statistics."""
         self._ensure_loaded()
-        return self._manager.stats() if hasattr(self._manager, 'stats') else {}
+        stats = self._manager.stats if hasattr(self._manager, 'stats') else None
+        if stats is None:
+            return {}
+        if hasattr(stats, 'to_dict'):
+            d = stats.to_dict()
+        else:
+            d = dict(stats) if isinstance(stats, dict) else {"error": "stats unavailable"}
+        # Remove cognitive_health to avoid slow snapshot on first access
+        d.pop("cognitive_health", None)
+        return d
 
     # ── Async API ───────────────────────────────────────────
 
