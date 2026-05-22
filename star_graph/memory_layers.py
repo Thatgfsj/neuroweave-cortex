@@ -123,7 +123,11 @@ class LayerManager:
     # ── Layer access ────────────────────────────────────────
 
     def get_layer(self, anchor_id: str) -> MemoryLayer:
-        """Get anchor's current memory layer, defaulting to episodic."""
+        """Get anchor's current memory layer.
+
+        Checks explicit assignment first, then dynamic attr on anchor,
+        then falls back to inference via classify_anchor.
+        """
         layer = self._layer_assignments.get(anchor_id)
         if layer is not None:
             return layer
@@ -135,6 +139,7 @@ class LayerManager:
                     return MemoryLayer(dynamic)
                 except ValueError:
                     pass
+            return self.classify_anchor(anchor)
         return MemoryLayer.EPISODIC
 
     def set_layer(self, anchor_id: str, layer: MemoryLayer) -> None:

@@ -1,23 +1,22 @@
-# NeuroWeave Cortex (NWC) — Cognitive Memory Runtime
+# NeuroWeave Cortex (NWC) — External Cognitive Cortex for AI Agents
 
-An infrastructure-grade memory system for AI agents. Not a vector database. Not a graph database. A **memory runtime** — it remembers, forgets, strengthens, connects, abstracts, and evolves, the way biological memory does.
+Not a vector database. Not a graph database. Not RAG. An **external cognitive cortex** — a cognitive runtime that perceives, activates concepts, maintains working memory, forms reasoning chains, tracks goals, manages attention, and evolves a self-model. It remembers, forgets, strengthens, connects, abstracts, and reasons — the way biological cognition does.
 
 ```
-Anchors: 131   Edges: 211   Ghosts: 0   Schemas: 9   Abstracts: 1
-Memory Stability: 0.72   Recall Plasticity: 0.58   Compression: 1.6x
+v1.0.8 | 112 modules | Phase 1-6 complete | Cognitive Cortex Architecture
 ```
 
 ## What makes it different
 
-Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **cognitive lifecycle**:
+Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **full cognitive lifecycle**:
 
-| Capability | Vector DB | Graph DB | NeuroWeave Cortex |
+| Capability | Vector DB | Graph DB | NW Cortex |
 |---|---|---|---|
 | Semantic retrieval | yes | no | yes |
 | Graph traversal | no | yes | yes |
 | Automatic forgetting (survival decay) | no | no | yes |
 | Memory strengthening (rehearsal) | no | no | yes |
-| Conflict detection (contradiction edges) | no | no | yes |
+| Conflict detection & resolution | no | no | yes |
 | Multi-strategy RRF retrieval fusion | no | no | yes |
 | Cross-Encoder reranking | no | no | yes |
 | Explainable reasoning paths | no | no | yes |
@@ -28,133 +27,207 @@ Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **
 | Emergent abstraction (pattern discovery) | no | no | yes |
 | Temporal context (TimeSpine-indexed) | no | no | yes |
 | 8-phase sleep consolidation | no | no | yes |
-| Ghost revival (savings effect) | no | no | yes |
-| Autobiographical self-model | no | no | yes |
+| Ghost revival (savings effect) | no | no | **world-first** |
+| Hebbian edge learning | no | no | yes |
+| 4-layer memory pyramid | no | no | yes |
+| Goal-driven inference | no | no | yes |
+| **Working Memory Workspace** | no | no | **yes** |
+| **Concept Cortex** | no | no | **yes** |
+| **Spreading Activation Engine** | no | no | **yes** |
+| **Salience-based attention** | no | no | **yes** |
+| **Self Model → LLM prompt injection** | no | no | **yes** |
+| **Autonomous reasoning loop** | no | no | **yes** |
+| **Full memory lifecycle (9 stages)** | no | no | **yes** |
 
 ## Quick Start
+
+### Classic API (Phase 1-5)
 
 ```python
 from star_graph import MemoryManager
 from star_graph.scheduler import AgentContext
 
-# One-line setup
 mgr = MemoryManager()
 
-# Remember things
+# Remember
 mgr.remember("User debugs Redis connection timeout — pool was 10, fixed to 20",
              tags=["redis", "debug", "timeout"])
-mgr.remember("User knows Python async programming with asyncio",
-             tags=["python", "knowledge"])
 mgr.remember("User prefers type hints and concise code",
              tags=["preference", "style"])
 
-# Working memory — fast, ephemeral buffer for active context
+# Working memory
 mgr.remember_working("Currently debugging auth middleware timeout",
                      tags=["debug", "auth"])
 
-# Context-aware recall — working memory gets retrieval priority
+# Context-aware recall
 ctx = AgentContext(task_type="debugging", active_goals=["fix Redis connection"])
 memories = mgr.recall("Redis connection pool config", context=ctx)
 print(memories.memory_summary)
 
-# System-2 deep recall for exhaustive or low-confidence queries
-memories = mgr.dual_recall("list all Redis-related issues", context=ctx)
-
-# Micro-consolidation — incremental, non-blocking
-mgr.micro_consolidate()
-
-# Let the system sleep — 8-phase consolidation
+# Sleep consolidation
 report = mgr.sleep()
-print(report)
 
 # Persist
 mgr.save("agent_memory.json")
-mgr.load("agent_memory.json")
+```
 
-# Export to editable Markdown (GBrain-aligned)
-mgr.export_markdown("memories/")
+### Cognitive Cortex API (Phase 6)
+
+```python
+from star_graph import (
+    PerceptionLayer, CognitiveWorkspace, ConceptCortex,
+    ActivationEngine, GoalSystem, SalienceEngine, SelfModel
+)
+
+# ── Full cognitive pipeline ──
+pl = PerceptionLayer()
+ws = CognitiveWorkspace(max_items=20)
+cc = ConceptCortex()
+ae = ActivationEngine(graph=graph)
+gs = GoalSystem()
+se = SalienceEngine()
+
+# 1. Perceive user input
+frame = pl.perceive("I need to debug a Redis memory leak urgently!")
+# → PerceptionFrame(intent="command", valence=-0.4, concepts=["redis","debug","leak"])
+
+# 2. Admit to working memory workspace
+ws.on_perception(frame)
+
+# 3. Activate concepts
+for concept in frame.extracted_concepts:
+    cc.get_or_create_concept(concept)
+
+# 4. Spread activation through memory graph
+result = ae.activate_from_perception(frame)
+
+# 5. Track goals
+goal = gs.add_goal("Fix Redis pipeline memory leak", priority=0.9)
+gs.activate_goal(goal.id)
+
+# 6. Compute salience — decide what enters attention
+signals = [se.compute_salience(item.id, "thought",
+    context={"task_relevance": item.relevance_to_current_task})
+    for item in ws.get_items()]
+winners = se.compete(signals, max_winners=5)
+
+# 7. Build self-model → LLM prompt injection
+sm = SelfModel(workspace=ws, goal_system=gs, concept_cortex=cc, salience_engine=se)
+prompt = sm.get_prompt_injection()
+# → "# Cognitive State Summary\n## Current Focus: ...\n## Active Goals: ..."
+
+# This is what the LLM sees — NOT raw memory dumps!
 ```
 
 ## Architecture
 
-Three-layer design. Each layer depends only on the one below.
+Four-layer cognitive design. Phase 6 adds the Cortex layer above Behavior.
 
 ```
+Layer 4: Cortex      │  Perception, Working Memory Workspace, Concept Cortex,
+    (Phase 6)        │  Spreading Activation, Goal System, Salience Engine,
+    perception.py,   │  Self Model, Autonomous Reasoning, Cognitive Compression,
+    cognitive_workspace.py,│  Memory Lifecycle Manager
+    concept_cortex.py,│  "What am I thinking right now? What should I focus on?"
+    activation_engine.py, │
+    goal_system.py,  │
+    salience.py,     │
+    self_model.py,   │
+    autonomous_reasoning.py,│
+    cognitive_compression.py,│
+    memory_lifecycle.py)│
+                     │
 Layer 3: Behavior    │  Cortex routing, memory gating, working memory,
-    (cortex.py,      │  dual-channel retrieval, adaptive replay, autobiographical memory
-     router.py,      │  "What should I recall right now, at what detail level?"
-     gate.py,        │
+    (cortex.py,      │  dual-channel retrieval, scheduler, quality scoring,
+     router.py,      │  memory budget, stability control, cognitive priority
+     gate.py,        │  "What should I recall right now, at what detail level?"
      working_memory.py,│
      scheduler.py,   │
-     autobiography.py)│
+     quality_score.py,│
+     memory_budget.py,│
+     stability_control.py,│
+     cognitive_priority.py)│
                      │
 Layer 2: Cognitive   │  Hub abstraction, cascade recall, TimeSpine temporal index,
     (retriever.py,   │  sleep consolidation, evolution, ghost revival,
      sleep.py,       │  abstraction, community detection, competition,
-     evolution.py,   │  conflict detection, memory revision, cross-encoder
-     ghost.py,       │  "How do memories connect, strengthen, and fade?"
-     abstraction.py, │
+     evolution.py,   │  conflict detection, memory revision, cross-encoder,
+     ghost.py,       │  Hebbian learning, domain routing, context routing
+     abstraction.py, │  "How do memories connect, strengthen, and fade?"
      community.py,   │
      competition.py, │
-     conflict_detection.py,│
-     memory_revision.py,   │
-     cross_encoder.py,     │
-     timespine.py,   │
-     cascade.py,     │
-     hub.py)         │
+     hebbian_learning.py,│
+     domain_graph.py,│
+     context_routing.py)│
                      │
 Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
-    (graph.py,       │  BM25 keyword index, multi-level caching
-     anchor.py,      │  "Where is this memory stored?"
-     storage.py,     │
-     sqlite_storage.py,│
+    (graph.py,       │  BM25 keyword index, multi-level caching, typed memory,
+     anchor.py,      │  4-layer memory pyramid, abstraction chain
+     storage.py,     │  "Where is this memory stored?"
      index.py,       │
      bm25.py,        │
-     cognitive_cache.py,│
-     tier.py)        │
+     typed_memory.py,│
+     memory_layers.py,│
+     abstraction_chain.py)│
 ```
 
-### Core modules
+### Core modules (Phase 1-4 foundation)
 
 | Module | Role |
 |---|---|
 | `manager.py` | High-level facade — `remember()`, `recall()`, `sleep()`, `save()` |
 | `runtime.py` | Dependency container — manages all subsystem lifecycles |
-| `retrieval_pipeline.py` | 5-layer dimensional descent (L0→L4) with automatic degradation |
 | `scheduler.py` | Context-aware retrieval with memory type selection |
 | `working_memory.py` | Short-term buffer (15-item, 1h TTL) — auto-promotes to long-term |
-| `sleep.py` | 10-phase sleep: N1_Replay → N2_Merge → N2b_ConflictDetection → N2c_MemoryRevision → N3_Compression → N3d_SleepRebuild → REM_Emotion → N4_Prune (v1.0.4) |
-| `evolution.py` | Survival-based decay (Ebbinghaus/Power-law/Exponential), belief transitions, interference |
-| `retriever.py` | HybridFusion + OscillationResonance + VectorSimilarity + Personalized PageRank + explainable scores |
-| `dual_channel.py` | System-1 (fast) + System-2 (deep) dual-channel retrieval with auto-trigger |
-| `bm25.py` | Sparse keyword retrieval (BM25) with weighted reciprocal rank fusion for hybrid search |
-| `cross_encoder.py` | Post-retrieval Cross-Encoder reranking (sentence-transformers) for precision improvement |
-| `conflict_detection.py` | Semantic contradiction detection with overwrite/coexist/deprecate resolution strategies |
-| `memory_revision.py` | Sleep-phase memory revision engine — surprise-prioritized, template/LLM re-summarization |
-| `ghost.py` | Latent memory traces with fuzzy recall and contradiction tracking (NegativeGhost) |
+| `sleep.py` | 8-phase sleep: N1_Replay → N2_Merge → N2b_Conflict → N2c_Revision → N3_Compression → N3d_Rebuild → REM_Emotion → N4_Prune |
+| `evolution.py` | Survival-based decay (Ebbinghaus/Power-law/Exponential), belief transitions |
+| `retriever.py` | HybridFusion + OscillationResonance + VectorSimilarity + Personalized PageRank |
+| `bm25.py` | Sparse keyword retrieval with RRF fusion |
+| `cross_encoder.py` | Cross-Encoder reranking for precision improvement |
+| `ghost.py` | Ghost traces, fuzzy recall, savings effect revival |
 | `abstraction.py` | Emergent category discovery from anchor clusters |
 | `community.py` | Louvain community detection with centroid routing |
-| `anchor.py` | Memory unit with 6-state lifecycle, 10-dim AnchorVector, multiplicative retention |
-| `graph.py` | Star graph with RichEdge (temporal, causal, state-transition), Schema, ReflectionNode |
-| `timespine.py` | Temporal index for O(days×buckets) time-scoped retrieval |
-| `cascade.py` | Causal chain traversal across connected memory sequences |
-| `hub.py` | Hierarchical hub-and-spoke abstraction (leaf→domain→global) |
-| `cortex.py` | Partitioned memory cortices with independent sleep and retrieval |
-| `cognitive_cache.py` | Multi-level cache (query/session/topic/activation) + exact-match entity lookup |
-| `tier.py` | STM/MTM/LTM/Core cognitive tiering + HOT/WARM/COLD storage tiers |
-| `autobiography.py` | Self-narrative formation and autobiographical memory |
-| `atom_facts.py` | LLM-powered atomic fact extraction from memory clusters |
-| `survival.py` | Pluggable survival functions (Ebbinghaus, Power-law, Exponential, Custom) |
+| `anchor.py` | Memory unit with 6-state lifecycle, 10-dim AnchorVector |
+| `graph.py` | Star graph with RichEdge, Schema, ReflectionNode |
 | `compression.py` | Multi-level session compression (episodic/strategic/meta) |
-| `resonance.py` | Phase-locked oscillation resonance for temporal-coherent retrieval |
-| `streaming.py` | Streaming memory buffer with backpressure |
-| `benchmark.py` | Built-in benchmark suite (5 categories) |
-| `batch_vectorizer.py` | Deferred batch embedding writes (buffer >= 32 / >30s flush) with SQLite WAL crash recovery |
-| `zero_llm_pipeline.py` | 7-stage zero-LLM ingestion: security → embed → dedup → entity → classify → score → link |
-| `multimodal.py` | Cross-modal text/image/audio memory — CLIP image encoding, Whisper/spectrogram audio, unified embedding space |
-| `forget_certificate.py` | Ed25519-signed JWS deletion certificates — GDPR Article 17 provable erasure |
-| `markdown_export.py` | Operator-owned plain-text memory export (GBrain-aligned); timeline + topic Markdown |
-| `config.py` | Centralized YAML config with schema validation, dot-path access, overrides |
+| `forget_certificate.py` | Ed25519-signed JWS deletion certificates — GDPR Article 17 |
+| `multimodal.py` | Cross-modal text/image/audio memory |
+| `zero_llm_pipeline.py` | 7-stage zero-LLM ingestion pipeline |
+| `batch_vectorizer.py` | Deferred batch embedding writes with SQLite WAL |
+| `markdown_export.py` | GBrain-aligned Markdown memory export |
+
+### Phase 5 — Cognitive Depth
+
+| Module | Role |
+|---|---|
+| `memory_budget.py` | Token + anchor budget management with eviction policies |
+| `quality_score.py` | 7-dimension memory quality scoring (usage, reasoning, feedback, etc.) |
+| `stability_control.py` | Long-term stability with exponential/linear decay, drift monitoring |
+| `memory_layers.py` | 4-layer pyramid: Working → Episodic → Semantic → Core Identity |
+| `typed_memory.py` | 7 memory types (code/task/dialogue/tool_call/knowledge/event/preference) |
+| `abstraction_chain.py` | Event → Summary → Pattern → Identity abstraction pipeline |
+| `domain_graph.py` | Domain-based graph partitioning with soft isolation |
+| `context_routing.py` | 6-dimension context-aware retrieval routing |
+| `hebbian_learning.py` | Hebbian edge learning — "neurons that fire together wire together" |
+| `agent_state.py` | Agent state memory: goal tree, tool calls, checkpoints |
+| `cognitive_closure.py` | Closed-loop feedback: recall → use → learn → improve |
+| `cognitive_priority.py` | 5-level priority assignment with forced injection for core identity |
+
+### Phase 6 — Cognitive Cortex
+
+| Module | Role |
+|---|---|
+| `thought_object.py` | Unified cognitive base class — activated nodes, not static memory |
+| `perception.py` | Raw text → structured PerceptionFrame (intent, emotion, goals, concepts) |
+| `cognitive_workspace.py` | **Core**: Working memory workspace with reasoning chains, attention, TTL decay |
+| `concept_cortex.py` | Concept network: activation, fusion, competition, 10 built-in core concepts |
+| `activation_engine.py` | Multi-source spreading activation (query/goal/concept/emotion seeds) |
+| `goal_system.py` | Goal hierarchy, conflict detection, goal-driven inference |
+| `salience.py` | 10-component attention competition with lateral inhibition |
+| `cognitive_compression.py` | Events → Concepts → Identity → World Model compression pipeline |
+| `self_model.py` | System self-model → compressed CognitiveState → LLM prompt injection |
+| `autonomous_reasoning.py` | Contradiction → Activation → Resolution loop (no LLM required) |
+| `memory_lifecycle.py` | Unified 9-stage lifecycle: Perception → Working → ... → Ghost → Dead |
 
 ## Retrieval Benchmarks
 
@@ -188,38 +261,40 @@ Per-category has_answer:
 | **OscillationResonance** | **0.967** | **0.967** | 0.667 |
 | HybridFusion | 0.900 | 0.900 | 0.667 |
 
-## Memory Lifecycle
+## Memory Lifecycle (9 stages)
 
-Every anchor moves through 6 states:
+Every memory moves through a full 9-stage cognitive lifecycle (Phase 6.10 `memory_lifecycle.py`):
 
 ```
-ACTIVE → REHEARSING → CONSOLIDATING → DORMANT → GHOST → REACTIVATED
+PERCEPTION → WORKING → SHORT_TERM → LONG_TERM → CONSOLIDATED → ARCHIVED → DORMANT → GHOST → DEAD
 ```
 
-- **Active**: Just created or recently accessed — fully plastic, easy to update
-- **Rehearsing**: Being replayed during sleep — temporarily elevated importance
-- **Consolidating**: Transferring from hippocampal to cortical — increasing stability
-- **Dormant**: Stable, low-activity — read-only, cortical retrieval
-- **Ghost**: Pruned but with residual trace — can partially recall or fully revive
-- **Reactivated**: Ghost revived by new relevant experience — reduced stability, high plasticity
+| Stage | Description | Duration |
+|-------|-------------|----------|
+| **Perception** | Initial intake, not yet stored | seconds |
+| **Working** | In cognitive workspace, high activation | minutes~hours |
+| **Short-term** | Stored, not yet consolidated | hours~days |
+| **Long-term** | Consolidated, actively retrievable | days~months |
+| **Consolidated** | Deeply integrated, high stability | months~years |
+| **Archived** | Cold storage, low access frequency | indefinite |
+| **Dormant** | Very low access, near ghost | indefinite |
+| **Ghost** | Forgotten but potentially revivable | 90 days |
+| **Dead** | Permanently removed | — |
 
-Paired with **ThermalState** (HOT → WARM → COLD → DEAD) for storage tier switching:
-- HOT: in-memory, fully accessible
-- WARM: in-memory, periodically flushed to disk
-- COLD: disk-only, transparent thaw on access
+Paired with **ThermalState** (HOT → WARM → COLD → DEAD) for storage tier switching and **4-layer pyramid** (Working → Episodic → Semantic → Core Identity).
 
-## Sleep Consolidation
+## Sleep Consolidation (8 phases)
 
 Sleep is not cleanup. Sleep **changes the graph**:
 
-1. **N1_Replay** — prioritizes surprising and emotional memories for replay via SWR scoring
-2. **N2_Merge** — fuses near-duplicate anchors (ANN-accelerated, O(n×k)), bridges constellations
-3. **N3_Compression** — transfers memories from hippocampal to cortical, forms schemas
-4. **N3b_AtomFacts** — LLM extraction of atomic facts from compressed clusters
-5. **REM_Emotion** — strips emotional charge from consolidated memories
-6. **N4_Prune** — removes weak anchors/edges, creates ghost traces for savings effect
-7. **N5_HubConnect** — cross-cortex hub bridge formation
-8. **N6_IndexRebuild** — refreshes ANN, BM25, and community indices
+1. **N1_Replay** — SWR-scored replay of surprising/emotional memories
+2. **N2_Merge** — ANN-accelerated near-duplicate fusion + constellation bridging
+3. **N2b_Conflict** — Semantic contradiction detection (overwrite/coexist/deprecate)
+4. **N2c_Revision** — Surprise-prioritized memory revision engine
+5. **N3_Compression** — Hippocampal→cortical transfer, schema formation
+6. **N3d_Rebuild** — Multi-node fusion, edge rewiring, abstractive pattern discovery
+7. **REM_Emotion** — Emotional decoupling from consolidated memories
+8. **N4_Prune** — Weak anchor/edge removal, ghost trace creation (savings effect)
 
 ## Dual-Channel Retrieval
 
@@ -389,7 +464,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** 1,989 tests passing, 84 modules (v1.0.4-dev).
+**Status:** Phase 1-6 complete, 112 modules, v1.0.8.
 
 ## Roadmap
 

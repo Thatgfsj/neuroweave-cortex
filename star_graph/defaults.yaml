@@ -1,7 +1,7 @@
 # NeuroWeave Cortex (NWC) — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.0.7"
+version: "1.2.0"
 
 # ── Storage paths ──
 # Default save location is ~/.star_graph/memory.json (JSON)
@@ -749,3 +749,258 @@ cognitive_closure:
   llm_enabled: false
   auto_correct: true
   max_corrections_per_cycle: 10
+
+# ═══════════════════════════════════════════════════════
+# Phase 6 — Cognitive Cortex (2026-05-22)
+# ═══════════════════════════════════════════════════════
+
+# ── Perception Layer (6.1) ──
+perception:
+  intent_confidence_threshold: 0.5
+  emotion_lexicon: nrc
+  concept_max_count: 10
+  implicit_need_max_count: 5
+  urgency_keywords_weight: 0.4
+  urgency_emotion_weight: 0.6
+  max_text_length: 8000
+  enable_entity_linking: true
+  domain_classification_enabled: true
+
+# ── Cognitive Workspace (6.2) ──
+cognitive_workspace:
+  max_items: 20
+  default_ttl_seconds: 300.0
+  decay_lambda_high_priority: 0.001
+  decay_lambda_medium_priority: 0.01
+  decay_lambda_low_priority: 0.05
+  focus_boost_factor: 1.5
+  diffusion_decay_per_hop: 0.3
+  max_reasoning_chains: 5
+  max_steps_per_chain: 20
+  conflict_detection_threshold: 0.7
+  auto_evict_on_overflow: true
+  eviction_policy: lowest_activation
+
+# ── Concept Cortex (6.3) ──
+concept_cortex:
+  max_concepts: 500
+  min_evidence_for_concept: 2
+  activation_decay_rate: 0.01
+  baseline_activation: 0.1
+  activation_threshold: 0.2
+  spread_steps: 2
+  spread_decay: 0.5
+  merge_similarity_threshold: 0.85
+  min_anchors_per_concept: 1
+  max_anchors_per_concept: 1000
+  auto_prune_interval: 100
+  seed_concepts_enabled: true
+
+# ── Activation Engine (6.4) ──
+activation_engine:
+  default_max_depth: 3
+  default_max_nodes: 50
+  default_decay: 0.6
+  min_activation_energy: 0.05
+  max_paths: 5
+  min_path_length: 2
+  path_confidence_threshold: 0.3
+  concept_seed_energy: 0.7
+  goal_seed_energy: 0.8
+  emotion_seed_energy: 0.5
+  query_seed_energy: 0.9
+  lateral_inhibition_radius: 0.7
+  lateral_inhibition_strength: 0.3
+  edge_type_weights:
+    causal: 1.5
+    semantic_similarity: 1.2
+    temporal_cooccurrence: 1.0
+    contradiction: 0.5
+    hierarchy: 0.8
+    association: 0.7
+
+# ── Goal System (6.5) ──
+goal_system:
+  max_goals: 100
+  max_active_goals: 10
+  max_sub_goals_per_goal: 10
+  auto_detect_from_perception: true
+  auto_decompose_complex_goals: true
+  conflict_check_interval: 50
+  progress_decay_rate: 0.01
+  abandon_stale_days: 90
+  archive_achieved_days: 30
+  emotional_drive_weight: 0.3
+  deadline_weight: 0.2
+
+# ── Salience Engine (6.6) ──
+salience:
+  component_weights:
+    task_relevance: 0.25
+    goal_alignment: 0.20
+    emotional_intensity: 0.10
+    novelty: 0.10
+    recency: 0.10
+    urgency: 0.10
+    frequency: 0.05
+    cognitive_priority: 0.05
+    social_relevance: 0.03
+    contradiction_flag: 0.02
+  max_attention_slots: 10
+  attention_decay_rate: 0.05
+  focus_boost_factor: 2.0
+  cognitive_load_warning: 0.8
+  cognitive_load_critical: 0.95
+  inhibition_radius: 0.7
+  inhibition_strength: 0.3
+  shift_hysteresis: 0.15
+  min_salience_for_admission: 0.15
+
+# ── Cognitive Compression (6.7) ──
+cognitive_compression:
+  min_cluster_size: 3
+  similarity_threshold: 0.55
+  max_source_anchors_per_summary: 30
+  summary_confidence_threshold: 0.4
+  concept_min_summaries: 3
+  pattern_min_concepts: 3
+  trait_min_patterns: 2
+  world_model_min_evidence: 5
+  world_model_confidence_threshold: 0.3
+  auto_prune_interval: 10
+  redundancy_cosine_threshold: 0.9
+  incremental_batch_size: 50
+  stages_enabled:
+    event_cluster: true
+    summarize: true
+    concept_extract: true
+    pattern_detect: true
+    trait_update: true
+    world_model: true
+    prune_redundant: true
+
+# ── Self Model (6.8) ──
+self_model:
+  update_interval_seconds: 30.0
+  max_uncertainties: 10
+  max_biases: 5
+  max_active_concepts: 8
+  emotional_smoothing_factor: 0.3
+  max_prompt_tokens: 2000
+  prompt_format: compact
+  include_memory_health: true
+  include_bias_warnings: true
+  persist_state_history: true
+  max_state_history: 100
+  bias_detection:
+    recency_window_seconds: 3600
+    confirmation_similarity_threshold: 0.8
+    anchoring_age_threshold: 86400
+
+# ── Autonomous Reasoning Loop (6.9) ──
+autonomous_reasoning:
+  enabled: false
+  max_iterations_per_run: 5
+  max_duration_seconds: 30.0
+  min_trigger_severity: 0.5
+  contradiction_threshold: 0.7
+  uncertainty_spike_threshold: 0.3
+  goal_blocked_severity: 0.6
+  evidence_search_depth: 2
+  evidence_min_count: 3
+  resolution_confidence_threshold: 0.6
+  auto_update_beliefs: true
+  auto_decompose_goals: true
+  trace_retention: 50
+
+# ── Memory Lifecycle (6.10) ──
+memory_lifecycle:
+  stage_policies:
+    working:
+      max_items: 200
+      ttl_seconds: 3600
+      promote_to: short_term
+      promote_condition: "importance > 0.3"
+    short_term:
+      max_items: 3000
+      ttl_seconds: 604800
+      promote_to: long_term
+      promote_condition: "access_count >= 3 OR stability > 0.5"
+      demote_to: archived
+      demote_condition: "idle_seconds > 259200 AND access_count < 2"
+    long_term:
+      max_items: 30000
+      ttl_seconds: 0
+      promote_to: consolidated
+      promote_condition: "stability > 0.7 AND access_count >= 10"
+      demote_to: archived
+      demote_condition: "idle_seconds > 2592000"
+    consolidated:
+      max_items: 15000
+      ttl_seconds: 0
+      demote_to: archived
+      demote_condition: "idle_seconds > 7776000"
+    archived:
+      max_items: 50000
+      ttl_seconds: 0
+      demote_to: dormant
+      demote_condition: "idle_seconds > 15552000"
+    dormant:
+      max_items: 0
+      demote_to: ghost
+      demote_condition: "retention < 0.05"
+    ghost:
+      max_items: 0
+      purge_after_days: 90
+  auto_transition_interval_hours: 6.0
+  max_transitions_per_cycle: 1000
+
+# ── Phase 7: Memory Evolution ────────────────────────────
+
+importance_engine:
+  weights:
+    emotion: 0.25
+    repetition: 0.30
+    goal: 0.20
+    novelty: 0.15
+    future: 0.10
+  thresholds:
+    discard: 0.2
+    low: 0.5
+    normal: 0.8
+    core: 1.0
+  decay_rates:
+    discard: 1.0
+    low: 0.3
+    normal: 0.1
+    core: 0.02
+
+belief_system:
+  initial_strength: 0.5
+  reinforce_amount: 0.05
+  challenge_amount: 0.1
+  stability_increment: 0.015
+  min_strength_for_stable: 0.7
+  min_stability_for_stable: 0.8
+  max_beliefs: 500
+
+personality_formation:
+  profile:
+    snapshot_interval_interactions: 50
+    max_snapshots: 100
+    max_patterns: 50
+    max_identity_markers: 20
+  evolution:
+    recent_window_days: 7
+    emerging_threshold: 3
+    fading_threshold_months: 3
+    stable_core_min_frequency: 5
+
+cognitive_identity:
+  persistence:
+    storage_dir: "~/.nwc/identity"
+    autosave: true
+    autosave_interval_interactions: 50
+  snapshot:
+    max_snapshots: 100
+    max_milestones: 50

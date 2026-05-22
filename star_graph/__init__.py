@@ -1,4 +1,4 @@
-"""NeuroWeave Cortex (NWC) — v1.0.0 cognitive architecture.
+"""NeuroWeave Cortex (NWC) — v1.2.0 cognitive architecture. 6-layer memory system.
 
 A graph-first, cortex-partitioned cognitive memory runtime for AI agents.
 
@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.0.3"
+__version__ = "1.0.8"
 
 import sys
 from typing import Any
@@ -370,6 +370,97 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 
     # MCP server (optional)
     "mcp_server":              ("star_graph.contrib.mcp_server", "server"),
+
+    # ── Phase 6: Cognitive Cortex — Thought Object base ──
+    "ThoughtObject":           ("star_graph.thought_object", "ThoughtObject"),
+    "new_thought":             ("star_graph.thought_object", "new_thought"),
+    "thought_from_anchor":     ("star_graph.thought_object", "thought_from_anchor"),
+
+    # ── Phase 6: Cognitive Cortex — Cognitive Workspace (6.2) ──
+    "CognitiveWorkspace":      ("star_graph.cognitive_workspace", "CognitiveWorkspace"),
+    "WorkspaceItem":           ("star_graph.cognitive_workspace", "WorkspaceItem"),
+    "WorkspaceState":          ("star_graph.cognitive_workspace", "WorkspaceState"),
+    "ReasoningChain":          ("star_graph.cognitive_workspace", "ReasoningChain"),
+    "ReasoningStep":           ("star_graph.cognitive_workspace", "ReasoningStep"),
+
+    # ── Phase 6: Cognitive Cortex — Activation Engine (6.4) ──
+    "ActivationEngine":        ("star_graph.activation_engine", "ActivationEngine"),
+    "ActivationSeed":          ("star_graph.activation_engine", "ActivationSeed"),
+    "ActivationToken":         ("star_graph.activation_engine", "ActivationToken"),
+    "ActivatedNode":           ("star_graph.activation_engine", "ActivatedNode"),
+    "SemanticPath":            ("star_graph.activation_engine", "SemanticPath"),
+    "ActivationResult":        ("star_graph.activation_engine", "ActivationResult"),
+
+    # ── Phase 6: Cognitive Cortex — Perception Layer (6.1) ──
+    "PerceptionLayer":         ("star_graph.perception", "PerceptionLayer"),
+    "PerceptionFrame":         ("star_graph.perception", "PerceptionFrame"),
+    "IntentSignal":            ("star_graph.perception", "IntentSignal"),
+
+    # ── Phase 6: Cognitive Cortex — Concept Cortex (6.3) ──
+    "ConceptCortex":           ("star_graph.concept_cortex", "ConceptCortex"),
+    "ConceptNode":             ("star_graph.concept_cortex", "ConceptNode"),
+    "ConceptFusion":           ("star_graph.concept_cortex", "ConceptFusion"),
+    "ConceptActivationPath":   ("star_graph.concept_cortex", "ConceptActivationPath"),
+    "CORE_CONCEPT_SEEDS":      ("star_graph.concept_cortex", "CORE_CONCEPT_SEEDS"),
+
+    # ── Phase 6: Cognitive Cortex — Goal System (6.5) ──
+    "GoalSystem":              ("star_graph.goal_system", "GoalSystem"),
+    "GoalFrame":               ("star_graph.goal_system", "GoalFrame"),
+    "GoalConflict":            ("star_graph.goal_system", "GoalConflict"),
+    "GoalDrivenInference":     ("star_graph.goal_system", "GoalDrivenInference"),
+
+    # ── Phase 6: Cognitive Cortex — Salience Engine (6.6) ──
+    "SalienceEngine":          ("star_graph.salience", "SalienceEngine"),
+    "SalienceSignal":          ("star_graph.salience", "SalienceSignal"),
+    "SalienceComponents":      ("star_graph.salience", "SalienceComponents"),
+    "AttentionFocus":          ("star_graph.salience", "AttentionFocus"),
+
+    # ── Phase 6: Cognitive Cortex — Cognitive Compression (6.7) ──
+    "CognitiveCompressor":     ("star_graph.cognitive_compression", "CognitiveCompressor"),
+    "CognitiveCompressionResult": ("star_graph.cognitive_compression", "CognitiveCompressionResult"),
+    "WorldModelBelief":        ("star_graph.cognitive_compression", "WorldModelBelief"),
+    "CompressionStage":        ("star_graph.cognitive_compression", "CompressionStage"),
+
+    # ── Phase 6: Cognitive Cortex — Self Model (6.8) ──
+    "SelfModel":               ("star_graph.self_model", "SelfModel"),
+    "CognitiveState":          ("star_graph.self_model", "CognitiveState"),
+    "BiasDetection":           ("star_graph.self_model", "BiasDetection"),
+    "SelfModelConfig":         ("star_graph.self_model", "SelfModelConfig"),
+
+    # ── Phase 6: Cognitive Cortex — Autonomous Reasoning (6.9) ──
+    "AutonomousReasoningLoop": ("star_graph.autonomous_reasoning", "AutonomousReasoningLoop"),
+    "ReasoningTrigger":        ("star_graph.autonomous_reasoning", "ReasoningTrigger"),
+    "ReasoningTrace":          ("star_graph.autonomous_reasoning", "ReasoningTrace"),
+    "CognitiveUpdate":         ("star_graph.autonomous_reasoning", "CognitiveUpdate"),
+
+    # ── Phase 6: Cognitive Cortex — Memory Lifecycle (6.10) ──
+    "MemoryLifecycleManager":  ("star_graph.memory_lifecycle", "MemoryLifecycleManager"),
+    "LifecycleStage":          ("star_graph.memory_lifecycle", "LifecycleStage"),
+    "LifecycleTransition":     ("star_graph.memory_lifecycle", "LifecycleTransition"),
+    "LifecycleState":          ("star_graph.memory_lifecycle", "LifecycleState"),
+
+    # ── Phase 7: Memory Evolution — Importance Engine (7.1) ──
+    "ImportanceEngine":        ("star_graph.importance_engine", "ImportanceEngine"),
+    "ImportanceSignal":        ("star_graph.importance_engine", "ImportanceSignal"),
+    "ImportanceResult":        ("star_graph.importance_engine", "ImportanceResult"),
+    "ImportanceLevel":         ("star_graph.importance_engine", "ImportanceLevel"),
+
+    # ── Phase 7: Memory Evolution — Belief System (7.2) ──
+    "BeliefSystem":            ("star_graph.belief_system", "BeliefSystem"),
+    "Belief":                  ("star_graph.belief_system", "Belief"),
+    "BeliefMerge":             ("star_graph.belief_system", "BeliefMerge"),
+
+    # ── Phase 7: Memory Evolution — Personality Formation (7.3) ──
+    "PersonalityFormationEngine": ("star_graph.personality_formation", "PersonalityFormationEngine"),
+    "CognitiveProfile":        ("star_graph.personality_formation", "CognitiveProfile"),
+    "CognitiveStyle":          ("star_graph.personality_formation", "CognitiveStyle"),
+    "ValueSystem":             ("star_graph.personality_formation", "ValueSystem"),
+    "EvolutionTrajectory":     ("star_graph.personality_formation", "EvolutionTrajectory"),
+
+    # ── Phase 7: Memory Evolution — Cognitive Identity (7.4) ──
+    "CognitiveIdentityManager": ("star_graph.cognitive_identity", "CognitiveIdentityManager"),
+    "CognitiveIdentity":       ("star_graph.cognitive_identity", "CognitiveIdentity"),
+    "UserIdentitySnapshot":    ("star_graph.cognitive_identity", "UserIdentitySnapshot"),
 
     # ── Phase 5: Cognitive Depth (2026-05-22) ──
     # memory budget & token budget
