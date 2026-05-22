@@ -15,7 +15,7 @@ CLI:
     nwc recall "query"
 """
 
-__version__ = "1.2.2"
+__version__ = "1.2.4"
 __all__ = ["Cortex", "RecallResult", "ContextFrame"]
 
 from nwc.core.cortex import Cortex, RecallResult, ContextFrame

@@ -71,8 +71,8 @@ def _do_warmup():
     global _warmup_done
     if _warmup_done:
         return
-    _warmup_done = True
     _warmup_embedder()
+    _warmup_done = True
     sys.stderr.write("[star-graph] Embedder warmup complete\n")
 
 
@@ -83,8 +83,9 @@ def _warmup_embedder():
     BM25/DomainRouter indices also have first-call setup cost.
     Without warmup, the first remember/recall call hits MCP client timeouts.
     """
+    mgr = _get_manager()
     try:
-        embedder = _mgr._rt._get_embedder()
+        embedder = mgr._rt._get_embedder()
         embedder.encode("warmup")
         sys.stderr.write(f"[star-graph] Embedder backend: {embedder.backend}, dim={embedder.dim}\n")
     except Exception:
@@ -94,10 +95,10 @@ def _warmup_embedder():
     # Pre-warm retrieval path: ingest a dummy memory then recall it,
     # so BM25 index, domain router, cognitive cache, etc. are all initialized.
     try:
-        anchor = _mgr.remember("__warmup__", tags=["system"], skip_gate=True)
+        anchor = mgr.remember("__warmup__", tags=["system"], skip_gate=True)
         if anchor:
-            _mgr.recall("__warmup__", max_items=1)
-            _mgr.forget(anchor.id, create_ghost=False)  # don't leave trash
+            mgr.recall("__warmup__", max_items=1)
+            mgr.forget(anchor.id, create_ghost=False)  # don't leave trash
     except Exception:
         pass  # retrieval warmup best-effort
 
@@ -106,7 +107,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.2.3",
+    version="1.2.4",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
