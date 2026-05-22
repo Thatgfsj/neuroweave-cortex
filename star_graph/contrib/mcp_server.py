@@ -309,6 +309,15 @@ async def call_tool(name: str, arguments: dict):
                 emotional_valence=arguments.get("emotional_valence", 0.0),
                 source_session=arguments.get("session_id", ""),
             )
+            if anchor is None:
+                return [TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "status": "rejected",
+                        "reason": "write gate rejected this memory",
+                        "text_preview": arguments["text"][:120],
+                    }, ensure_ascii=False, indent=2),
+                )]
             return [TextContent(
                 type="text",
                 text=json.dumps({
@@ -334,6 +343,8 @@ async def call_tool(name: str, arguments: dict):
             )
             items_json = []
             for item in result.items:
+                if item.anchor is None:
+                    continue
                 items_json.append({
                     "anchor_id": item.anchor.id,
                     "text": item.compressed_text or item.anchor.text[:200],
@@ -404,11 +415,6 @@ async def call_tool(name: str, arguments: dict):
 
         elif name == "stats":
             s = mgr.stats
-            # Add cognitive health
-            try:
-                health = mgr.metrics.snapshot()
-            except Exception:
-                health = {}
             return [TextContent(
                 type="text",
                 text=json.dumps({
@@ -420,12 +426,6 @@ async def call_tool(name: str, arguments: dict):
                     "sleep_cycles": s.sleep_cycles,
                     "evolutions": s.total_evolutions,
                     "uptime_seconds": round(s.uptime_seconds, 0),
-                    "cognitive_health": {
-                        "memory_stability": round(health.get("memory_stability", 0), 2),
-                        "recall_plasticity": round(health.get("recall_plasticity", 0), 2),
-                        "compression_ratio": round(health.get("compression_ratio", 0), 2),
-                        "semantic_drift_resistance": round(health.get("semantic_drift_resistance", 0), 2),
-                    },
                 }, ensure_ascii=False, indent=2),
             )]
 
@@ -473,17 +473,20 @@ async def call_tool(name: str, arguments: dict):
             )]
 
         elif name == "remember_working":
-            anchor = mgr.remember_working(
+            entry = mgr.remember_working(
                 text=arguments["text"],
                 tags=arguments.get("tags", []),
             )
+            # WorkingMemoryEntry has no .id — create pseudo-id from text hash
+            import hashlib
+            pseudo_id = f"wm_{hashlib.md5(entry.text.encode()).hexdigest()[:8]}"
             return [TextContent(
                 type="text",
                 text=json.dumps({
                     "status": "stored_working",
-                    "anchor_id": anchor.id,
-                    "text_preview": anchor.text[:120],
-                    "tags": anchor.tags,
+                    "id": pseudo_id,
+                    "text_preview": entry.text[:120],
+                    "tags": entry.tags,
                     "tier": "working",
                 }, ensure_ascii=False, indent=2),
             )]
