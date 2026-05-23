@@ -111,7 +111,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.2.6",
+    version="1.2.7",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
@@ -314,11 +314,11 @@ async def list_tools():
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
-    # stats does NOT trigger warmup — it only reads counters, no embedder needed
-    # Use dedicated thread-pool executor to avoid starving asyncio default pool
+    # stats does NOT trigger warmup — fire-and-forget so the event loop
+    # stays responsive; await would block call_tool for 17s and cause MCP timeout
     if name != "stats":
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(_warmup_executor, _do_warmup)
+        loop.create_task(loop.run_in_executor(_warmup_executor, _do_warmup))
     mgr = _get_manager()
 
     try:
