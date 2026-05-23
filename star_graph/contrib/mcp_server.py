@@ -32,6 +32,7 @@ Tools exposed:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import sys
@@ -51,6 +52,9 @@ from mcp.types import Tool, TextContent
 _mgr = None
 _storage_path = os.environ.get("STAR_GRAPH_STORAGE_PATH", "")
 _warmup_done = False
+_warmup_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="nwc-warmup"
+)
 
 
 def _get_manager():
@@ -107,7 +111,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.2.5",
+    version="1.2.6",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
@@ -311,8 +315,10 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     # stats does NOT trigger warmup — it only reads counters, no embedder needed
+    # Use dedicated thread-pool executor to avoid starving asyncio default pool
     if name != "stats":
-        await asyncio.to_thread(_do_warmup)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_warmup_executor, _do_warmup)
     mgr = _get_manager()
 
     try:
