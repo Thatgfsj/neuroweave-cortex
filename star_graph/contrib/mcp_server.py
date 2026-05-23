@@ -107,7 +107,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.2.4",
+    version="1.2.5",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "
@@ -312,7 +312,7 @@ async def list_tools():
 async def call_tool(name: str, arguments: dict):
     # stats does NOT trigger warmup — it only reads counters, no embedder needed
     if name != "stats":
-        _do_warmup()
+        await asyncio.to_thread(_do_warmup)
     mgr = _get_manager()
 
     try:
