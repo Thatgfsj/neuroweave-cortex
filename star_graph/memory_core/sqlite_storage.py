@@ -18,8 +18,9 @@ import json
 import math
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from .anchor import (
     Anchor, AnchorVector, AnchorPrediction, Oscillator, MemoryState,
@@ -292,6 +293,30 @@ class SQLiteStorage(StorageBackend):
             return len(tables) > 0
         except Exception:
             return False
+
+    # ── Transaction context manager ──────────────────────
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """SQLite transaction context — auto-commit or rollback."""
+        c = self.conn
+        with c:  # sqlite3 connection as context manager = transaction
+            yield
+
+    # ── Batch save ───────────────────────────────────────
+
+    def batch_save(self, items: list[tuple[str, dict]]) -> None:
+        """Efficiently batch-write multiple items in a single transaction."""
+        c = self.conn
+        with c:
+            for item_type, data in items:
+                if item_type == "anchor":
+                    self.save_anchor(data.get("id", ""), data)
+                elif item_type == "edge":
+                    self.save_edge(data.get("source", ""),
+                                   data.get("target", ""), data)
+                elif item_type == "ghost":
+                    self.save_ghost(data.get("id", ""), data)
 
     # ── Fine-grained ops ────────────────────────────────
 

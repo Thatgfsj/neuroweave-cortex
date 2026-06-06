@@ -269,13 +269,17 @@ class RetrievalCore:
         seen_texts = {self._rt._normalize_text(item.compressed_text)
                       for item in merged_items
                       if hasattr(item, 'compressed_text') and item.compressed_text}
+        # Raw buffer chunks keep their natural score — previously penalized
+        # by 0.7 multiplier, but these are the most recent un-compressed
+        # memories and often the best match for short-term factual queries.
+        # They compete on merit alongside anchored items.
         for chunk, score in raw_results:
             norm_text = self._rt._normalize_text(chunk.text[:120])
             if norm_text and norm_text in seen_texts:
                 continue
             seen_texts.add(norm_text)
             merged_items.append(MemoryItem(
-                anchor=None, relevance_score=score * 0.7,
+                anchor=None, relevance_score=score,
                 memory_type=MemoryType.WORKING, compression_level=0,
                 compressed_text=chunk.text[:200],
             ))

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from ..anchor import Anchor
 from ..shard import MemoryShardManager
@@ -328,13 +329,18 @@ class RuntimeLifecycle:
         return graph, log
 
     def save(self, path: str | None = None) -> str:
-        """Persist the entire memory system to disk."""
-        from ..storage import JSONStorage
-        filepath = path or self.storage_path or str(JSONStorage.DEFAULT_PATH)
-        storage = JSONStorage(filepath)
+        """Persist the entire memory system to disk.
+
+        Defaults to SQLiteStorage. Pass a '.json' path for JSON export.
+        """
+        from ..storage_backend import StorageBackend
+        filepath = path or self.storage_path or str(
+            Path.home() / ".nwc" / "memory.db")
+        self._ensure_nwc_dir()
+        storage = StorageBackend.detect_and_create(filepath)
         storage.save(self.graph)
         if self._ghosts:
-            ghost_path = filepath.replace(".json", "_ghosts.json")
+            ghost_path = Path(filepath).with_suffix("_ghosts.json")
             with open(ghost_path, "w", encoding="utf-8") as f:
                 ghost_data = {}
                 for gid, g in self._ghosts.ghosts.items():
@@ -354,6 +360,18 @@ class RuntimeLifecycle:
                 json.dump(ghost_data, f, indent=2, ensure_ascii=False)
         self.storage_path = filepath
         return filepath
+
+    @staticmethod
+    def _ensure_nwc_dir() -> None:
+        from pathlib import Path
+        (Path.home() / ".nwc").mkdir(parents=True, exist_ok=True)
+
+    def export_json(self, path: str) -> str:
+        """Export memory to a JSON file (compatible with older tools)."""
+        from ..storage import JSONStorage
+        storage = JSONStorage(path)
+        storage.save(self.graph)
+        return path
 
     def save_sharded(self, base_dir: str = "memory") -> dict:
         """Save anchors partitioned by domain + time into shard files.

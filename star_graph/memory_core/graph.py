@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import math
 import time
+import threading
 from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -597,6 +599,7 @@ class StarGraph:
     """The core star-graph memory structure with cortical index and ghosts."""
 
     def __init__(self):
+        self._lock = threading.RLock()
         self.anchors: dict[str, Anchor] = {}
         self.edges: dict[tuple[str, str], Edge] = {}
         self._adjacency: dict[str, set[str]] = defaultdict(set)
@@ -685,6 +688,14 @@ class StarGraph:
 
     # ── CRUD ──────────────────────────────────────────────
 
+    # ── Thread safety ─────────────────────────────────────
+
+    @contextmanager
+    def lock(self):
+        """Context manager for thread-safe compound operations on the graph."""
+        with self._lock:
+            yield
+
     def _get_ann_index(self):
         if self._ann_index is None:
             from .index import ANNIndex
@@ -692,11 +703,12 @@ class StarGraph:
         return self._ann_index
 
     def add_anchor(self, anchor: Anchor) -> str:
-        self.anchors[anchor.id] = anchor
-        if anchor.embedding:
-            self.cortical_index.append((anchor.embedding, anchor.id))
-            if self._ann_index is not None:
-                self._ann_index.add(anchor.id, anchor.embedding)
+        with self._lock:
+            self.anchors[anchor.id] = anchor
+            if anchor.embedding:
+                self.cortical_index.append((anchor.embedding, anchor.id))
+                if self._ann_index is not None:
+                    self._ann_index.add(anchor.id, anchor.embedding)
         return anchor.id
 
     def add_edge(self, src: str, tgt: str, weight: float = 0.5,
@@ -705,85 +717,86 @@ class StarGraph:
                  temporal_order: str = "", causal_strength: float = 0.0,
                  valid_until: float = 0.0, relation: str = "",
                  session: str = "") -> Optional[Edge]:
-        if src not in self.anchors or tgt not in self.anchors:
-            return None
+        with self._lock:
+            if src not in self.anchors or tgt not in self.anchors:
+                return None
 
-        # ── Edge Sparsification Gate ───────────────────────
-        # Reject or downgrade edges based on explicability.
-        # Only edges with approved relation types pass at full weight.
-        relation_lower = relation.lower() if relation else ""
-        effective_relation = relation_lower or edge_type.lower()
+            # ── Edge Sparsification Gate ───────────────────────
+            # Reject or downgrade edges based on explicability.
+            # Only edges with approved relation types pass at full weight.
+            relation_lower = relation.lower() if relation else ""
+            effective_relation = relation_lower or edge_type.lower()
 
-        if effective_relation not in EXPLICABLE_RELATIONS or effective_relation in LEGACY_EDGE_TYPES:
-            if source_type == "implicit" and confidence is None and causal_strength == 0.0:
-                # Pure cosine-similarity edge with no explicable reason — downgrade severely
-                weight = max(0.02, weight * 0.3)  # heavy penalty for legacy implicit edges
+            if effective_relation not in EXPLICABLE_RELATIONS or effective_relation in LEGACY_EDGE_TYPES:
+                if source_type == "implicit" and confidence is None and causal_strength == 0.0:
+                    # Pure cosine-similarity edge with no explicable reason — downgrade severely
+                    weight = max(0.02, weight * 0.3)  # heavy penalty for legacy implicit edges
 
-        # Non-strong relations get a weight penalty to favor explicable edges
-        if effective_relation in STRONG_RELATIONS:
-            weight = min(1.0, weight * 1.1)  # slight boost for strong relations
-        elif effective_relation not in EXPLICABLE_RELATIONS:
-            weight = max(0.05, weight * 0.5)  # penalty for weak/implicit relations
+            # Non-strong relations get a weight penalty to favor explicable edges
+            if effective_relation in STRONG_RELATIONS:
+                weight = min(1.0, weight * 1.1)  # slight boost for strong relations
+            elif effective_relation not in EXPLICABLE_RELATIONS:
+                weight = max(0.05, weight * 0.5)  # penalty for weak/implicit relations
 
-        # Default edge TTL: 14 days for weak, 90 days for strong
-        if valid_until <= 0:
-            import time as _time
-            days = 90 if effective_relation in STRONG_RELATIONS else 14
-            valid_until = _time.time() + days * 86400
+            # Default edge TTL: 14 days for weak, 90 days for strong
+            if valid_until <= 0:
+                import time as _time
+                days = 90 if effective_relation in STRONG_RELATIONS else 14
+                valid_until = _time.time() + days * 86400
 
-        key = self._key(src, tgt)
+            key = self._key(src, tgt)
 
-        # Already connected — reinforce instead of duplicate
-        if key in self.edges:
-            existing = self.edges[key]
-            existing.strengthen(0.05)
-            return existing
-
-        # State-transition edges: mark the old edge as stale
-        if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS):
+            # Already connected — reinforce instead of duplicate
             if key in self.edges:
                 existing = self.edges[key]
-                if isinstance(existing, RichEdge):
-                    existing.mark_stale(replaced_by_edge_key=str(key))
+                existing.strengthen(0.05)
+                return existing
 
-        # Edge budget enforcement — prevent node degree explosion
-        max_edges = getattr(self, '_max_edges_per_node', 0)
-        if max_edges > 0:
-            for node_id in (src, tgt):
-                if self.node_degree(node_id) >= max_edges:
-                    self._evict_weakest_edge(node_id)
+            # State-transition edges: mark the old edge as stale
+            if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS):
+                if key in self.edges:
+                    existing = self.edges[key]
+                    if isinstance(existing, RichEdge):
+                        existing.mark_stale(replaced_by_edge_key=str(key))
 
-        # Use RichEdge when confidence, explicit source_type, temporal, or causal fields are set
-        is_rich = (
-            confidence is not None
-            or source_type != "implicit"
-            or temporal_order
-            or causal_strength > 0
-            or valid_until > 0
-            or relation
-            or edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS,
-                             EDGE_CAUSED_BY, EDGE_DERIVED_FROM, "causal", "temporal")
-        )
+            # Edge budget enforcement — prevent node degree explosion
+            max_edges = getattr(self, '_max_edges_per_node', 0)
+            if max_edges > 0:
+                for node_id in (src, tgt):
+                    if self.node_degree(node_id) >= max_edges:
+                        self._evict_weakest_edge(node_id)
 
-        if is_rich:
-            edge = RichEdge(
-                source=key[0], target=key[1], weight=weight,
-                edge_type=edge_type,
-                confidence=confidence or (0.85 if source_type == "explicit" else 0.5),
-                source_type=source_type,
-                temporal_order=temporal_order,
-                causal_strength=causal_strength,
-                valid_until=valid_until,
-                relation=relation or edge_type,
-                source_session=session,
+            # Use RichEdge when confidence, explicit source_type, temporal, or causal fields are set
+            is_rich = (
+                confidence is not None
+                or source_type != "implicit"
+                or temporal_order
+                or causal_strength > 0
+                or valid_until > 0
+                or relation
+                or edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS,
+                                 EDGE_CAUSED_BY, EDGE_DERIVED_FROM, "causal", "temporal")
             )
-        else:
-            edge = Edge(source=key[0], target=key[1], weight=weight, edge_type=edge_type)
 
-        self.edges[key] = edge
-        self._adjacency[src].add(tgt)
-        self._adjacency[tgt].add(src)
-        return edge
+            if is_rich:
+                edge = RichEdge(
+                    source=key[0], target=key[1], weight=weight,
+                    edge_type=edge_type,
+                    confidence=confidence or (0.85 if source_type == "explicit" else 0.5),
+                    source_type=source_type,
+                    temporal_order=temporal_order,
+                    causal_strength=causal_strength,
+                    valid_until=valid_until,
+                    relation=relation or edge_type,
+                    source_session=session,
+                )
+            else:
+                edge = Edge(source=key[0], target=key[1], weight=weight, edge_type=edge_type)
+
+            self.edges[key] = edge
+            self._adjacency[src].add(tgt)
+            self._adjacency[tgt].add(src)
+            return edge
 
     def add_reflection(self, reflection: ReflectionNode) -> str:
         """Store a meta-cognitive reflection and link it to source anchors.
@@ -812,17 +825,18 @@ class StarGraph:
         return sorted(result, key=lambda r: -(r.strength * r.confidence))
 
     def remove_anchor(self, anchor_id: str) -> None:
-        if anchor_id in self.anchors:
-            self.anchors.pop(anchor_id)
-        to_remove = [(a, b) for (a, b) in self.edges if a == anchor_id or b == anchor_id]
-        for key in to_remove:
-            self.edges.pop(key, None)
-        self._adjacency.pop(anchor_id, None)
-        for adj in self._adjacency.values():
-            adj.discard(anchor_id)
-        self.cortical_index = [(e, aid) for e, aid in self.cortical_index if aid != anchor_id]
-        if self._ann_index is not None:
-            self._ann_index.remove(anchor_id)
+        with self._lock:
+            if anchor_id in self.anchors:
+                self.anchors.pop(anchor_id)
+            to_remove = [(a, b) for (a, b) in self.edges if a == anchor_id or b == anchor_id]
+            for key in to_remove:
+                self.edges.pop(key, None)
+            self._adjacency.pop(anchor_id, None)
+            for adj in self._adjacency.values():
+                adj.discard(anchor_id)
+            self.cortical_index = [(e, aid) for e, aid in self.cortical_index if aid != anchor_id]
+            if self._ann_index is not None:
+                self._ann_index.remove(anchor_id)
 
     # ── Navigation / Cognitive convenience methods ──────
     # These operate on the graph's public API but belong to Layer 2 conceptually.

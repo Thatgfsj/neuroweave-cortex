@@ -8,9 +8,12 @@ MemoryManager delegates to this for all non-retrieval operations.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from ..anchor import Anchor, MemoryState
@@ -78,6 +81,7 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
     def __init__(self, graph: StarGraph | None = None,
                  config: Config | None = None,
                  storage_path: str = ""):
+        self._lock = threading.RLock()
         self.graph = graph or StarGraph()
         self.cfg = config or Config.get()
         self.storage_path = storage_path
@@ -609,16 +613,18 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
     #  moved to RuntimeCore and RuntimeLifecycle mixins)
 
     def load(self, path: str) -> StarGraph:
-        """Load the memory system from disk."""
-        from ..storage import JSONStorage
-        storage = JSONStorage(path)
+        """Load the memory system from disk.
+
+        Auto-detects storage backend by file extension (.json → JSON, .db → SQLite).
+        """
+        from ..storage_backend import StorageBackend
+        storage = StorageBackend.detect_and_create(path)
         self.graph = storage.load()
         self.storage_path = path
 
         # Try to load ghosts
-        import json
-        ghost_path = path.replace(".json", "_ghosts.json")
-        if os.path.exists(ghost_path):
+        ghost_path = Path(path).with_suffix("_ghosts.json")
+        if ghost_path.exists():
             with open(ghost_path, "r", encoding="utf-8") as f:
                 ghost_data = json.load(f)
             from ..ghost import GhostNode
