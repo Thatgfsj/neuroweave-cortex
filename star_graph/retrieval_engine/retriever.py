@@ -244,7 +244,7 @@ class VectorSimilarityRetriever(Retriever):
             )
 
         if not embedding:
-            from .embedding import get_embedder
+            from ..embedding import get_embedder
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
@@ -376,7 +376,7 @@ class OscillationResonanceRetriever(Retriever):
     def _derive_driving_phasor(self, query: str,
                                 embedding: list[float] | None = None) -> tuple[complex, float]:
         """Derive driving phasor from query — delegates to embedder for cognitive features."""
-        from .embedding import get_embedder
+        from ..embedding import get_embedder
         embedder = get_embedder()
         freq, phase = embedder.derive_driving_phasor(query, embedding)
 
@@ -441,7 +441,7 @@ class OscillationResonanceRetriever(Retriever):
             )
 
         if not embedding:
-            from .embedding import get_embedder
+            from ..embedding import get_embedder
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
@@ -751,7 +751,7 @@ class HybridFusionRetriever(Retriever):
         t0 = time.perf_counter()
 
         if not embedding:
-            from .embedding import get_embedder
+            from ..embedding import get_embedder
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
@@ -840,7 +840,7 @@ class HybridFusionRetriever(Retriever):
                 top_k: int = 3) -> list[tuple[Anchor, ExplainableScore]]:
         """Retrieve with explainable scores — shows WHY each memory was selected."""
         if not embedding:
-            from .embedding import get_embedder
+            from ..embedding import get_embedder
             embedder = get_embedder()
             embedding = embedder.encode(query)
 
