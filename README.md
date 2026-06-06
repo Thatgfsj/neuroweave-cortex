@@ -3,7 +3,7 @@
 Not a vector database. Not a graph database. Not RAG. An **external cognitive cortex** — a cognitive runtime that perceives, activates concepts, maintains working memory, forms reasoning chains, tracks goals, manages attention, and evolves a self-model. It remembers, forgets, strengthens, connects, abstracts, and reasons — the way biological cognition does.
 
 ```
-v1.0.8 | 112 modules | Phase 1-6 complete | Cognitive Cortex Architecture
+v1.2.9 | 132 modules | Engineering Foundation Phase | Cognitive Memory Engine
 ```
 
 ## What makes it different
@@ -233,33 +233,29 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 
 ### LoCoMo Benchmark (real-world conversations)
 
-Evaluated on the [LoCoMo-10 dataset](https://github.com/snap-research/LoCoMo): 10 conversations, 5,882 turns across 272 sessions, 1,986 QA pairs across 5 categories. Pure retrieval (no LLM generation).
+Evaluated on the [LoCoMo-10 dataset](https://github.com/snap-research/LoCoMo): 10 conversations, 5,882 turns across 272 sessions, 1,986 QA pairs across 5 categories. Pure retrieval (no LLM generation). Token-matching has_answer & F1 following the LoCoMo paper methodology.
 
 | Method | has_answer | F1 | Latency |
 |---|---|---|---|
-| VectorSimilarity | 13.1% | 0.026 | 122.2ms |
-| OscillationResonance | 11.9% | 0.026 | 110.4ms |
-| **HybridFusion + BM25** | **15.3%** | **0.025** | <200ms |
+| VectorSimilarity | 25.3% | 0.016 | 57.4ms |
+| OscillationResonance | 24.8% | 0.016 | 143.9ms |
+| **HybridFusion + BM25** | **31.1%** | **0.017** | 297.2ms |
 
-Per-category has_answer:
+Per-category has_answer (HybridFusion):
 
-| Category | #QA | VecSim | OscRes | HybFus |
-|---|---|---|---|---|
-| Temporal (1) | 282 | 3.5% | 2.8% | 4.3% |
-| Short Memory (2) | 321 | 1.9% | 2.2% | 1.9% |
-| Long Memory (3) | 96 | 2.1% | 2.1% | 3.1% |
-| Composite (4) | 841 | 18.0% | 16.4% | 21.0% |
-| Adversarial (5) | 446 | 20.4% | 18.4% | 23.5% |
-
-### Internal Benchmark (synthetic multi-session)
-
-6 sessions × 80 turns, 5 categories. 1.7x compression (6,708 → 3,982 tokens) with maintained or improved recall.
-
-| Method | C-R@3 | C-R@5 | Interf |
+| Category | #QA | Description | has_answer |
 |---|---|---|---|
-| VectorSimilarity | 0.933 | 0.933 | N/A |
-| **OscillationResonance** | **0.967** | **0.967** | 0.667 |
-| HybridFusion | 0.900 | 0.900 | 0.667 |
+| 1 (Temporal) | 282 | Time/date/sequence questions | 11.0% |
+| 2 (Short Memory) | 321 | Recent fact recall | 3.1% |
+| 3 (Long Memory) | 96 | Distant fact recall | 7.3% |
+| 4 (Composite) | 841 | Multi-step reasoning | 44.0% |
+| 5 (Adversarial) | 446 | Misleading/distractor queries | 44.8% |
+
+**Key observations:**
+- Category 1 (temporal) and 2-3 (short/long memory) remain weak — these require exact token matching of dates and entities, which pure embedding struggles with
+- Category 4 (composite) and 5 (adversarial) show reasonable performance — the multi-strategy retrieval handles these well
+- LLM-as-judge evaluation (MiniMax M2.7): HybridFusion achieves **llm_judge_score=0.05** (vs 0.025 for VectorSimilarity, 0.075 for OscillationResonance), indicating that retrieval results often lack the full context needed for answer generation
+- **Next target**: Improve category 1-3 via BM25+embedding RRF fusion and query expansion (see [plan.md](plan.md))
 
 ## Memory Lifecycle (9 stages)
 
