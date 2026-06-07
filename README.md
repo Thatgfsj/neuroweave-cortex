@@ -1,9 +1,9 @@
-# NeuroWeave Cortex (NWC) — External Cognitive Cortex for AI Agents
+# NeuroWeave Cortex (NWC) — 星图记忆引擎 · Star-Graph Cognitive Engine
 
-Not a vector database. Not a graph database. Not RAG. An **external cognitive cortex** — a cognitive runtime that perceives, activates concepts, maintains working memory, forms reasoning chains, tracks goals, manages attention, and evolves a self-model. It remembers, forgets, strengthens, connects, abstracts, and reasons — the way biological cognition does.
+Not a vector database. Not a graph database. Not RAG. A **cognitive character** — an observatory that illuminates a star field of memories, each star's brightness depending on **where you stand and what you're looking for**. It forgets, distorts, has emotional judgment, makes free associations, and walks discovery paths through a multi-dimensional star graph — the way biological cognition does.
 
 ```
-v1.2.9 | 132 modules | Engineering Foundation Phase | Cognitive Memory Engine
+v1.2.11 | 134 modules | Observation-Driven Retrieval | Cognitive Character
 ```
 
 ## What makes it different
@@ -18,6 +18,10 @@ Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **
 | Memory strengthening (rehearsal) | no | no | yes |
 | Conflict detection & resolution | no | no | yes |
 | Multi-strategy RRF retrieval fusion | no | no | yes |
+| **Observatory: observer-dependent luminosity** | no | no | **yes** |
+| **Gravity wells: query inertia & momentum** | no | no | **yes** |
+| **Source attribution & trust scores** | no | no | **yes** |
+| **Event-anchored timeline** | no | no | **yes** |
 | Cross-Encoder reranking | no | no | yes |
 | Explainable reasoning paths | no | no | yes |
 | Memory revision engine (sleep) | no | no | yes |
@@ -32,7 +36,6 @@ Vector databases retrieve. Graph databases traverse. NeuroWeave Cortex runs a **
 | 4-layer memory pyramid | no | no | yes |
 | Goal-driven inference | no | no | yes |
 | **Working Memory Workspace** | no | no | **yes** |
-| **Concept Cortex** | no | no | **yes** |
 | **Spreading Activation Engine** | no | no | **yes** |
 | **Salience-based attention** | no | no | **yes** |
 | **Self Model → LLM prompt injection** | no | no | **yes** |
@@ -460,7 +463,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** Engineering Foundation Phase, v1.2.10, 132 modules. See [plan.md](plan.md) for latest roadmap.
+**Status:** v1.2.11 | 134 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
 
 ## Roadmap
 
