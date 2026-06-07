@@ -335,6 +335,25 @@ class SleepCycle(SleepNREM, SleepREM, SleepConsolidate):
             avg_retention_before=stats_before["avg_retention"],
         )
 
+        """
+        Algorithm: 8-Phase Sleep Consolidation
+        Input:  G_t (memory graph at time t), R (recent anchors)
+        Output: G_{t+1} (consolidated memory graph)
+
+        Phase 1 (N1_Replay):   Select high-surprise/high-valence memories for replay
+                                score(m) = α·surprise(m) + β·|valence(m)| + γ·recency(m)
+        Phase 2 (N2_Merge):    Merge near-duplicate anchors by embedding similarity
+                                merge(a,b) if cosine(a,b) > θ_merge, keep higher-importance
+        Phase 3 (N2b_Conflict): Detect semantic contradictions between anchors on same topic
+                                conflict(a,b) if cosine(a,b) > θ_conf AND valence(a)·valence(b) < 0
+        Phase 4 (N2c_Revision): Revise low-stability memories against high-confidence evidence
+        Phase 5 (N3_Compression): Abstract episodic clusters into semantic schemas via
+                                  hierarchical clustering + template extraction
+        Phase 6 (N3d_Rebuild):  Rewire edges, promote stable anchors to long-term store
+        Phase 7 (REM_Emotion):  Decouple emotional valence from consolidated semantic memories
+        Phase 8 (N4_Prune):     Remove low-retention anchors, create ghost traces for savings effect
+        """
+
         # ── N1: Replay Indexing ──
         t0 = time.time()
         if recent_anchors:

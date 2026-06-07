@@ -465,6 +465,19 @@ pytest tests/ --cov=star_graph --cov-report=term
 
 **Status:** v1.2.12 | 134 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
 
+## Citation
+
+If you use NeuroWeave Cortex in your research, please cite:
+
+```bibtex
+@software{neuroweave_cortex,
+  title = {NeuroWeave Cortex: A Hippocampal-Inspired Cognitive Memory System},
+  author = {Thatgfsj},
+  year = {2026},
+  url = {https://github.com/Thatgfsj/neuroweave-cortex}
+}
+```
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned work.

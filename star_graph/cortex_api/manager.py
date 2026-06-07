@@ -248,3 +248,81 @@ class MemoryManager:
         """Async wrapper for stats()."""
         import asyncio
         return await asyncio.to_thread(lambda: self.stats, **kwargs)
+
+    # ── Paper experiment interface ────────────────────────────
+
+    def recall_with_config(self, query: str = "",
+                           config_override: dict | None = None,
+                           max_items: int = 10) -> object:
+        """Recall with temporary config overrides for ablation experiments.
+
+        Args:
+            query: Search query
+            config_override: Dict of config paths to override, e.g.
+                {"sleep.enabled": False, "spreading.enabled": False}
+            max_items: Max results
+
+        Returns:
+            MemoryContext from recall()
+        """
+        saved_values = {}
+        if config_override:
+            for k, v in config_override.items():
+                parts = k.split(".")
+                target = self.cfg
+                for p in parts[:-1]:
+                    target = getattr(target, p, target)
+                saved_values[k] = getattr(target, parts[-1], None)
+                setattr(target, parts[-1], v)
+
+        try:
+            return self.recall(query=query, max_items=max_items)
+        finally:
+            for k, v in saved_values.items():
+                parts = k.split(".")
+                target = self.cfg
+                for p in parts[:-1]:
+                    target = getattr(target, p, target)
+                setattr(target, parts[-1], v)
+
+    def get_memory_stats(self) -> dict:
+        """Return quantifiable graph metrics for paper figures.
+
+        Returns:
+            dict with: anchor_count, edge_count, ghost_count, schema_count,
+                      avg_clustering, avg_path_length,
+                      thermal_distribution {HOT, WARM, COLD},
+                      memory_state_distribution {ACTIVE, REHEARSING, ...}
+        """
+        g = self.graph
+        anchors = list(g.anchors.values())
+        n = len(anchors)
+        e = len(g.edges)
+
+        # Node degrees
+        degrees = [g.node_degree(a.id) for a in anchors] if n > 0 else [0]
+        avg_degree = sum(degrees) / max(1, n)
+
+        # Thermal distribution
+        thermal = {"HOT": 0, "WARM": 0, "COLD": 0, "ARCHIVE": 0}
+        for a in anchors:
+            ts = getattr(a, '_thermal_state', None)
+            if ts:
+                thermal[str(ts.name)] = thermal.get(str(ts.name), 0) + 1
+
+        # State distribution
+        states = {}
+        for a in anchors:
+            s = str(a.state.name) if hasattr(a.state, 'name') else str(a.state)
+            states[s] = states.get(s, 0) + 1
+
+        return {
+            "anchor_count": n,
+            "edge_count": e,
+            "avg_degree": round(avg_degree, 2),
+            "ghost_count": len(g._ghost_subsystem.ghosts) if hasattr(g, '_ghost_subsystem') and g._ghost_subsystem else 0,
+            "schema_count": len(g.schemas),
+            "reflection_count": len(g.reflections),
+            "thermal_distribution": thermal,
+            "memory_state_distribution": states,
+        }
