@@ -56,6 +56,8 @@ class JSONStorage(StorageBackend):
                     "tags": a.tags,
                     "schema_ref": a.schema_ref,
                     "replay_count": a.replay_count,
+                    "source_attribution": a.source_attribution,
+                    "source_trust": a.source_trust,
                 }
                 for a in graph.anchors.values()
             ],

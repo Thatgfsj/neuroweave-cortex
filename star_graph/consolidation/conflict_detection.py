@@ -123,6 +123,11 @@ class ConflictDetector:
           - Both have moderate stability → COEXIST (tag both as conflicting views)
           - Old anchor (a) has very low retention → DEPRECATE old
           - Otherwise → COEXIST (conservative default)
+
+        v1.2.10: Added source_trust comparison — a memory from a high-trust
+        source (e.g. self_reported=0.9) can overwrite a low-trust memory
+        (e.g. inferred=0.4) even when confidence/stability are similar.
+        This mimics human social memory: we trust what we see over what we infer.
         """
         now = time.time()
         for cp in conflicts:
@@ -135,7 +140,25 @@ class ConflictDetector:
             newer = b if b_is_newer else a
             older = a if b_is_newer else b
 
-            # OVERWRITE: high-confidence new fact replaces old
+            # ── Source trust override ──
+            # A high-trust memory can overwrite a low-trust memory even
+            # when both have similar confidence/stability.
+            trust_gap = newer.source_trust - older.source_trust
+            trust_override = trust_gap > 0.3  # e.g., self_reported(0.9) vs inferred(0.4)
+
+            # OVERWRITE: high-confidence new fact replaces old,
+            # or high-trust source overrides low-trust source
+            if trust_override:
+                cp.resolution = ConflictResolution.OVERWRITE
+                cp.reason = (f"source_trust_overwrite: trust gap={trust_gap:.2f}, "
+                             f"{newer.source_attribution}({newer.source_trust:.1f}) > "
+                             f"{older.source_attribution}({older.source_trust:.1f})")
+                older.invalid_at = now
+                older.conflict_candidate = False
+                newer.conflict_candidate = False
+                continue
+
+            # OVERWRITE via confidence
             if newer.vector.confidence > self.overwrite_confidence and \
                newer.vector.stability > self.overwrite_confidence and \
                older.vector.stability < self.overwrite_confidence:

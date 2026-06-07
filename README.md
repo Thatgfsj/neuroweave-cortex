@@ -460,7 +460,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** Phase 1-6 complete, 112 modules, v1.0.8.
+**Status:** Engineering Foundation Phase, v1.2.10, 132 modules. See [plan.md](plan.md) for latest roadmap.
 
 ## Roadmap
 

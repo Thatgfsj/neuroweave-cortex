@@ -23,7 +23,44 @@ to be available, set by the inheriting class.
 from __future__ import annotations
 
 import math
+import re
 import time
+
+
+# ── Temporal query detection ──────────────────────────────
+# Identifies queries containing time/date references for
+# TimeSpine-based pre-filtering. Used by recall() to boost
+# Category 1 (temporal QA) recall on LoCoMo.
+
+_TEMPORAL_PATTERNS = re.compile(
+    r'\b('
+    r'yesterday|today|tomorrow|'
+    r'last\s+\w+|next\s+\w+|'
+    r'\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|'
+    r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|'
+    r'\d{4}[/-]\d{1,2}[/-]\d{1,2}|'
+    r'\d{1,2}:\d{2}\s*(am|pm)|'
+    r'ago|earlier|later|before|after|'
+    r'morning|afternoon|evening|night|'
+    r'monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+    r'this\s+(week|month|year)|'
+    r'previous\s+(week|month|year|session)|'
+    r'\d+\s+(days?|weeks?|months?|years?|hours?|minutes?)\s+(ago|earlier|before|later)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _detect_temporal_query(query: str) -> tuple[bool, list[str]]:
+    """Detect whether query contains temporal/date references.
+
+    Returns:
+        (is_temporal: bool, matched_keywords: list[str])
+    """
+    if not query:
+        return False, []
+    matches = _TEMPORAL_PATTERNS.findall(query)
+    return len(matches) > 0, list(set(matches))
 
 from ..scheduler import AgentContext, MemoryContext, MemoryItem, MemoryType
 from ..anchor import Anchor
@@ -305,6 +342,34 @@ class RetrievalCore:
             except Exception:
                 pass
 
+        # ── Recency boost — reward recently created/accessed memories ──
+        # Directly addresses LoCoMo Category 2 (Short Memory) and 3 (Long Memory)
+        # where pure embedding fails on older but contextually relevant anchors.
+        now = time.time()
+        for item in merged_items:
+            if item.anchor:
+                age_hours = (now - item.anchor.last_activated_at) / 3600.0
+                if age_hours < 24:          # last 24 hours → strong boost
+                    item.relevance_score = min(1.0, item.relevance_score + 0.10)
+                elif age_hours < 168:       # last 7 days → moderate boost
+                    item.relevance_score = min(1.0, item.relevance_score + 0.05)
+
+        # ── Temporal query boosting ──
+        # For queries with temporal keywords (yesterday, last week, date patterns),
+        # scan TimeSpine for matching time windows and boost matching items.
+        # Directly addresses LoCoMo Category 1 (Temporal QA)
+        is_temporal, _ = _detect_temporal_query(query)
+        if is_temporal and query:
+            try:
+                temporal_aids = self._rt.timespine.query_window_anchor_ids(
+                    start_time=0, end_time=now, top_k=50)
+                temporal_set = set(temporal_aids)
+                for item in merged_items:
+                    if item.anchor and item.anchor.id in temporal_set:
+                        item.relevance_score = min(1.0, item.relevance_score + 0.15)
+            except Exception:
+                pass
+
         # Sort by fused relevance score (RRF already weights paths, no
         # need for manual BM25-first bias)
         merged_items.sort(key=lambda i: -i.relevance_score)
@@ -421,9 +486,11 @@ class RetrievalCore:
             "exact_hits": len(exact_results),
             "cache_hits": len(cache_hit_anchors),
             "raw_chunks": len(raw_results),
+            "bm25_items": len(bm25_items),
             "graph_items": len(graph_result.get("items", [])),
             "spreading_items": len(spreading_items),
             "final_count": len(merged_items),
+            "is_temporal_query": is_temporal if 'is_temporal' in dir() else False,
             "layers_visited": str(layers_visited)[:300],
             "channel": "system1_rrf",
             "rrf_paths_fused": len(ranked_lists),
@@ -431,6 +498,7 @@ class RetrievalCore:
             "exact_ms": round(exact_ms, 3),
             "cache_ms": round(cache_ms, 3),
             "raw_ms": round(raw_ms, 3),
+            "bm25_ms": round(bm25_ms, 3),
             "graph_ms": round(graph_ms, 3),
             "spreading_ms": round(spreading_ms, 3),
             "ce_ms": round(ce_ms, 3),

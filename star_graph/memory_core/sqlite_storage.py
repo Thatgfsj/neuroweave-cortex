@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS anchors (
     tags_json TEXT NOT NULL DEFAULT '[]',
     schema_ref TEXT,
     replay_count INTEGER NOT NULL DEFAULT 0,
+    source_attribution TEXT NOT NULL DEFAULT 'observation',
+    source_trust REAL NOT NULL DEFAULT 0.6,
     state TEXT NOT NULL DEFAULT 'active',
     state_history_json TEXT NOT NULL DEFAULT '[]'
 );
@@ -120,6 +122,15 @@ class SQLiteStorage(StorageBackend):
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(SCHEMA_SQL)
+            # Migrate old databases: add source_attribution columns if missing
+            try:
+                self._conn.execute("ALTER TABLE anchors ADD COLUMN source_attribution TEXT NOT NULL DEFAULT 'observation'")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            try:
+                self._conn.execute("ALTER TABLE anchors ADD COLUMN source_trust REAL NOT NULL DEFAULT 0.6")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         return self._conn
 
     # ── Full save/load ──────────────────────────────────
@@ -136,9 +147,10 @@ class SQLiteStorage(StorageBackend):
                 c.execute(
                     """INSERT INTO anchors (id, text, vector_json, embedding_blob,
                        prediction_json, oscillator_json, created_at, last_activated_at,
-                       source_session, tags_json, schema_ref, replay_count, state,
+                       source_session, tags_json, schema_ref, replay_count,
+                       source_attribution, source_trust, state,
                        state_history_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         a.id, a.text,
                         json.dumps(a.vector.to_list()),
@@ -153,6 +165,7 @@ class SQLiteStorage(StorageBackend):
                         a.created_at, a.last_activated_at,
                         a.source_session, json.dumps(a.tags),
                         a.schema_ref, a.replay_count,
+                        a.source_attribution, a.source_trust,
                         a.state.value if isinstance(a.state, MemoryState) else str(a.state),
                         json.dumps([(s.value if isinstance(s, MemoryState) else str(s), ts)
                                      for s, ts in a.state_history]),
@@ -198,12 +211,23 @@ class SQLiteStorage(StorageBackend):
         if not tables:
             return graph
 
+        # Detect available columns for backward compat
+        columns = [col[1] for col in c.execute("PRAGMA table_info(anchors)").fetchall()]
+        has_attribution = 'source_attribution' in columns
+
         for row in c.execute("SELECT * FROM anchors"):
             (
                 aid, text, vector_json, embedding_blob, prediction_json,
                 oscillator_json, created_at, last_activated_at, source_session,
-                tags_json, schema_ref, replay_count, state_str, state_history_json,
+                tags_json, schema_ref, replay_count,
+                *extra,
             ) = row
+
+            # Handle variable-length rows (old vs new schema)
+            state_str = extra[0] if len(extra) > 0 else 'active'
+            state_history_json = extra[1] if len(extra) > 1 else '[]'
+            source_attribution = extra[2] if len(extra) > 2 else 'observation'
+            source_trust = float(extra[3]) if len(extra) > 3 else 0.6
 
             osc = json.loads(oscillator_json)
             oscillator = Oscillator(
@@ -245,6 +269,8 @@ class SQLiteStorage(StorageBackend):
                 created_at=created_at, last_activated_at=last_activated_at,
                 source_session=source_session, tags=json.loads(tags_json),
                 schema_ref=schema_ref, replay_count=replay_count,
+                source_attribution=source_attribution,
+                source_trust=source_trust,
                 state=state, state_history=state_history,
             )
             graph.add_anchor(anchor)

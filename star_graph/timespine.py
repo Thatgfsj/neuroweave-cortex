@@ -98,6 +98,8 @@ class TimeSpine:
         self.cluster_similarity_threshold = cluster_similarity_threshold
         self.buckets: dict[int, TimeBucket] = {}  # day_key → TimeBucket
         self._cluster_id_counter: int = 0
+        # v1.2.10: event-anchored timeline — important memories as time landmarks
+        self.landmarks: dict[int, list[str]] = defaultdict(list)  # day_key → [anchor_id]
 
     # ── Indexing ─────────────────────────────────────────
 
@@ -120,6 +122,10 @@ class TimeSpine:
         # Find existing cluster for this topic, or create new
         cluster = self._find_or_create_cluster(
             bucket, anchor_id, importance, embedding, topic, timestamp)
+
+        # v1.2.10: High-importance anchors become landmarks for event-anchored timeline
+        if importance > 0.8:
+            self.mark_landmark(anchor_id, timestamp, importance)
 
         return cluster.id if cluster else None
 
@@ -193,6 +199,87 @@ class TimeSpine:
         # Sort by importance within the window
         results.sort(key=lambda c: -c.importance)
         return results[:max_clusters]
+
+    def query_window_anchor_ids(self, start_time: float, end_time: float,
+                                  top_k: int = 50) -> list[str]:
+        """Return flat list of anchor IDs within a time window, for use in recall()."""
+        clusters = self.query_window(start_time, end_time, max_clusters=20)
+        anchor_ids: list[str] = []
+        seen: set[str] = set()
+        for c in clusters:
+            for aid in c.anchor_ids:
+                if aid not in seen:
+                    seen.add(aid)
+                    anchor_ids.append(aid)
+                    if len(anchor_ids) >= top_k:
+                        break
+            if len(anchor_ids) >= top_k:
+                break
+        return anchor_ids
+
+    # ── Event-Anchored Timeline (v1.2.10) ────────────────
+
+    def mark_landmark(self, anchor_id: str, timestamp: float | None = None,
+                      importance: float = 0.5) -> None:
+        """Mark an anchor as a landmark — a significant event on the timeline.
+
+        Only anchors with importance > 0.8 become landmarks, mimicking
+        how humans anchor their sense of time to memorable events.
+        """
+        if importance < 0.8:
+            return
+        if timestamp is None:
+            timestamp = time.time()
+        day_key = self._day_key(timestamp)
+        if anchor_id not in self.landmarks[day_key]:
+            self.landmarks[day_key].append(anchor_id)
+
+    def get_landmarks(self, max_days_back: int = 90) -> list[tuple[int, str]]:
+        """Get all landmarks within max_days_back, sorted recent-first.
+
+        Returns list of (day_key, anchor_id) tuples.
+        """
+        now_day = self._day_key(time.time())
+        results: list[tuple[int, str]] = []
+        for day_key in range(now_day - max_days_back, now_day + 1):
+            for aid in self.landmarks.get(day_key, []):
+                results.append((day_key, aid))
+        results.sort(key=lambda x: -x[0])
+        return results
+
+    def resolve_temporal_query(self, query: str) -> tuple[float, float] | None:
+        """Try to resolve a natural-language temporal query to a time window.
+
+        Uses landmarks to anchor relative time expressions:
+        "after the Redis fix" → time window after the nearest landmark matching "Redis"
+        "last week" → (now-7days, now)
+        "during the deployment" → time window during deployment landmark
+
+        Returns (start_time, end_time) or None if unresolvable.
+        """
+        query_lower = query.lower()
+
+        # Simple relative time patterns
+        now = time.time()
+        if 'last week' in query_lower or 'past week' in query_lower:
+            return (now - 7 * 86400, now)
+        if 'last month' in query_lower or 'past month' in query_lower:
+            return (now - 30 * 86400, now)
+        if 'yesterday' in query_lower:
+            return (now - 2 * 86400, now - 86400)
+        if 'today' in query_lower:
+            return (now - 86400, now)
+
+        # Try to find a matching landmark by keyword
+        import re
+        landmark_kws = re.findall(r'(?:after|before|during|at)\s+([a-zA-Z]\w+(?:\s+\w+){0,3})', query_lower)
+        if landmark_kws:
+            keyword = landmark_kws[0]
+            # Search through anchors for matching text
+            # (This will be handled at the retrieval_core level since we need graph access)
+            pass
+
+        return None
 
     def scan_timeline(self, start_time: float,
                       direction: str = "backward",

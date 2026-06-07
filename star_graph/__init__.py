@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.0.8"
+__version__ = "1.2.11"
 
 import sys
 from typing import Any
@@ -526,6 +526,14 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "FeedbackRecord":          ("star_graph.cognitive_closure", "FeedbackRecord"),
     "ClosureConfig":           ("star_graph.cognitive_closure", "ClosureConfig"),
     "CognitiveClosure":        ("star_graph.cognitive_closure", "CognitiveClosure"),
+
+    # v1.2.11: observatory & gravity well
+    "Lantern":                 ("star_graph.observatory", "Lantern"),
+    "Observatory":             ("star_graph.observatory", "Observatory"),
+    "IlluminationResult":      ("star_graph.observatory", "IlluminationResult"),
+    "compute_luminosity":      ("star_graph.observatory", "compute_luminosity"),
+    "GravityWell":             ("star_graph.gravity_well", "GravityWell"),
+    "GravityWellManager":      ("star_graph.gravity_well", "GravityWellManager"),
 }
 
 

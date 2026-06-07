@@ -14,6 +14,26 @@ from __future__ import annotations
 
 import enum
 import hashlib
+
+# Source attribution types for human-like memory provenance
+SOURCE_SELF_REPORTED = "self_reported"   # User said it themselves
+SOURCE_USER_TOLD_ME = "user_told_me"     # Agent was told by user
+SOURCE_INFERRED = "inferred"             # System inferred it
+SOURCE_TOOL_OUTPUT = "tool_output"       # Tool returned it
+SOURCE_OBSERVATION = "observation"       # System observed it
+
+_SOURCE_TRUST_DEFAULTS = {
+    SOURCE_SELF_REPORTED: 0.9,
+    SOURCE_USER_TOLD_ME: 0.7,
+    SOURCE_INFERRED: 0.4,
+    SOURCE_TOOL_OUTPUT: 0.8,
+    SOURCE_OBSERVATION: 0.6,
+}
+
+def source_trust_default(source: str) -> float:
+    """Get default trust score for a source attribution type."""
+    return _SOURCE_TRUST_DEFAULTS.get(source, 0.6)
+
 import math
 import time
 from dataclasses import dataclass, field
@@ -298,6 +318,9 @@ class Anchor:
     community_id: str = ""                       # primary community
     secondary_community_ids: list[str] = field(default_factory=list)  # bridge
     # v0.8: exact match cache fields
+    # v1.2.10: source attribution — human-like memory provenance
+    source_attribution: str = "observation"   # self_reported / user_told_me / inferred / tool_output / observation
+    source_trust: float = 0.6                 # 0..1 dynamic trust score for this source
     exact_match_keys: list[str] = field(default_factory=list)  # deterministic lookup keys
     salience: float = 0.0          # 0..1 how salient/easily-recallable this memory is
     # v1.0.4: lifecycle management

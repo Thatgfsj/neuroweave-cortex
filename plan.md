@@ -4,7 +4,7 @@
 
 ---
 
-## 定位: Cognitive Memory Engine（认知记忆引擎）
+## 定位: Cognitive Character — 类人认知引擎
 
 ### 不是
 
@@ -13,19 +13,21 @@
 - Agent 插件
 - MCP 附件
 - RAG 系统
+- 更快的数据库
 
 ### 而是
 
-> NeuroWeave Cortex is a cognitive long-term memory engine for AI systems.
-> 不是"让 AI 记住"，而是"让 AI 形成认知"。
+> NeuroWeave Cortex 不是一个 memory layer，而是一个 **cognitive character**。
+> 它的灵魂不是"更快更准"，而是"会遗忘、会扭曲、有情绪、有社交判断、能自由联想的人工心智"。
 
-核心哲学:
+核心理念:
 
 1. **记忆不平等** — 早餐吃了什么 ≠ 长期目标 ≠ 废话，必须分级存储
 2. **记忆会成长** — 从数据 → 模式 → 信念 → 人格，不是静止的
-3. **认知压缩是未来** — 海量对话 → 抽象 → 压缩 → 人格 → 长期认知
-4. **LLM 在认知层之下** — NWC 先形成认知状态，LLM 只负责语言表达
+3. **类人记忆不是缺陷，而是特征** — 失真、遗忘、情绪抑制、自由联想，这些"不完美"正是差异化壁垒
+4. **认知压缩是未来** — 海量对话 → 抽象 → 压缩 → 人格 → 长期认知
 5. **AI 不是"读取记忆"，而是"基于记忆思考"**
+6. **工程基础是地基，不是房子** — 地基要稳，但最终交付的是类人认知
 
 ---
 
@@ -291,20 +293,20 @@ final_score =
 
 | 指标 | VectorSimilarity | OscillationResonance | HybridFusion | 行业参考(DPR/FAISS) |
 |------|:---:|:---:|:---:|:---:|
-| LoCoMo has_answer | 15.3% | 24.8% | **31.1%** | 40-60% |
+| LoCoMo has_answer | 25.3% | 24.8% | **31.1%** | 40-60% |
 | LoCoMo F1 | 0.016 | 0.016 | **0.017** | 0.2-0.4 |
 | LLM Judge Score | 0.025 | 0.075 | 0.05 | — |
 | recall@1 | 0.0 | 0.0 | 0.0 | — |
 
 **结论**: 当前检索系统在长对话记忆召回上基本不可用。31% has_answer 意味着约 70% 的查询完全找不到答案。三种检索策略的 F1 都低于 0.02，说明即使命中也匹配质量极差。
 
-### 1.2 存储层：生产断层
+### 1.2 存储层：生产断层（已部分修复）
 
-- **默认存储**: JSON 文件（单文件读写，无事务，无并发保护）
-- **SQLite 存储**: 存在 `sqlite_storage.py` 但未作为默认后端集成
-- **无向量数据库支持**: 无 Qdrant/Milvus/Chroma 等生产级后端
-- **无并发安全**: 多线程写入无锁保护，JSON 持久化非原子
-- **无水平扩展**: 无分片、分布式、多租户方案
+- **默认存储**: ✅ 已改为 SQLite (`~/.nwc/memory.db`)，`save()`/`load()` 自动检测文件后缀
+- **JSON 存储**: 保留为兼容选项，`export_json()` 方法可用
+- **StorageBackend 接口**: ✅ 已完成抽象层（`batch_save`/`transaction`/`search`/`detect_and_create`）
+- **并发安全**: ✅ StarGraph 已加 `threading.RLock`，`add_anchor`/`add_edge`/`remove_anchor` 线程安全
+- **未完成**: 无 Qdrant/Milvus 等专用向量数据库后端；无水平扩展方案
 
 ### 1.3 架构：认知复杂度与工程价值的倒挂
 
@@ -346,24 +348,40 @@ final_score =
 
 ---
 
-## 二、核心定位：从"认知皮层"到"可用的长期记忆引擎"
+## 二、核心定位：工程基础×类人认知
 
-### 保留的核心理念
+### 两个轮子，缺一不可
 
-NeuroWeave Cortex 的差异化定位仍然成立：
-1. **记忆不平等** — 分级存储而非平铺
-2. **记忆会成长** — 从数据→模式→信念的演化是合理方向
-3. **认知压缩** — 海量对话→抽象摘要是有价值的
-4. **LLM 在认知层之下** — 先形成认知状态再表达
+NeuroWeave Cortex 的竞争壁垒不是"检索速度比 FAISS 快"，也不是"模块数比 Mem0 多"。它真正的差异化是：
 
-### 但实现的先后顺序必须重构
+1. **类人记忆** — 会遗忘、会扭曲、有情绪、有社交判断、能自由联想
+2. **多维度记忆** — 从感知到身份的多层演化，维度间的动态竞争与融合
+
+### 工程基础是轮子，不是方向
 
 ```
-之前（当前路线): 感知层 → 认知层 → 人格层 → 生产层
-现在（修正路线): 感知层 → 生产层 → 认知层 → 人格层
-                                              ↑
-                              生产就绪之前，认知层是空中楼阁
+工程基础（地基）→ 支撑 → 类人认知（房子）
+     ↓                        ↓
+ 可部署、可用              差异化、不可替代
 ```
+
+- 之前（我的错误）：`地基打好再建房子` → 无限期拖延房子的建设
+- 现在（正确路线）：`地基和房子同步建` → 每次迭代同时推进工程和认知
+
+### 已完成的工程基础（不重复做）
+
+| 项目 | 状态 |
+|------|------|
+| 存储后端接口抽象 | ✅ done |
+| SQLite 默认后端 | ✅ done |
+| 并发锁 (RLock) | ✅ done |
+| Raw Buffer 优先级提升 | ✅ done |
+| 模块分类清单 | ✅ done |
+| plan 方向调整 | ✅ done |
+
+### 下一阶段的核心：类人记忆增强
+
+工程基继续加固，但**同时**投入类人记忆特征的实现。
 
 ---
 
@@ -388,6 +406,29 @@ NeuroWeave Cortex 的差异化定位仍然成立：
 **现状**: `recall()` 路径中 Raw Buffer 结果排在 Graph 结果之后。但 Raw Buffer 存的是最近 1-2 个 session 的原始对话，对短期事实类查询命中率远高于压缩后的 anchor。
 
 **变更**: `exact → raw → graph`（Raw Buffer 提前）
+
+#### C. 时间感知检索（针对 LoCoMo Category 1 Temporal）
+
+**现状**: 主 `recall()` 路径中完全无时间权重。Category 1（时间类查询：日期/时刻/顺序）has_answer 仅 11.0%。纯 embedding 对"上周三"这样的时间表述完全不敏感。
+
+**方案**:
+1. 在 `retrieval_core.py` 的 `recall()` 中增加 `_detect_temporal_query()` 函数，识别"时间类"查询关键词（yesterday/last week/on May 7th 等）
+2. 当检测到时间类查询时，调用 `timespine.query_window()` 做时间窗预过滤，只检索时间窗内的 anchor
+3. 对命中的结果增加时间匹配分数加成（+0.15）
+
+**预期提升**: Category 1 has_answer 从 11% → 25%+
+
+#### D. 近期记忆权重提升（针对 LoCoMo Category 2-3 Short/Long Memory）
+
+**现状**: RRF 融合路径中无时间衰减。Category 2（Short Memory）has_answer 仅 3.1%，Category 3（Long Memory）仅 7.3%。早期记忆几乎被完全遗忘。
+
+**方案**:
+1. 在 `recall()` 的 RRF 融合后、sort 之前，增加一个时间衰减权重步骤
+2. 对最近 24 小时内的 anchor 加 +0.10 分数加成
+3. 对最近 7 天内的 anchor 加 +0.05 分数加成
+4. 权重在 `defaults.yaml` 中可配置为 `recall.recency_boost_hours` / `recall.recency_boost_weight`
+
+**预期提升**: Category 2-3 has_answer 从 3-7% → 15%+
 
 ---
 
@@ -606,7 +647,80 @@ services:
 
 ---
 
-### 第七组：生物启发模块的生存验证
+### 第八组：类人记忆增强（核心差异化）
+
+#### P0 — 社交来源归因 + 信任度
+
+**文件**: `anchor.py` + `sleep.py` N2b_Conflict
+
+在 `AnchorVector` 中增加 `source_attribution` 字段，区分记忆来源：
+
+| 来源类型 | 含义 | 初始信任度 |
+|----------|------|-----------|
+| `self_reported` | 用户自己说的 | 0.9 |
+| `user_told_me` | Agent 被告知的 | 0.7 |
+| `inferred` | 系统推断的 | 0.4 |
+| `tool_output` | 工具返回的 | 0.8 |
+| `observation` | 系统观察到的 | 0.6 |
+
+**冲突解决增强**: 在睡眠 N2b_Conflict 阶段，当两个记忆矛盾时，不是单纯按时间或激活度覆盖，而是按信任度加权——高信任度来源的记忆覆盖低信任度的。
+
+#### P0 — 事件锚定时间线（Event-Anchored Timeline）
+
+**文件**: `timespine.py` / 新增 `event_anchor.py`
+
+当前 Category 1（Temporal）只有 11% has_answer，因为人类不说"2024年6月7日"，而是说"就在那次 Redis 调试之后"。
+
+方案：
+1. 在 `TimeSpine` 中增加**重要事件标记**——当一条记忆的 importance > 0.8 时，自动标记为"时间地标"
+2. 新增 `event_anchor.py` 模块，提供 `resolve_temporal_query(query) → time_window` 函数
+3. 查询"上周三"时，先解析为"最近的项目里程碑前后"，再映射到具体日期范围
+
+#### P1 — 情感多维化
+
+**文件**: `salience.py` + `anchor.py`
+
+引入轻量情感向量（效价、唤醒度、支配度 + 情绪标签），增加:
+- **抑制性回忆**: 高尴尬度的记忆降低主动召回概率
+- **怀旧提升**: 高怀旧度的记忆在低任务负载时提升 Ghost Revival 概率
+
+#### P1 — 自由联想模式
+
+**文件**: `activation_engine.py`
+
+新增 `free_associate()` 接口，不接收查询，从当前工作记忆出发做随机漫步（random walk with temperature），返回 `association_type: "direct" / "distant" / "analogical"`。
+
+#### P2 — 叙事连贯性检索
+
+**文件**: `retriever.py`
+
+新增 `narrative_weave` 模式——用图的路径搜索替代点的相似度搜索，返回"能连成一段合理叙事的记忆链"。
+
+#### P2 — 记忆失真/重构
+
+**文件**: `sleep.py` N2c_Revision
+
+引入轻度重构——当两个记忆被多次同时激活时，边界模糊化产生合成记忆，打上 `reconstructed` 标签。
+
+#### P3 — 情境信封
+
+**文件**: 新增 `contextual_envelope.py`
+
+给记忆增加轻量的情境包裹（地点、身体状态、前序任务），作为回忆时的氛围匹配。
+
+---
+
+### 第九组：工程基础继续加固
+
+以下项目继续推进，与第八组并行：
+
+| 项目 | 状态 |
+|------|------|
+| Qdrant 存储后端 | 🔜 待做 |
+| LangChain 适配器 | 🔜 待做 |
+| Mem0/FAISS 对比基准 | 🔜 待做 |
+| 延迟分解（latency breakdown） | 🔜 待做 |
+| 模块化拆分 | 🔜 待做 |
 
 **原则**: 对于所有未被消融实验证明价值的"生物学启发"模块，标记为 **EXPERIMENTAL** 并在日志中告警。如果 3 个月内仍无消融证据，在 v2.0 中移除。
 
@@ -625,56 +739,57 @@ services:
 ### Track 1: 核心检索管道（最高优先级）
 
 ```
-1.1 Raw Buffer 优先级提升          ← 1天，仅改合并顺序
-1.2 ANN 增量维护                    ← 2天，消除全量重建
-1.3 BM25+Embedding 真 RRF 融合     ← 3天，检索质量核心提升
-1.4 检索权重回归调优                ← 2天，LoCoMo 数据驱动
-1.5 并发安全锁 + 原子写入           ← 2天，数据安全
+1.1 Raw Buffer 优先级提升          ← done, 移除 0.7 惩罚
+1.2 时间感知检索（Category 1）      ← 当前：时间实体检测 + TimeSpine 预过滤
+1.3 近期记忆权重（Category 2-3）    ← 当前：recall() 增加时间衰减权重
+1.4 BM25+Embedding 真 RRF 融合     ← 待做：量化提升
+1.5 检索权重回归调优                ← 待做：LoCoMo 数据驱动
+1.6 并发安全锁 + 原子写入           ← done
 ```
 
 ### Track 2: 存储层工程化
 
 ```
-2.1 StorageBackend 接口设计         ← 1天
-2.2 SQLiteStorage 升级为默认后端    ← 2天
-2.3 QdrantStorage 实现              ← 3天
-2.4 导出/导入/迁移工具              ← 2天
+2.1 StorageBackend 接口设计         ← done
+2.2 SQLiteStorage 升级为默认后端    ← done
+2.3 QdrantStorage 实现              ← 待做
+2.4 导出/导入/迁移工具              ← 待做
 ```
 
 ### Track 3: 生态集成
 
 ```
-3.1 LangChain NeuroWeaveMemory      ← 2天
-3.2 基准对比脚本 (Mem0/Zep/FAISS)   ← 3天
-3.3 消融实验框架                     ← 3天
-3.4 OpenAI Agents SDK adapter       ← 2天
+3.1 LangChain NeuroWeaveMemory      ← 待做
+3.2 基准对比脚本 (Mem0/Zep/FAISS)   ← 待做
+3.3 消融实验框架                     ← 待做
+3.4 OpenAI Agents SDK adapter       ← 待做
 ```
 
 ### Track 4: 可观测性
 
 ```
-4.1 关键路径 OpenTelemetry 埋点     ← 2天
-4.2 Prometheus 指标暴露             ← 1天
-4.3 REST API 认证 + 速率限制        ← 2天
-4.4 Docker Compose 部署方案         ← 1天
+4.1 关键路径延迟分解（recall latency breakdown）  ← 当前
+4.2 Prometheus 指标暴露               ← 待做
+4.3 REST API 认证 + 速率限制          ← 待做
+4.4 Docker Compose 部署方案           ← 待做
 ```
 
 ### Track 5: 模块化拆分
 
 ```
-5.1 模块清单审查：core vs cognitive 划分  ← 1天
-5.2 core 包重组，依赖清理                  ← 2天
-5.3 cognitive 包独立，惰性导入              ← 2天
-5.4 配置简化：从 300+ 参数到 ~50 核心参数   ← 2天
+5.1 模块清单审查：core vs cognitive 划分  ← done (docs/module-classification.md)
+5.2 core 包重组，依赖清理                  ← 待做
+5.3 cognitive 包独立，惰性导入              ← 待做
+5.4 配置简化：从 300+ 参数到 ~50 核心参数   ← 待做
 ```
 
 ### Track 6: 端到端评测
 
 ```
-6.1 多轮对话记忆基准                     ← 3天
-6.2 消融实验自动运行 + 报告生成           ← 2天
-6.3 延迟/吞吐压力测试                     ← 2天
-6.4 长期稳定性测试（10万+记忆）           ← 3天
+6.1 多轮对话记忆基准                     ← 当前：创建 e2e 任务基准
+6.2 消融实验自动运行 + 报告生成           ← 待做
+6.3 延迟/吞吐压力测试                     ← 待做
+6.4 长期稳定性测试（10万+记忆）           ← 待做
 ```
 
 ---
