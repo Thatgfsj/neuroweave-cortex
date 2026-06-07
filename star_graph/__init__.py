@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.2.11"
+__version__ = "1.2.12"
 
 import sys
 from typing import Any

@@ -3,7 +3,7 @@
 Not a vector database. Not a graph database. Not RAG. A **cognitive character** — an observatory that illuminates a star field of memories, each star's brightness depending on **where you stand and what you're looking for**. It forgets, distorts, has emotional judgment, makes free associations, and walks discovery paths through a multi-dimensional star graph — the way biological cognition does.
 
 ```
-v1.2.11 | 134 modules | Observation-Driven Retrieval | Cognitive Character
+v1.2.12 | 134 modules | Observation-Driven Retrieval | Cognitive Character
 ```
 
 ## What makes it different
@@ -463,7 +463,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** v1.2.11 | 134 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
+**Status:** v1.2.12 | 134 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
 
 ## Roadmap
 

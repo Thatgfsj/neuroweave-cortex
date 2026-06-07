@@ -271,7 +271,7 @@ final_score =
 ### 1.0 当前代码库状态
 
 - **134 modules** (112 star_graph + 20 nwc + 2 new: observatory + gravity_well)
-- v1.2.11 — 观测者依赖的检索范式
+- v1.2.12 — 观测者依赖的检索范式
 - **新核心**: `observatory.py` (天文台亮度引擎) + `gravity_well.py` (引力井惯性)
 - **类人记忆增强**: source_attribution, event-anchored timeline, temporal query detection
 
@@ -833,7 +833,7 @@ services:
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **1.2.11** | **2026-06** | **类人记忆引擎：天文台+引力井。范式迁移：从向量检索到星图观测。新增 observatory.py, gravity_well.py, source_attribution, event-anchored timeline** |
+| **1.2.12** | **2026-06** | **类人记忆引擎：天文台+引力井。范式迁移：从向量检索到星图观测。新增 observatory.py, gravity_well.py, source_attribution, event-anchored timeline** |
 | 1.0.7 | 2026-05 | Phase 5 Cognitive Depth: 12 modules (memory budget, quality score, stability control, 4-layer pyramid, typed memory, domain graph, Hebbian learning, etc.) |
 | 1.0.8 | 2026-05 | Phase 6 Cognitive Cortex: 11 modules (ThoughtObject, PerceptionLayer, CognitiveWorkspace, ConceptCortex, ActivationEngine, GoalSystem, SalienceEngine, SelfModel, AutonomousReasoning, MemoryLifecycle). 4-layer architecture. 112 modules. |
 | 1.1.0 | 2026-05 | LLM SDK: nwc/ package (20 files), CLI (Typer, 13 commands), MCP server (14 tools), OpenAI-compatible API, 5 LLM adapters, docs/llm_integration.md |
