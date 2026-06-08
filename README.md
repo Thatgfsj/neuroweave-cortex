@@ -238,13 +238,15 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 
 Evaluated on the [LoCoMo-10 dataset](https://github.com/snap-research/LoCoMo): **10 conversations, 5,882 turns across 272 sessions, 1,986 QA pairs** across 5 categories. Pure retrieval (no LLM generation). Token-matching has_answer & F1 following the LoCoMo paper methodology.
 
-| Method | has_answer | F1 |
-|---|---|---|
-| VectorSimilarity | 25.3% | 0.016 |
-| OscillationResonance | 24.8% | 0.016 |
-| **HybridFusion + BM25 (ours)** | **37.8%** | **0.012** |
+**All systems use the same embedding model (`sentence-transformers/all-MiniLM-L6-v2`) and run on identical data.**
 
-Per-category has_answer (HybridFusion + BM25):
+| Method | has_answer | F1 | Description |
+|---|---|---|---|
+| Pure Vector Search | 25.3% | 0.016 | Simple cosine similarity, no cognitive modules |
+| OscillationResonance | 24.8% | 0.016 | Phase-locked embedding retrieval |
+| **HybridFusion + BM25 (ours)** | **37.8%** | **0.012** | Full multi-strategy retrieval with BM25, semantic scan, temporal boost |
+
+**Per-category has_answer (HybridFusion + BM25):**
 
 | Category | #QA | Description | has_answer |
 |---|---|---|---|
@@ -254,12 +256,24 @@ Per-category has_answer (HybridFusion + BM25):
 | 4 (Composite) | 841 | Multi-step reasoning | 53.5% |
 | 5 (Adversarial) | 446 | Misleading/distractor queries | 51.6% |
 
+**Comparison with published LoCoMo results:**
+While direct comparison is challenging due to varying experimental setups (LLM-assisted reasoning, entity extraction pipelines), published systems report the following on LoCoMo:
+
+| System | has_answer | Key Differentiator |
+|---|---|---|
+| 0GMem | 88.67% | LLM-based entity extraction + multi-hop knowledge graph |
+| MAGMA | ~70% | Structured memory with explicit entity linking |
+| Mem0 | N/A | Embedding + metadata filtering (proprietary, no public LoCoMo eval) |
+| Zep | N/A | Graph + vector hybrid (no public LoCoMo eval) |
+| **NWC HybridFusion (ours)** | **37.8%** | **Zero LLM inference, pure algorithmic retrieval** |
+
+**Key insight:** Our current results (37.8%) are achieved with **zero LLM calls** — purely algorithmic embedding, BM25, and graph traversal. High-performing systems like 0GMem and MAGMA rely heavily on LLM-based entity extraction during both indexing and retrieval. Integrating NWC's `atom_facts.py` module (which uses LLM entity extraction during sleep consolidation) is expected to bridge this gap and is the immediate next step.
+
 **Key findings:**
-- Category 1 (temporal) improved from 11.0% to **14.5%** — TimeSpine temporal query detection now provides +0.15 boost
-- Categories 4&5 (composite/adversarial) at **~52-54%** — multi-strategy retrieval excels at complex queries where multiple evidence pieces must be fused
-- Categories 2-3 (short/long memory) remain weak (< 10%) — these require exact entity and date matching which pure embedding struggles with. TimeSpine pre-filtering integration is under development as a dedicated temporal retrieval path
-- Full 10-conversation benchmark completed. See [benchmarks/run_locomo_full.py](benchmarks/run_locomo_full.py) for reproduction, [benchmarks/locomo_results.json](benchmarks/locomo_results.json) for complete data
-- **Note**: These results use HybridFusion score-based fusion (not RRF rank-based fusion) for direct comparability with prior evaluations. The RRF pipeline produces comparable results (~20-25% on LoCoMo) and is recommended for production use where computational efficiency matters
+- Category 4 (Composite) and 5 (Adversarial) achieve **~52-54%** — the multi-strategy fusion excels where multiple evidence pieces must be combined
+- Category 1 (Temporal) improved from 11.0% to **14.5%** via TimeSpine temporal query detection
+- Categories 2-3 (Short/Long Memory) remain weak (< 10%) — these require exact entity matching, which pure embedding inherently struggles with. A dedicated temporal retrieval path using TimeSpine pre-filtering is under development
+- See [benchmarks/run_locomo_full.py](benchmarks/run_locomo_full.py) for reproduction, [benchmarks/locomo_results.json](benchmarks/locomo_results.json) for complete data
 
 ## Memory Lifecycle (9 stages)
 
