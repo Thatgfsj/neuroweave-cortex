@@ -1,383 +1,209 @@
-"""Memory Lifecycle — unified full-lifecycle management for memory anchors.
+"""Memory Lifecycle Engine — autonomous memory layer migration.
 
-Consolidates: tier system (Hot/Warm/Cold), 4-layer pyramid, stability_control,
-thermal_store, ghost subsystem, and memory_budget eviction.
+Implements cognitive memory migration between layers:
+  L0 (Input)    → ephemeral, per-session, not persisted
+  L1 (Working)  → recent active memories, LLM-maintained, fast read/write
+  L2 (Long-term) → stable consolidated memories, strength-based retrieval
+  L3 (Archive)  → compressed summaries, not in real-time retrieval
 
-Lifecycle stages:
-  PERCEPTION → WORKING → SHORT_TERM → LONG_TERM → CONSOLIDATED → ARCHIVED → DORMANT → GHOST → DEAD
+Migration rules:
+  L1→L2: access_count > threshold OR age > 30 days OR user re-mentions
+  L2→L3: 90 days no access OR importance < threshold → compress → archive
+  L3→L2: query embedding matches archived summary → reactivate → restore
 """
 
 from __future__ import annotations
 
-import enum
 import math
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from enum import Enum
 
 
-class LifecycleStage(enum.Enum):
-    PERCEPTION = "perception"          # initial intake (not yet stored)
-    WORKING = "working"                # in cognitive workspace
-    SHORT_TERM = "short_term"          # stored, not consolidated
-    LONG_TERM = "long_term"            # consolidated, actively retrievable
-    CONSOLIDATED = "consolidated"      # deeply integrated, high stability
-    ARCHIVED = "archived"              # low access, in cold storage
-    DORMANT = "dormant"               # very low access, near ghost
-    GHOST = "ghost"                    # forgotten but potentially revivable
-    DEAD = "dead"                      # permanently removed
+class MemoryLayer(Enum):
+    L0_INPUT = "input"
+    L1_WORKING = "working"
+    L2_LONG_TERM = "long_term"
+    L3_ARCHIVE = "archive"
 
 
 @dataclass
-class LifecycleTransition:
-    """Record of a lifecycle stage transition."""
+class MemoryMigration:
+    """A single migration event between layers."""
     anchor_id: str
-    from_stage: LifecycleStage
-    to_stage: LifecycleStage
-    reason: str = ""
-    timestamp: float = field(default_factory=time.time)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    from_layer: MemoryLayer
+    to_layer: MemoryLayer
+    reason: str
+    timestamp: float
+    compressed_text: str = ""
 
 
-@dataclass
-class LifecycleState:
-    """Current lifecycle state of a memory anchor."""
-    anchor_id: str
-    current_stage: LifecycleStage = LifecycleStage.SHORT_TERM
-    entered_at: float = field(default_factory=time.time)
-    time_in_stage: float = 0.0
-    access_count_in_stage: int = 0
-    demotion_risk: float = 0.0           # 0..1 probability of demotion soon
+# Layer transition thresholds
+L1_TO_L2_ACCESS_THRESHOLD = 3      # promoted after 3 accesses
+L1_TO_L2_AGE_DAYS = 30              # promoted after 30 days
+L2_TO_L3_AGE_DAYS = 90              # archived after 90 days
+L2_TO_L3_IMPORTANCE_THRESHOLD = 0.3  # archived if importance below this
+L2_REACTIVATE_SIMILARITY = 0.55     # reactivate from archive if cosine > this
 
 
-# ── Default stage policies ──────────────────────────────────────
+class MemoryLifecycleEngine:
+    """Manages autonomous memory migration across L0-L3 layers.
+    
+    Called during sleep consolidation. Does NOT use LLM for routing —
+    all decisions are based on access patterns and temporal decay.
+    LLM is only used for: compressing L2→L3 summaries, expanding L3→L2.
+    """
 
-_DEFAULT_STAGE_POLICIES: dict[str, dict] = {
-    "working": {
-        "max_items": 200, "ttl_seconds": 3600,
-        "promote_to": "short_term",
-        "promote_condition": "importance > 0.3",
-    },
-    "short_term": {
-        "max_items": 3000, "ttl_seconds": 604800,  # 7 days
-        "promote_to": "long_term",
-        "promote_condition": "access_count >= 3 OR stability > 0.5",
-        "demote_to": "archived",
-        "demote_condition": "idle_seconds > 259200 AND access_count < 2",  # 3 days
-    },
-    "long_term": {
-        "max_items": 30000, "ttl_seconds": 0,  # infinite
-        "promote_to": "consolidated",
-        "promote_condition": "stability > 0.7 AND access_count >= 10",
-        "demote_to": "archived",
-        "demote_condition": "idle_seconds > 2592000",  # 30 days
-    },
-    "consolidated": {
-        "max_items": 15000, "ttl_seconds": 0,
-        "demote_to": "archived",
-        "demote_condition": "idle_seconds > 7776000",  # 90 days
-    },
-    "archived": {
-        "max_items": 50000, "ttl_seconds": 0,
-        "demote_to": "dormant",
-        "demote_condition": "idle_seconds > 15552000",  # 180 days
-    },
-    "dormant": {
-        "max_items": 0,  # unlimited
-        "demote_to": "ghost",
-        "demote_condition": "retention < 0.05",
-    },
-    "ghost": {
-        "max_items": 0,
-        "purge_after_days": 90,
-    },
-}
-
-
-class MemoryLifecycleManager:
-    """Unified lifecycle management for all memory anchors."""
-
-    def __init__(self, graph=None, *,
-                 config: dict[str, Any] | None = None,
-                 stability_controller=None,
-                 memory_budget=None,
-                 thermal_store=None,
-                 ghost_subsystem=None):
+    def __init__(self, graph, llm_fn=None):
         self.graph = graph
-        self._config = config or {}
-        self._stability_controller = stability_controller
-        self._memory_budget = memory_budget
-        self._thermal_store = thermal_store
-        self._ghost_subsystem = ghost_subsystem
+        self.llm_fn = llm_fn  # optional LLM for compression/expansion
+        self.migrations: list[MemoryMigration] = []
+        # Archive store: anchor_id → compressed_text
+        self._archive: dict[str, str] = getattr(graph, '_archive', {})
+        if not hasattr(graph, '_archive'):
+            graph._archive = self._archive
 
-        # Stage policies
-        cfg_policies = self._config.get("stage_policies", {})
-        self._policies: dict[str, dict] = {}
-        for stage_name, defaults in _DEFAULT_STAGE_POLICIES.items():
-            self._policies[stage_name] = {**defaults, **cfg_policies.get(stage_name, {})}
+    # ── L1 → L2 promotion ──────────────────────────────────
 
-        self._transitions: list[LifecycleTransition] = []
-        self._state_cache: dict[str, LifecycleState] = {}
-
-        self._auto_interval = self._config.get("auto_transition_interval_hours", 6.0)
-        self._max_transitions = self._config.get("max_transitions_per_cycle", 1000)
-
-    # ── Stage Management ───────────────────────────────────
-
-    def classify_anchor(self, anchor_id: str, anchor_obj=None) -> LifecycleStage:
-        """Determine which lifecycle stage an anchor belongs in."""
-        if not anchor_obj and self.graph:
-            try:
-                anchor_obj = self.graph.get_anchor(anchor_id)
-            except Exception:
-                pass
-
-        if not anchor_obj:
-            return LifecycleStage.SHORT_TERM
-
-        # Use anchor attributes to determine stage
-        stability = getattr(anchor_obj, 'stability', 0.5)
-        access_count = getattr(anchor_obj, 'access_count', 0)
-        importance = getattr(anchor_obj, 'importance', 0.5)
-        retention = getattr(anchor_obj, 'retention_score', 0.5)
-        state = getattr(anchor_obj, 'state', None)
-
-        # Check ghost state first
-        if state and hasattr(state, 'value') and 'ghost' in str(state.value).lower():
-            return LifecycleStage.GHOST
-
-        if retention < 0.05:
-            return LifecycleStage.DORMANT
-        if retention < 0.15:
-            return LifecycleStage.ARCHIVED
-        if stability > 0.7 and access_count >= 10:
-            return LifecycleStage.CONSOLIDATED
-        if stability > 0.5 or access_count >= 3:
-            return LifecycleStage.LONG_TERM
-        return LifecycleStage.SHORT_TERM
-
-    def transition(self, anchor_id: str, to_stage: LifecycleStage,
-                   reason: str = "") -> LifecycleTransition | None:
-        """Transition an anchor to a new lifecycle stage."""
-        current = self._state_cache.get(anchor_id)
-        from_stage = current.current_stage if current else self.classify_anchor(anchor_id)
-
-        if from_stage == to_stage:
-            return None
-
-        trans = LifecycleTransition(
-            anchor_id=anchor_id,
-            from_stage=from_stage,
-            to_stage=to_stage,
-            reason=reason,
-        )
-        self._transitions.append(trans)
-
-        # Update cache
-        self._state_cache[anchor_id] = LifecycleState(
-            anchor_id=anchor_id,
-            current_stage=to_stage,
-        )
-
-        return trans
-
-    def auto_transition_all(self) -> list[LifecycleTransition]:
-        """Scan all anchors and auto-transition based on policy rules."""
-        transitions: list[LifecycleTransition] = []
-
-        # Check promotions
-        promotions = self._check_promotions()
-        transitions.extend(promotions)
-
-        # Check demotions
-        if len(transitions) < self._max_transitions:
-            demotions = self._check_demotions()
-            remaining = self._max_transitions - len(transitions)
-            transitions.extend(demotions[:remaining])
-
-        return transitions
-
-    # ── Promotion / Demotion ───────────────────────────────
-
-    def _check_promotions(self) -> list[LifecycleTransition]:
-        """Find anchors eligible for promotion."""
-        transitions: list[LifecycleTransition] = []
-
-        for anchor_id, state in list(self._state_cache.items()):
-            stage_name = state.current_stage.value
-            policy = self._policies.get(stage_name, {})
-            promote_to = policy.get("promote_to")
-            if not promote_to:
+    def promote_l1_to_l2(self, now: float | None = None) -> list[MemoryMigration]:
+        """Promote eligible L1 memories to L2 (long-term).
+        
+        Eligibility:
+          - replay_count >= L1_TO_L2_ACCESS_THRESHOLD
+          - OR age > L1_TO_L2_AGE_DAYS
+        """
+        if now is None:
+            now = time.time()
+        promoted: list[MemoryMigration] = []
+        
+        for aid, anchor in list(self.graph.anchors.items()):
+            # Skip if already L2
+            if getattr(anchor, '_layer', None) == MemoryLayer.L2_LONG_TERM:
                 continue
+            
+            age_days = (now - anchor.created_at) / 86400.0
+            replay = getattr(anchor, 'replay_count', 0)
+            
+            if replay >= L1_TO_L2_ACCESS_THRESHOLD or age_days >= L1_TO_L2_AGE_DAYS:
+                anchor._layer = MemoryLayer.L2_LONG_TERM
+                reason = f"replay_count={replay}" if replay >= L1_TO_L2_ACCESS_THRESHOLD else f"age={age_days:.0f}d"
+                self.migrations.append(MemoryMigration(
+                    anchor_id=aid, from_layer=MemoryLayer.L1_WORKING,
+                    to_layer=MemoryLayer.L2_LONG_TERM, reason=reason, timestamp=now
+                ))
+                promoted.append(self.migrations[-1])
+        
+        return promoted
 
-            condition = policy.get("promote_condition", "")
-            if self._evaluate_condition(condition, anchor_id, state):
-                try:
-                    to_stage = LifecycleStage(promote_to)
-                    transitions.append(self.transition(
-                        anchor_id, to_stage,
-                        reason=f"auto-promote: {condition}"
-                    ))
-                except ValueError:
-                    pass
+    # ── L2 → L3 archival ───────────────────────────────────
 
-        return transitions
-
-    def _check_demotions(self) -> list[LifecycleTransition]:
-        """Find anchors that should be demoted."""
-        transitions: list[LifecycleTransition] = []
-
-        for anchor_id, state in list(self._state_cache.items()):
-            stage_name = state.current_stage.value
-            policy = self._policies.get(stage_name, {})
-            demote_to = policy.get("demote_to")
-            if not demote_to:
+    def archive_l2_to_l3(self, now: float | None = None) -> list[MemoryMigration]:
+        """Move stale/lowl-importance L2 memories to L3 archive.
+        
+        Eligibility:
+          - 90 days since last_activated_at
+          - OR vector.importance < L2_TO_L3_IMPORTANCE_THRESHOLD
+        """
+        if now is None:
+            now = time.time()
+        archived: list[MemoryMigration] = []
+        
+        for aid, anchor in list(self.graph.anchors.items()):
+            if getattr(anchor, '_layer', None) not in (None, MemoryLayer.L2_LONG_TERM):
                 continue
+            
+            age_days = (now - anchor.last_activated_at) / 86400.0
+            importance = anchor.vector.importance if hasattr(anchor, 'vector') else 0.5
+            
+            if age_days < L2_TO_L3_AGE_DAYS and importance >= L2_TO_L3_IMPORTANCE_THRESHOLD:
+                continue  # not eligible
+            
+            # Compress using LLM if available, else simple truncation
+            if self.llm_fn and len(anchor.text) > 100:
+                compressed = self._llm_compress(anchor.text)
+            else:
+                compressed = anchor.text[:120] + "..." if len(anchor.text) > 120 else anchor.text
+            
+            self._archive[aid] = compressed
+            anchor._layer = MemoryLayer.L3_ARCHIVE
+            
+            reason = f"age={age_days:.0f}d" if age_days >= L2_TO_L3_AGE_DAYS else f"importance={importance:.2f}"
+            self.migrations.append(MemoryMigration(
+                anchor_id=aid, from_layer=MemoryLayer.L2_LONG_TERM,
+                to_layer=MemoryLayer.L3_ARCHIVE, reason=reason,
+                timestamp=now, compressed_text=compressed
+            ))
+            archived.append(self.migrations[-1])
+        
+        return archived
 
-            condition = policy.get("demote_condition", "")
-            if self._evaluate_condition(condition, anchor_id, state):
-                try:
-                    to_stage = LifecycleStage(demote_to)
-                    transitions.append(self.transition(
-                        anchor_id, to_stage,
-                        reason=f"auto-demote: {condition}"
-                    ))
-                except ValueError:
-                    pass
+    # ── L3 → L2 reactivation ───────────────────────────────
 
-        return transitions
+    def reactivate_l3_to_l2(self, query_embedding: list[float],
+                            top_k: int = 3) -> list[MemoryMigration]:
+        """Check if any archived memory matches current query.
+        
+        If similarity between query and archived summary > threshold,
+        restore the memory to L2.
+        """
+        from star_graph.math_utils import cosine_sim as _cos
+        
+        reactivated: list[MemoryMigration] = []
+        scored: list[tuple[float, str]] = []
+        
+        for aid, compressed in self._archive.items():
+            anchor = self.graph.anchors.get(aid)
+            if anchor is None or not anchor.embedding:
+                continue
+            sim = _cos(query_embedding, anchor.embedding)
+            if sim >= L2_REACTIVATE_SIMILARITY:
+                scored.append((sim, aid))
+        
+        scored.sort(key=lambda x: -x[0])
+        for sim, aid in scored[:top_k]:
+            anchor = self.graph.anchors.get(aid)
+            if anchor and hasattr(anchor, '_layer'):
+                anchor._layer = MemoryLayer.L2_LONG_TERM
+                anchor.last_activated_at = time.time()
+                self.migrations.append(MemoryMigration(
+                    anchor_id=aid, from_layer=MemoryLayer.L3_ARCHIVE,
+                    to_layer=MemoryLayer.L2_LONG_TERM,
+                    reason=f"reactivated(sim={sim:.2f})",
+                    timestamp=time.time()
+                ))
+                reactivated.append(self.migrations[-1])
+        
+        return reactivated
 
-    def _evaluate_condition(self, condition: str, anchor_id: str,
-                            state: LifecycleState) -> bool:
-        """Evaluate a promotion/demotion condition string."""
-        if not condition:
-            return False
+    # ── LLM compression helper ─────────────────────────────
 
-        # Simple condition evaluator
+    def _llm_compress(self, text: str) -> str:
+        """Use optional LLM to compress memory text.
+        
+        Falls back to truncation if no LLM available.
+        """
+        if not self.llm_fn:
+            return text[:120] + "..." if len(text) > 120 else text
         try:
-            # Handle "importance > 0.3"
-            if "importance >" in condition:
-                threshold = float(condition.split(">")[-1].strip())
-                anchor = self._get_anchor(anchor_id)
-                return getattr(anchor, 'importance', 0.5) > threshold
-
-            if "stability >" in condition:
-                threshold = float(condition.split(">")[-1].strip())
-                anchor = self._get_anchor(anchor_id)
-                return getattr(anchor, 'stability', 0.5) > threshold
-
-            if "access_count >=" in condition:
-                threshold = int(condition.split(">=")[-1].strip())
-                return state.access_count_in_stage >= threshold
-
-            if "idle_seconds >" in condition:
-                threshold = float(condition.split(">")[-1].strip())
-                idle = time.time() - state.entered_at
-                return idle > threshold
-
-            if "retention <" in condition:
-                threshold = float(condition.split("<")[-1].strip())
-                anchor = self._get_anchor(anchor_id)
-                return getattr(anchor, 'retention_score', 0.5) < threshold
-        except (ValueError, IndexError):
-            pass
-
-        return False
-
-    def _get_anchor(self, anchor_id: str) -> Any:
-        """Get anchor object."""
-        if self.graph and hasattr(self.graph, 'get_anchor'):
-            try:
-                return self.graph.get_anchor(anchor_id)
-            except Exception:
-                pass
-        return None
-
-    # ── End of Life ────────────────────────────────────────
-
-    def archive(self, anchor_id: str):
-        self.transition(anchor_id, LifecycleStage.ARCHIVED, "explicit archive")
-
-    def ghost(self, anchor_id: str):
-        self.transition(anchor_id, LifecycleStage.GHOST, "explicit forget")
-
-    def purge(self, anchor_id: str):
-        """Permanently delete."""
-        self.transition(anchor_id, LifecycleStage.DEAD, "explicit purge")
-        self._state_cache.pop(anchor_id, None)
-
-    def revive(self, anchor_id: str):
-        """Revive from ghost/dormant back to short_term."""
-        if anchor_id in self._state_cache:
-            stage = self._state_cache[anchor_id].current_stage
-            if stage in (LifecycleStage.GHOST, LifecycleStage.DORMANT, LifecycleStage.ARCHIVED):
-                self.transition(anchor_id, LifecycleStage.SHORT_TERM, "revival")
-
-    # ── Lifecycle Mapping ──────────────────────────────────
-
-    @staticmethod
-    def map_to_tier(stage: LifecycleStage) -> str:
-        """Map lifecycle stage to existing tier system (Hot/Warm/Cold)."""
-        mapping = {
-            LifecycleStage.WORKING: "hot",
-            LifecycleStage.SHORT_TERM: "hot",
-            LifecycleStage.LONG_TERM: "warm",
-            LifecycleStage.CONSOLIDATED: "warm",
-            LifecycleStage.ARCHIVED: "cold",
-            LifecycleStage.DORMANT: "cold",
-            LifecycleStage.GHOST: "cold",
-            LifecycleStage.DEAD: "dead",
-        }
-        return mapping.get(stage, "warm")
-
-    @staticmethod
-    def map_to_layer(stage: LifecycleStage) -> str:
-        """Map lifecycle stage to 4-layer pyramid."""
-        mapping = {
-            LifecycleStage.PERCEPTION: "working",
-            LifecycleStage.WORKING: "working",
-            LifecycleStage.SHORT_TERM: "episodic",
-            LifecycleStage.LONG_TERM: "episodic",
-            LifecycleStage.CONSOLIDATED: "semantic",
-            LifecycleStage.ARCHIVED: "semantic",
-            LifecycleStage.DORMANT: "core_identity",
-            LifecycleStage.GHOST: "core_identity",
-            LifecycleStage.DEAD: "dead",
-        }
-        return mapping.get(stage, "episodic")
+            return self.llm_fn(text)
+        except Exception:
+            return text[:120] + "..." if len(text) > 120 else text
 
     # ── Stats ──────────────────────────────────────────────
 
-    def get_stage_distribution(self) -> dict[str, int]:
-        counts: dict[str, int] = defaultdict(int)
-        for state in self._state_cache.values():
-            counts[state.current_stage.value] += 1
-        return dict(counts)
-
-    def get_lifecycle_report(self) -> dict:
-        return {
-            "stage_distribution": self.get_stage_distribution(),
-            "total_transitions": len(self._transitions),
-            "cached_anchors": len(self._state_cache),
-            "recent_transitions": [
-                {"anchor_id": t.anchor_id[:12],
-                 "from": t.from_stage.value,
-                 "to": t.to_stage.value,
-                 "reason": t.reason}
-                for t in self._transitions[-20:]
-            ],
-        }
-
-    def get_health_score(self) -> float:
-        """0..1 overall lifecycle health."""
-        dist = self.get_stage_distribution()
-        total = sum(dist.values()) or 1
-        # Healthy: most in long_term + consolidated, less in archived/ghost
-        healthy = dist.get('long_term', 0) + dist.get('consolidated', 0) + dist.get('short_term', 0)
-        return min(1.0, healthy / total)
-
-    def record_access(self, anchor_id: str):
-        """Record that an anchor was accessed."""
-        if anchor_id in self._state_cache:
-            self._state_cache[anchor_id].access_count_in_stage += 1
+    def get_layer_counts(self) -> dict[str, int]:
+        """Count anchors in each layer."""
+        counts = {"L0_input": 0, "L1_working": 0, "L2_long_term": 0, "L3_archive": 0, "unlabeled": 0}
+        for anchor in self.graph.anchors.values():
+            layer = getattr(anchor, '_layer', None)
+            if layer is None:
+                counts["unlabeled"] += 1
+            elif layer == MemoryLayer.L1_WORKING:
+                counts["L1_working"] += 1
+            elif layer == MemoryLayer.L2_LONG_TERM:
+                counts["L2_long_term"] += 1
+            elif layer == MemoryLayer.L3_ARCHIVE:
+                counts["L3_archive"] += 1
+            else:
+                counts["L0_input"] += 1
+        return counts

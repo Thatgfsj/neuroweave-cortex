@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.2.14"
+__version__ = "1.3.0"
 
 import sys
 from typing import Any
@@ -534,6 +534,14 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "compute_luminosity":      ("star_graph.observatory", "compute_luminosity"),
     "GravityWell":             ("star_graph.gravity_well", "GravityWell"),
     "GravityWellManager":      ("star_graph.gravity_well", "GravityWellManager"),
+
+    # v1.3: activation-graph & memory lifecycle
+    "ActivationGraph":         ("star_graph.activation_graph", "ActivationGraph"),
+    "ActivatedNode":           ("star_graph.activation_graph", "ActivatedNode"),
+    "get_activation_graph":    ("star_graph.activation_graph", "get_activation_graph"),
+    "compute_edge_strength":   ("star_graph.activation_graph", "compute_edge_strength"),
+    "MemoryLifecycleEngine":   ("star_graph.memory_lifecycle", "MemoryLifecycleEngine"),
+    "MemoryLayer":             ("star_graph.memory_lifecycle", "MemoryLayer"),
 }
 
 

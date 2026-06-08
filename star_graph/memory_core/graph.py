@@ -46,6 +46,8 @@ class Edge:
     failure_count: int = 0       # times this edge was part of a failed reasoning chain
     last_success_at: float = 0.0
     last_failure_at: float = 0.0
+    # v1.3: activation-graph decay tracking
+    decay_rate: float = 0.001    # per-day natural decay coefficient for this edge
 
     def strengthen(self, delta: float = 0.05) -> None:
         self.weight = min(1.0, self.weight + delta)
