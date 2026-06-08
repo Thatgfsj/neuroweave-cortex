@@ -194,16 +194,16 @@ def evaluate_hybridfusion(graph, qa_pairs, embedder):
                     seen.add(an.id)
                     texts.append(an.text[:200])
 
-        for aid_bm, _ in bm25.search(question, top_k=20):
+        for aid_bm, _ in bm25.search(question, top_k=40):
             if aid_bm not in seen:
                 an = graph.anchors.get(aid_bm)
                 if an:
                     seen.add(aid_bm)
                     texts.append(an.text[:200])
-                if len(texts) >= 40:
+                if len(texts) >= 60:  # larger context for better recall
                     break
 
-        combined = ' '.join(texts[:40])
+        combined = ' '.join(texts[:60])
         results.append({
             'hit': has_answer(answer, combined),
             'f1': f1_score(combined[:2000], answer),

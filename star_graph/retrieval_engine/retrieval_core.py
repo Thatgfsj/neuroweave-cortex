@@ -224,7 +224,7 @@ class RetrievalCore:
         if bm25_items:
             ranked_lists.append([(item.anchor.id, item.relevance_score)
                                  for item in bm25_items if item.anchor])
-            path_weights.append(1.3)
+            path_weights.append(1.5)  # increased: BM25 is strongest signal for exact token matching
             for item in bm25_items:
                 if item.anchor and item.anchor.id not in id_meta:
                     id_meta[item.anchor.id] = (
@@ -259,7 +259,7 @@ class RetrievalCore:
         if spreading_items:
             ranked_lists.append([(item.anchor.id, item.relevance_score)
                                  for item in spreading_items if item.anchor])
-            path_weights.append(0.8)
+            path_weights.append(0.6)  # reduced: spreading adds breadth but low precision for exact matching
             for item in spreading_items:
                 if item.anchor and item.anchor.id not in id_meta:
                     id_meta[item.anchor.id] = (
@@ -287,7 +287,7 @@ class RetrievalCore:
                 pass
         if sem_ids:
             ranked_lists.append(sem_ids)
-            path_weights.append(1.3)  # same weight as BM25 for balanced RRF
+            path_weights.append(1.0)  # semantic breadth, lower than BM25/exact to avoid diluting keyword precision
             for aid, sim in sem_ids:
                 if aid not in id_meta:
                     anchor = self._rt.graph.anchors.get(aid)
@@ -622,7 +622,7 @@ class RetrievalCore:
 
         # Fetch 2x candidates for reranking headroom
         # Search BM25 with generous pool — more candidates = better RRF fusion
-        search_k = max(max_items * 10, 120)  # at least 120 candidates
+        search_k = max(max_items * 15, 200)  # at least 200 candidates for better recall
         hits = bm25.search(query, top_k=search_k)
         if not hits:
             return []
@@ -700,7 +700,7 @@ class RetrievalCore:
             ))
 
         items.sort(key=lambda i: -i.relevance_score)
-        return_items = items[:max_items * 3]  # generous pool for RRF fusion
+        return_items = items[:max_items * 5]  # generous pool for RRF fusion
         return return_items
 
     def _system2_recall(self, query: str, context: AgentContext,
