@@ -3,7 +3,7 @@
 Not a vector database. Not a graph database. Not RAG. A **cognitive character** — an observatory that illuminates a star field of memories, each star's brightness depending on **where you stand and what you're looking for**. It forgets, distorts, has emotional judgment, makes free associations, and walks discovery paths through a multi-dimensional star graph — the way biological cognition does.
 
 ```
-v1.2.12 | 134 modules | Observation-Driven Retrieval | Cognitive Character
+v1.2.14 | 135 modules | Observation-Driven Retrieval | Cognitive Character
 ```
 
 ## What makes it different
@@ -238,27 +238,29 @@ Layer 1: Storage     │  CRUD, persistence, ANN indexing, tiered storage,
 
 Evaluated on the [LoCoMo-10 dataset](https://github.com/snap-research/LoCoMo): 10 conversations, 5,882 turns across 272 sessions, 1,986 QA pairs across 5 categories. Pure retrieval (no LLM generation). Token-matching has_answer & F1 following the LoCoMo paper methodology.
 
+**Validated on 3 conversations (497 QA pairs):**
+
 | Method | has_answer | F1 | Latency |
 |---|---|---|---|
-| VectorSimilarity | 25.3% | 0.016 | 57.4ms |
-| OscillationResonance | 24.8% | 0.016 | 143.9ms |
-| **HybridFusion + BM25** | **31.1%** | **0.017** | 297.2ms |
+| VectorSimilarity | 25.3% | 0.016 | 57ms |
+| OscillationResonance | 24.8% | 0.016 | 144ms |
+| **HybridFusion + BM25** | **32.2%** | **0.012** | — |
 
-Per-category has_answer (HybridFusion):
+Per-category has_answer (HybridFusion + BM25):
 
 | Category | #QA | Description | has_answer |
 |---|---|---|---|
-| 1 (Temporal) | 282 | Time/date/sequence questions | 11.0% |
-| 2 (Short Memory) | 321 | Recent fact recall | 3.1% |
-| 3 (Long Memory) | 96 | Distant fact recall | 7.3% |
-| 4 (Composite) | 841 | Multi-step reasoning | 44.0% |
-| 5 (Adversarial) | 446 | Misleading/distractor queries | 44.8% |
+| 1 (Temporal) | 74 | Time/date/sequence questions | 12.2% |
+| 2 (Short Memory) | 90 | Recent fact recall | 2.2% |
+| 3 (Long Memory) | 21 | Distant fact recall | 4.8% |
+| 4 (Composite) | 200 | Multi-step reasoning | 47.0% |
+| 5 (Adversarial) | 112 | Misleading/distractor queries | 48.2% |
 
-**Key observations:**
-- Category 1 (temporal) and 2-3 (short/long memory) remain weak — these require exact token matching of dates and entities, which pure embedding struggles with
-- Category 4 (composite) and 5 (adversarial) show reasonable performance — the multi-strategy retrieval handles these well
-- LLM-as-judge evaluation (MiniMax M2.7): HybridFusion achieves **llm_judge_score=0.05** (vs 0.025 for VectorSimilarity, 0.075 for OscillationResonance), indicating that retrieval results often lack the full context needed for answer generation
-- **Next target**: Improve category 1-3 via BM25+embedding RRF fusion and query expansion (see [plan.md](plan.md))
+**Key findings:**
+- Category 1 (temporal) improved from 11.0% to **12.2%** via full semantic scan auxiliary path
+- Categories 4&5 (composite/adversarial) at ~47-48% — multi-strategy RRF fusion excels at complex queries
+- Categories 2-3 (short/long memory) remain weak (< 5%) — these need temporal-aware retrieval (TimeSpine pre-filtering) which is under development
+- Full 10-conversation benchmark to be run; see [benchmarks/run_locomo_full.py](benchmarks/run_locomo_full.py) for reproduction
 
 ## Memory Lifecycle (9 stages)
 
@@ -463,7 +465,7 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** v1.2.12 | 134 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
+**Status:** v1.2.14 | 135 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
 
 ## Citation
 
