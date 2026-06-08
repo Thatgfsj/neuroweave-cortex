@@ -1,0 +1,32 @@
+{
+  "config": {
+    "conversations": 3,
+    "seeds": 1,
+    "total_qa": 497
+  },
+  "full": {
+    "has_answer": "37.8±0.0",
+    "has_answer_mean": 37.8,
+    "has_answer_std": 0.0
+  },
+  "no_sleep": {
+    "has_answer": "35.2±0.7",
+    "has_answer_mean": 35.2,
+    "has_answer_std": 0.7
+  },
+  "no_rrf": {
+    "has_answer": "25.1±0.0",
+    "has_answer_mean": 25.1,
+    "has_answer_std": 0.0
+  },
+  "no_spreading": {
+    "has_answer": "36.0±0.5",
+    "has_answer_mean": 36.0,
+    "has_answer_std": 0.5
+  },
+  "no_cache": {
+    "has_answer": "37.0±0.3",
+    "has_answer_mean": 37.0,
+    "has_answer_std": 0.3
+  }
+}
