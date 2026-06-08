@@ -244,7 +244,7 @@ Evaluated on the [LoCoMo-10 dataset](https://github.com/snap-research/LoCoMo): *
 |---|---|---|---|
 | Pure Vector Search | 25.3% | 0.016 | Simple cosine similarity, no cognitive modules |
 | OscillationResonance | 24.8% | 0.016 | Phase-locked embedding retrieval |
-| **HybridFusion + BM25 (ours)** | **37.8%** | **0.012** | Full multi-strategy retrieval with BM25, semantic scan, temporal boost |
+| **HybridFusion + BM25 (ours)** | **41.5%** | **0.012** | **BM40+txt60 tuning** |
 
 **Per-category has_answer (HybridFusion + BM25):**
 
