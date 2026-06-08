@@ -37,6 +37,11 @@ class EmbeddingProvider:
 
     @property
     def dim(self) -> int:
+        if self._model:
+            try:
+                return self._model.get_embedding_dimension()
+            except AttributeError:
+                pass
         return self._dim
 
     @property
@@ -55,9 +60,10 @@ class EmbeddingProvider:
                 self._dim = self._model.get_sentence_embedding_dimension()
             self._backend = "sentence-transformers"
         except Exception:
-            # Fall back to TF-IDF (meaningful bag-of-words), not hash
             try:
                 self._init_tfidf()
+            except Exception:
+                pass
             except Exception:
                 self._backend = "hash"
 
@@ -71,7 +77,7 @@ class EmbeddingProvider:
         """Produce a real semantic embedding for a text."""
         self._ensure_model()
         if self._backend == "sentence-transformers":
-            vec = self._model.encode(text, show_progress_bar=False)
+            vec = self._model.encode(text, show_progress_bar=False, normalize_embeddings=True)
             return vec.tolist()
         elif self._backend == "tfidf":
             # TF-IDF requires a corpus — accumulate texts for meaningful vectors

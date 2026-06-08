@@ -134,7 +134,7 @@ def main():
     args = parser.parse_args()
 
     dataset = load_locomo(args.locomo_path)
-    num_conv = 3 if args.quick else len(dataset)
+    num_conv = 1 if args.quick else len(dataset)
     print(f"Ablation Study — {num_conv} conversations, {len(SEEDS)} seeds per config\n")
 
     results = {}
