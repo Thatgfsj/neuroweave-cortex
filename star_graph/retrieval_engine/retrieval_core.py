@@ -196,6 +196,36 @@ class RetrievalCore:
             query_emb=query_emb, query=query, max_items=max_items)
         spreading_ms = (time.time() - t0) * 1000
 
+        # Path C2: Activation-graph walk (v1.3) — uses historical edge activation
+        # instead of LLM-determined relevance. Brightness = f(access, recency, edge_strength).
+        t0 = time.time()
+        activation_items: list[MemoryItem] = []
+        try:
+            from star_graph.activation_graph import get_activation_graph
+            ag = get_activation_graph(self._rt.graph)
+            emb = query_emb or (self._rt._get_embedder().encode(query) if query else None)
+            if emb is not None:
+                act_results = ag.find_seeds(emb, top_k=max_items, min_similarity=0.15)
+                if act_results:
+                    act_spread = ag.spread(act_results, max_depth=2, max_nodes=max_items * 2)
+                    seen_aids = set()
+                    for node in act_spread:
+                        if node.node_id in seen_aids:
+                            continue
+                        anchor = self._rt.graph.anchors.get(node.node_id)
+                        if anchor and anchor.is_retrievable:
+                            seen_aids.add(node.node_id)
+                            activation_items.append(MemoryItem(
+                                anchor=anchor,
+                                relevance_score=node.activation,
+                                memory_type=MemoryType.SEMANTIC,
+                                compression_level=1,
+                                compressed_text=anchor.text[:200],
+                            ))
+        except Exception:
+            pass
+        activation_ms = (time.time() - t0) * 1000
+
         # ── RRF Fusion: multi-path reciprocal rank fusion ──
         # Collect anchored, independently-ranked lists from each retrieval
         # path. Reciprocal Rank Fusion rewards items that appear highly in
@@ -266,6 +296,18 @@ class RetrievalCore:
                         item.anchor,
                         getattr(item, 'compressed_text', '') or item.anchor.text[:200],
                         item.memory_type, item.compression_level, "spreading_activation")
+
+        # Path C2: Activation-graph walk (v1.3) — historical edge activation
+        if activation_items:
+            ranked_lists.append([(item.anchor.id, item.relevance_score)
+                                 for item in activation_items if item.anchor])
+            path_weights.append(0.7)  # activation history, moderate weight
+            for item in activation_items:
+                if item.anchor and item.anchor.id not in id_meta:
+                    id_meta[item.anchor.id] = (
+                        item.anchor,
+                        getattr(item, 'compressed_text', '') or item.anchor.text[:200],
+                        item.memory_type, item.compression_level, "activation_graph")
 
 
         # ── Full semantic scan (auxiliary path) ──

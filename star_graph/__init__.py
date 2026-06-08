@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 import sys
 from typing import Any
@@ -433,11 +433,6 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ReasoningTrace":          ("star_graph.autonomous_reasoning", "ReasoningTrace"),
     "CognitiveUpdate":         ("star_graph.autonomous_reasoning", "CognitiveUpdate"),
 
-    # ── Phase 6: Cognitive Cortex — Memory Lifecycle (6.10) ──
-    "MemoryLifecycleManager":  ("star_graph.memory_lifecycle", "MemoryLifecycleManager"),
-    "LifecycleStage":          ("star_graph.memory_lifecycle", "LifecycleStage"),
-    "LifecycleTransition":     ("star_graph.memory_lifecycle", "LifecycleTransition"),
-    "LifecycleState":          ("star_graph.memory_lifecycle", "LifecycleState"),
 
     # ── Phase 7: Memory Evolution — Importance Engine (7.1) ──
     "ImportanceEngine":        ("star_graph.importance_engine", "ImportanceEngine"),
@@ -527,14 +522,6 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ClosureConfig":           ("star_graph.cognitive_closure", "ClosureConfig"),
     "CognitiveClosure":        ("star_graph.cognitive_closure", "CognitiveClosure"),
 
-    # v1.2.11: observatory & gravity well
-    "Lantern":                 ("star_graph.observatory", "Lantern"),
-    "Observatory":             ("star_graph.observatory", "Observatory"),
-    "IlluminationResult":      ("star_graph.observatory", "IlluminationResult"),
-    "compute_luminosity":      ("star_graph.observatory", "compute_luminosity"),
-    "GravityWell":             ("star_graph.gravity_well", "GravityWell"),
-    "GravityWellManager":      ("star_graph.gravity_well", "GravityWellManager"),
-
     # v1.3: activation-graph & memory lifecycle
     "ActivationGraph":         ("star_graph.activation_graph", "ActivationGraph"),
     "ActivatedNode":           ("star_graph.activation_graph", "ActivatedNode"),
@@ -542,6 +529,13 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "compute_edge_strength":   ("star_graph.activation_graph", "compute_edge_strength"),
     "MemoryLifecycleEngine":   ("star_graph.memory_lifecycle", "MemoryLifecycleEngine"),
     "MemoryLayer":             ("star_graph.memory_lifecycle", "MemoryLayer"),
+    "MemoryMigration":         ("star_graph.memory_lifecycle", "MemoryMigration"),
+
+    # v1.2.11: observatory & gravity well (cleaned for v1.3)
+    "Observatory":             ("star_graph.observatory", "Observatory"),
+    "ObservationResult":       ("star_graph.observatory", "ObservationResult"),
+    "GravityWell":             ("star_graph.gravity_well", "GravityWell"),
+    "GravityWellManager":      ("star_graph.gravity_well", "GravityWellManager"),
 }
 
 

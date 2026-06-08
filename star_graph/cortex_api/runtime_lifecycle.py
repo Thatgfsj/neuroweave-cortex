@@ -232,6 +232,30 @@ class RuntimeLifecycle:
         except Exception:
             pass
 
+        # 6o. Memory Lifecycle Engine — L1→L2 promotion, L2→L3 archival
+        lifecycle_result = {"promoted_l1": 0, "archived_l2": 0}
+        try:
+            from star_graph.memory_lifecycle import MemoryLifecycleEngine
+            mle = MemoryLifecycleEngine(self.graph)
+            promoted = mle.promote_l1_to_l2()
+            archived = mle.archive_l2_to_l3()
+            lifecycle_result = {
+                "promoted_l1": len(promoted),
+                "archived_l2": len(archived),
+                "total_migrations": len(mle.migrations),
+            }
+        except Exception:
+            pass
+
+        # 6p. Activation graph edge decay — weaken unused edges
+        act_result = {"edges_decayed": 0}
+        try:
+            from star_graph.activation_graph import get_activation_graph
+            ag = get_activation_graph(self.graph)
+            act_result["edges_decayed"] = ag.decay_all()
+        except Exception:
+            pass
+
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
         if purged_ids and self._tiered is not None:
@@ -272,6 +296,8 @@ class RuntimeLifecycle:
             "cluster_memory": cm_result,
             "versioned_memory": vm_result,
             "episodic_memory": em_result,
+            "activation_graph_decay": act_result,
+            "memory_lifecycle": lifecycle_result,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
