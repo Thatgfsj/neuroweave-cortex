@@ -1,15 +1,14 @@
 """Memory Lifecycle Engine — autonomous memory layer migration.
 
-Implements cognitive memory migration between layers:
+Memories are NEVER deleted. They transition between activation layers:
   L0 (Input)    → ephemeral, per-session, not persisted
-  L1 (Working)  → recent active memories, LLM-maintained, fast read/write
-  L2 (Long-term) → stable consolidated memories, strength-based retrieval
-  L3 (Archive)  → compressed summaries, not in real-time retrieval
+  L1 (Working)  → recent active memories, fast read/write
+  L2 (Long-term) → stable consolidated memories
+  L3 (Dormant)  → low-activation memories, retrievable via propagation
 
-Migration rules:
-  L1→L2: access_count > threshold OR age > 30 days OR user re-mentions
-  L2→L3: 90 days no access OR importance < threshold → compress → archive
-  L3→L2: query embedding matches archived summary → reactivate → restore
+Core principle: No memory is deleted. Only accessibility changes.
+  Dormant memories persist forever. They can be reactivated when
+  activation propagation reaches them via connected nodes.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ class MemoryLayer(Enum):
     L0_INPUT = "input"
     L1_WORKING = "working"
     L2_LONG_TERM = "long_term"
-    L3_ARCHIVE = "archive"
+    L3_DORMANT = "dormant"
 
 
 @dataclass
@@ -41,9 +40,9 @@ class MemoryMigration:
 # Layer transition thresholds
 L1_TO_L2_ACCESS_THRESHOLD = 3      # promoted after 3 accesses
 L1_TO_L2_AGE_DAYS = 30              # promoted after 30 days
-L2_TO_L3_AGE_DAYS = 90              # archived after 90 days
-L2_TO_L3_IMPORTANCE_THRESHOLD = 0.3  # archived if importance below this
-L2_REACTIVATE_SIMILARITY = 0.55     # reactivate from archive if cosine > this
+L2_TO_L3_AGE_DAYS = 90              # dim after 90 days
+L2_TO_L3_IMPORTANCE_THRESHOLD = 0.3  # dim if importance below this
+L2_REACTIVATE_SIMILARITY = 0.55     # reactivate from dormant if cosine > this
 
 
 class MemoryLifecycleEngine:
@@ -59,9 +58,9 @@ class MemoryLifecycleEngine:
         self.llm_fn = llm_fn  # optional LLM for compression/expansion
         self.migrations: list[MemoryMigration] = []
         # Archive store: anchor_id → compressed_text
-        self._archive: dict[str, str] = getattr(graph, '_archive', {})
-        if not hasattr(graph, '_archive'):
-            graph._archive = self._archive
+        self._dormant_store: dict[str, str] = getattr(graph, '_dormant_store', {})
+        if not hasattr(graph, '_dormant_store'):
+            graph._dormant_store = self._dormant_store
 
     # ── L1 → L2 promotion ──────────────────────────────────
 
@@ -97,13 +96,8 @@ class MemoryLifecycleEngine:
 
     # ── L2 → L3 archival ───────────────────────────────────
 
-    def archive_l2_to_l3(self, now: float | None = None) -> list[MemoryMigration]:
-        """Move stale/lowl-importance L2 memories to L3 archive.
-        
-        Eligibility:
-          - 90 days since last_activated_at
-          - OR vector.importance < L2_TO_L3_IMPORTANCE_THRESHOLD
-        """
+    def dim_l2_to_l3(self, now: float | None = None) -> list[MemoryMigration]:
+        """Move stale/low-importance L2 memories to L3 dormant."""""
         if now is None:
             now = time.time()
         archived: list[MemoryMigration] = []
@@ -124,13 +118,13 @@ class MemoryLifecycleEngine:
             else:
                 compressed = anchor.text[:120] + "..." if len(anchor.text) > 120 else anchor.text
             
-            self._archive[aid] = compressed
-            anchor._layer = MemoryLayer.L3_ARCHIVE
+            self._dormant_store[aid] = compressed
+            anchor._layer = MemoryLayer.L3_DORMANT
             
             reason = f"age={age_days:.0f}d" if age_days >= L2_TO_L3_AGE_DAYS else f"importance={importance:.2f}"
             self.migrations.append(MemoryMigration(
                 anchor_id=aid, from_layer=MemoryLayer.L2_LONG_TERM,
-                to_layer=MemoryLayer.L3_ARCHIVE, reason=reason,
+                to_layer=MemoryLayer.L3_DORMANT, reason=reason,
                 timestamp=now, compressed_text=compressed
             ))
             archived.append(self.migrations[-1])
@@ -139,19 +133,15 @@ class MemoryLifecycleEngine:
 
     # ── L3 → L2 reactivation ───────────────────────────────
 
-    def reactivate_l3_to_l2(self, query_embedding: list[float],
+    def reactivate_dormant_to_l2(self, query_embedding: list[float],
                             top_k: int = 3) -> list[MemoryMigration]:
-        """Check if any archived memory matches current query.
-        
-        If similarity between query and archived summary > threshold,
-        restore the memory to L2.
-        """
+        """Check if any dormant memory matches current query."""""
         from star_graph.math_utils import cosine_sim as _cos
         
         reactivated: list[MemoryMigration] = []
         scored: list[tuple[float, str]] = []
         
-        for aid, compressed in self._archive.items():
+        for aid, compressed in self._dormant_store.items():
             anchor = self.graph.anchors.get(aid)
             if anchor is None or not anchor.embedding:
                 continue
@@ -166,7 +156,7 @@ class MemoryLifecycleEngine:
                 anchor._layer = MemoryLayer.L2_LONG_TERM
                 anchor.last_activated_at = time.time()
                 self.migrations.append(MemoryMigration(
-                    anchor_id=aid, from_layer=MemoryLayer.L3_ARCHIVE,
+                    anchor_id=aid, from_layer=MemoryLayer.L3_DORMANT,
                     to_layer=MemoryLayer.L2_LONG_TERM,
                     reason=f"reactivated(sim={sim:.2f})",
                     timestamp=time.time()
@@ -193,7 +183,7 @@ class MemoryLifecycleEngine:
 
     def get_layer_counts(self) -> dict[str, int]:
         """Count anchors in each layer."""
-        counts = {"L0_input": 0, "L1_working": 0, "L2_long_term": 0, "L3_archive": 0, "unlabeled": 0}
+        counts = {"L0_input": 0, "L1_working": 0, "L2_long_term": 0, "L3_dormant": 0, "unlabeled": 0}
         for anchor in self.graph.anchors.values():
             layer = getattr(anchor, '_layer', None)
             if layer is None:
@@ -202,8 +192,8 @@ class MemoryLifecycleEngine:
                 counts["L1_working"] += 1
             elif layer == MemoryLayer.L2_LONG_TERM:
                 counts["L2_long_term"] += 1
-            elif layer == MemoryLayer.L3_ARCHIVE:
-                counts["L3_archive"] += 1
+            elif layer == MemoryLayer.L3_DORMANT:
+                counts["L3_dormant"] += 1
             else:
                 counts["L0_input"] += 1
         return counts

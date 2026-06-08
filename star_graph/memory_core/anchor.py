@@ -125,52 +125,57 @@ class ThermalState(enum.Enum):
 
 
 class MemoryState(enum.Enum):
-    """Six-state memory lifecycle — not just 'stored' or 'deleted'.
+    """Memory lifecycle states — memories are NEVER deleted, only deactivated.
 
     Each state governs retrieval behavior, update plasticity, and decay rate.
+    
+    Core philosophy: No memory is deleted. Only accessibility changes.
+      Active → Inactive → Dormant(Deep Dormant)
+      Any dormant memory can be reactivated via activation propagation.
 
-    Thermal overlay:
-      HOT  ← ACTIVE, REHEARSING
-      WARM ← CONSOLIDATING, DORMANT
-      COLD ← DORMANT (low retention), GHOST (with partial recall)
-      DEAD ← GHOST (fully decayed, metadata only)
+    Activation level ∊ [0,1]:
+      1.0 = currently active (just recalled)
+      0.7 = frequent access
+      0.3 = infrequent but known
+      0.1 = dormant (not accessed in a long time)
+      0.01 = deep dormant (years old, only retrievable via propagation)
     """
     ACTIVE = "active"              # Just created or recently retrieved — full plasticity
     REHEARSING = "rehearsing"      # Being replayed during sleep SWR — temporarily elevated
     CONSOLIDATING = "consolidating"  # Undergoing hippocampal→cortical transfer
-    DORMANT = "dormant"            # Stable, low-activity, cortical retrieval only
-    GHOST = "ghost"                # Pruned but with residual trace (savings effect)
-    REACTIVATED = "reactivated"    # Ghost revived — lower stability, elevated surprise
+    INACTIVE = "inactive"          # Stable, low-activity, cortical retrieval only
+    DORMANT = "dormant"            # Previously "ghost" — dormant but with residual trace
+    REACTIVATED = "reactivated"    # Dormant revived — lower stability, elevated surprise
 
 
 # Explicit MemoryState → ThermalState mapping.
-# Updated during transition() to avoid dual-state-machine drift.
 _STATE_THERMAL_MAP = {
     MemoryState.ACTIVE: ThermalState.HOT,
     MemoryState.REHEARSING: ThermalState.HOT,
     MemoryState.CONSOLIDATING: ThermalState.WARM,
-    MemoryState.DORMANT: ThermalState.WARM,
-    MemoryState.GHOST: ThermalState.COLD,
+    MemoryState.INACTIVE: ThermalState.WARM,
+    MemoryState.DORMANT: ThermalState.COLD,
     MemoryState.REACTIVATED: ThermalState.HOT,
 }
 # DORMANT with very low retention maps to FROZEN (done in thermal_state property logic)
 
 # State transition rules: (current, event) → next
-# Events: 'create', 'replay', 'consolidate', 'retrieve', 'prune', 'revive', 'stabilize'
+# Events: 'create', 'replay', 'consolidate', 'retrieve', 'dim', 'revive', 'stabilize'
+# 'dim' = reduce activation (sleep pruning), NOT deletion
+# 'revive' = reactivate from dormant via propagation
 _TRANSITIONS = {
     (MemoryState.ACTIVE, 'replay'): MemoryState.REHEARSING,
     (MemoryState.ACTIVE, 'consolidate'): MemoryState.CONSOLIDATING,
-    (MemoryState.ACTIVE, 'prune'): MemoryState.GHOST,
+    (MemoryState.ACTIVE, 'dim'): MemoryState.INACTIVE,
     (MemoryState.REHEARSING, 'consolidate'): MemoryState.CONSOLIDATING,
     (MemoryState.REHEARSING, 'retrieve'): MemoryState.ACTIVE,
-    (MemoryState.CONSOLIDATING, 'stabilize'): MemoryState.DORMANT,
+    (MemoryState.CONSOLIDATING, 'stabilize'): MemoryState.INACTIVE,
     (MemoryState.CONSOLIDATING, 'retrieve'): MemoryState.ACTIVE,
-    (MemoryState.DORMANT, 'retrieve'): MemoryState.ACTIVE,
-    (MemoryState.DORMANT, 'prune'): MemoryState.GHOST,
-    (MemoryState.DORMANT, 'replay'): MemoryState.REHEARSING,
-    (MemoryState.GHOST, 'revive'): MemoryState.REACTIVATED,
+    (MemoryState.INACTIVE, 'retrieve'): MemoryState.ACTIVE,
+    (MemoryState.INACTIVE, 'dim'): MemoryState.DORMANT,
+    (MemoryState.DORMANT, 'revive'): MemoryState.REACTIVATED,
     (MemoryState.REACTIVATED, 'consolidate'): MemoryState.CONSOLIDATING,
-    (MemoryState.REACTIVATED, 'stabilize'): MemoryState.DORMANT,
+    (MemoryState.REACTIVATED, 'stabilize'): MemoryState.INACTIVE,
 }
 
 
@@ -306,7 +311,17 @@ class Anchor:
     tags: list[str] = field(default_factory=list)
     schema_ref: Optional[str] = None
     replay_count: int = 0
-    # v0.4: state machine
+    """Activation level: how 'bright' this memory is.
+    
+    ∞ 1.0 = currently active (just recalled)
+    ∞ 0.7 = frequent access
+    ∞ 0.3 = infrequent but known
+    ∞ 0.1 = dormant (not accessed in a long time)
+    ∞ 0.01 = deep dormant (years old, only retrievable via activation propagation)
+    
+    Memories are NEVER deleted. They only transition between activation levels.
+    """
+    activation_level: float = 1.0
     state: MemoryState = MemoryState.ACTIVE
     state_history: list[tuple[MemoryState, float]] = field(default_factory=list)
     _thermal_state: ThermalState | None = None  # set during transition(), avoids dual-state drift
@@ -445,16 +460,17 @@ class Anchor:
     def is_retrievable(self) -> bool:
         """Can this anchor be returned in retrieval results?
 
-        Ghosts, FROZEN/DEAD, and deprecated (invalid_at) memories are not
-        retrievable unless revived.
+        In NWC v1.3.1+, ALL memories are retrievable regardless of state.
+        Dormant memories simply have very low activation_level and will
+        only appear if activation propagation reaches them.
+        
+        Only memories marked as invalid_at (manually deprecated) are excluded.
         """
-        if self.state == MemoryState.GHOST:
-            return False
-        if self.thermal_state in (ThermalState.FROZEN, ThermalState.DEAD):
-            return False
         if self.invalid_at is not None:
             return False
-        return True
+        # Memories with activation_level >= 0.001 are retrievable
+        # (0.001 = deep dormant, only reachable via strong propagation)
+        return self.activation_level >= 0.001
 
     @property
     def memory_tier(self) -> str:

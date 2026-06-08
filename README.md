@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.1-blue?style=flat-square" alt="version"/>
+  <img src="https://img.shields.io/badge/version-1.3.2-blue?style=flat-square" alt="version"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="license"/>
   <img src="https://img.shields.io/badge/python-3.11%2B-orange?style=flat-square" alt="python"/>
   <img src="https://img.shields.io/badge/status-beta-yellow?style=flat-square" alt="status"/>
@@ -16,6 +16,7 @@
   <b>Not a vector database. Not a graph database. Not RAG.</b><br>
   <b>Not even an "LLM-powered memory system".</b><br>
   A <b>self-organizing cognitive memory</b> — memory is structured by <b>use, not by prompt</b>.<br>
+  <b>No memory is ever deleted. Only accessibility changes.</b><br>
   LLM reads memory. LLM does <b>not</b> decide what memory says.
 </p>
 
@@ -47,7 +48,8 @@ NeuroWeave Cortex **learns from use**:
 | Semantic retrieval | ✅ | ❌ | ✅ | ✅ |
 | Graph traversal | ❌ | ✅ | ❌ | ✅ |
 | **Activation-based retrieval** | ❌ | ❌ | ❌ | ✅ |
-| **Edge decay (true forgetting)** | ❌ | ❌ | ❌ | ✅ |
+| **Edge decay (no deletion)** | ❌ | ❌ | ❌ | ✅ |
+| **Memory never deleted** | ❌ | ❌ | ❌ | ✅ |
 | **Memory lifecycle (L1→L2→L3)** | ❌ | ❌ | ❌ | ✅ |
 | **LLM-free retrieval routing** | ✅ | ✅ | ❌ | ✅ |
 | **LLM for maintenance only** | ❌ | ❌ | ❌ | ✅ |
@@ -64,15 +66,34 @@ Query → LLM generates embedding → LLM decides what's relevant → Return
 ```
 Problem: **LLM is the router.** Every retrieval is a new LLM computation. Nothing stabilizes.
 
-### The Right Way (NWC v1.3):
+### The NWC Way (v1.3.1):
 ```
 Query → Embedding → Find seed nodes → Activation spread → Return
 ```
 The LLM never touches the retrieval path. Retrieval is driven by:
 1. **Historical activation** — how often has each memory been accessed?
 2. **Edge strength** — how strongly are memories connected (reinforced by co-use)?
-3. **Temporal decay** — edges weaken naturally over days of disuse
+3. **Temporal decay** — edges weaken naturally over days of disuse (but NEVER to zero)
 4. **Recency boost** — recently accessed memories activate more readily
+
+### 🗝️ Core Design Principle: No Memory Is Ever Deleted
+
+```
+Traditional memory systems:  Store → Retrieve → Delete (when full)
+NWC memory system:          Create → Activate → Dim → Dormant → Reactivate ♾️
+```
+
+Memories do NOT have a "delete" state. They transition between activation levels:
+- **1.0** — currently active (just recalled)
+- **0.7** — frequent access
+- **0.3** — infrequent but known  
+- **0.1** — dormant (not accessed in a long time)
+- **0.01** — deep dormant (years old)
+
+Even a memory with `activation_level = 0.01` is retrievable — if activation
+propagation from a connected query reaches it. This mimics human memory:
+you may not think about your elementary school classmates for decades,
+but a single photo can bring everything flooding back.
 
 ---
 
@@ -91,8 +112,9 @@ L2: Long-term ─── Stable facts, experiences, relationships (months-years)
     │               ONLY operations: strengthen, supplement, weaken
     │               NEVER: full reconstruction
     ↓ archive on 90d no-access or low importance
-L3: Archive  ─── Compressed summaries, not in real-time retrieval
-    ↑ reactivate on query similarity
+L3: Dormant  ─── Low-activation memories retrievable via propagation (years)
+    │               NEVER deleted. Only activation_level approaches 0.
+    ↑ reactivate on query similarity or activation propagation
 ```
 
 This is **not** a flat table. Memories physically transition between layers

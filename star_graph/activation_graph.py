@@ -122,7 +122,9 @@ class ActivationGraph:
                 activated[nid] = sim
                 queue.append((nid, sim, 0, [nid]))
         
-        # BFS spreading
+        # BFS spreading — can propagate through dormant memories
+        # Dormant memories have low activation but are NOT ignored.
+        # They can be "re-lit" by strong activation from neighbors.
         while queue and len(activated) < max_nodes:
             nid, current_act, depth, path = queue.pop(0)
             
@@ -145,8 +147,9 @@ class ActivationGraph:
                     continue
                     
                 edge_strength = compute_edge_strength(edge, now)
-                if edge_strength < activation_threshold:
-                    continue  # decayed edge → no spread
+                # Even decayed edges can propagate if the parent activation is strong enough
+                if edge_strength < activation_threshold and current_act < 0.5:
+                    continue  # only strong activation can cross weak edges
                 
                 # Activation = parent_act × edge_strength × recency_boost
                 hours_since = (now - edge.last_activated_at) / 3600.0
@@ -154,7 +157,8 @@ class ActivationGraph:
                 
                 child_act = current_act * edge_strength * (0.5 + 0.5 * recency_boost)
                 
-                if child_act < activation_threshold:
+                # Allow VERY weak activation (dormant memories can still be found)
+                if child_act < 0.001:
                     continue
                 
                 seen.add(neighbor_id)
@@ -202,33 +206,30 @@ class ActivationGraph:
                 count += 1
         return count
 
-    # ── Decay all edges ─────────────────────────────────────
+    # ── Decay all edges (reduce weight, NEVER delete) ──────────
     
     def decay_all(self, now: float | None = None) -> int:
-        """Apply time decay to all edges. Returns count of evicted edges."""
+        """Apply time decay to all edges.
+        
+        Edges are NEVER deleted. Their weight is gradually reduced.
+        A weight of 0.001 means the connection is virtually dormant
+        but can still be traversed by strong activation.
+        
+        Returns count of edges that fell below 0.01 threshold.
+        """
         if now is None:
             now = time.time()
-        evicted = 0
-        expired_keys = []
+        low_count = 0
         
         for key, edge in self.graph.edges.items():
             days_since = (now - edge.last_activated_at) / 86400.0
             if days_since > 0:
                 decay = math.exp(-edge.decay_rate * days_since)
-                new_weight = edge.weight * decay
-                if new_weight < 0.01:
-                    expired_keys.append(key)
-                else:
-                    edge.weight = new_weight
+                edge.weight = max(0.001, edge.weight * decay)  # never go to 0
+                if edge.weight < 0.01:
+                    low_count += 1
         
-        for key in expired_keys:
-            a, b = key
-            self.graph.edges.pop(key, None)
-            self.graph._adjacency.get(a, set()).discard(b)
-            self.graph._adjacency.get(b, set()).discard(a)
-            evicted += 1
-        
-        return evicted
+        return low_count
 
 
 def get_activation_graph(graph, embedder=None) -> ActivationGraph:

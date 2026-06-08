@@ -238,7 +238,7 @@ class RuntimeLifecycle:
             from star_graph.memory_lifecycle import MemoryLifecycleEngine
             mle = MemoryLifecycleEngine(self.graph)
             promoted = mle.promote_l1_to_l2()
-            archived = mle.archive_l2_to_l3()
+            archived = mle.dim_l2_to_l3()
             lifecycle_result = {
                 "promoted_l1": len(promoted),
                 "archived_l2": len(archived),
