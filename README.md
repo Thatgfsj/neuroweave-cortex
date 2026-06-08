@@ -6,6 +6,7 @@
   <img src="https://img.shields.io/github/stars/Thatgfsj/neuroweave-cortex?style=flat-square" alt="stars"/>
   <img src="https://img.shields.io/badge/LLM-routing%20free-success?style=flat-square" alt="llm-free"/>
   <img src="https://img.shields.io/badge/retrieval-activation%20graph-8A2BE2?style=flat-square" alt="activation"/>
+  <img src="https://img.shields.io/badge/lifecycle-L1%E2%86%92L2%E2%86%92L3-blueviolet?style=flat-square" alt="lifecycle"/>
 </p>
 
 <h1 align="center">🧠 NeuroWeave Cortex</h1>
