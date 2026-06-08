@@ -478,7 +478,9 @@ pytest tests/ -v
 pytest tests/ --cov=star_graph --cov-report=term
 ```
 
-**Status:** v1.2.14 | 135 modules | Observation-Driven Retrieval | Cognitive Character. See [plan.md](plan.md) for latest roadmap.
+**Status:** v1.2.14 | 135 modules | Observation-Driven Retrieval | Cognitive Character.
+**LoCoMo-10 result:** 41.5% has_answer (BM40+text60 tuning, +3.7pp over baseline).
+See [plan.md](plan.md) for latest roadmap.
 
 ## Citation
 
