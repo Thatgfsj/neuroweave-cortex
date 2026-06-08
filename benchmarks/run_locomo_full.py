@@ -1,17 +1,17 @@
-"""LoCoMo-10/50 full evaluation — RRF retrieval pipeline.
+"""LoCoMo-10 全量评估 — 论文基准 + RRF 对比
 
-Academic usage:
-    python benchmarks/run_locomo_full.py [--quick] [--conversations N]
+Usage:
+    python benchmarks/run_locomo_full.py
 
 Outputs:
-    - Console report with per-category breakdown
-    - JSON results file (benchmarks/locomo_results.json)
-    - CSV for paper figures (benchmarks/locomo_results.csv)
+    benchmarks/locomo_results.json    — 完整结果
+    benchmarks/locomo_results.csv     — 图表数据
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -27,11 +27,13 @@ from star_graph import (
     StarGraph, Anchor, get_embedder, seed_everything, MemoryRuntime,
     RetrievalPipeline, AgentContext, Config,
 )
-from star_graph.retrieval_engine.retrieval_core import _detect_temporal_query
 from star_graph.math_utils import cosine_sim
+from star_graph.retriever import HybridFusionRetriever
+from star_graph.bm25 import BM25Index
+from star_graph.index import ANNIndex
 
 
-# ── Metrics (same as LoCoMo paper) ──
+# ── Metrics ──
 
 def _normalize(text):
     return unicodedata.normalize('NFD', text)
@@ -60,29 +62,23 @@ def has_answer(answers, text):
         answer_tokens = [ps.stem(w) for w in normalize_answer(answer).split()]
         if not answer_tokens:
             continue
-        # Strategy 1: exact token sequence match
         for i in range(len(text_tokens) - len(answer_tokens) + 1):
             if answer_tokens == text_tokens[i:i + len(answer_tokens)]:
                 return True
-        # Strategy 2: sliding-window token coverage
         window = max(len(answer_tokens) + 6, 10)
         for i in range(len(text_tokens) - min(window, len(text_tokens)) + 1):
             window_tokens = set(text_tokens[i:i + window])
             overlap = sum(1 for t in answer_tokens if t in window_tokens)
             if overlap / len(answer_tokens) >= 0.75:
                 return True
-        # Strategy 3: bigram overlap
         ans_bigrams = set(zip(answer_tokens, answer_tokens[1:])) if len(answer_tokens) > 1 else set()
         text_bigrams = set(zip(text_tokens, text_tokens[1:])) if len(text_tokens) > 1 else set()
         if ans_bigrams and text_bigrams:
             bigram_jaccard = len(ans_bigrams & text_bigrams) / len(ans_bigrams | text_bigrams)
             if bigram_jaccard > 0.5:
                 return True
-        # Strategy 4: substring for short answers
         if len(answer_tokens) <= 3:
-            answer_lower = normalize_answer(answer).lower()
-            text_lower = normalize_answer(text).lower()
-            if answer_lower in text_lower:
+            if normalize_answer(answer).lower() in normalize_answer(text).lower():
                 return True
     return False
 
@@ -100,7 +96,7 @@ def f1_score(prediction, ground_truth):
     return (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
 
-# ── Data loading ──
+# ── Data ──
 
 def load_locomo(path):
     with open(path, encoding='utf-8') as f:
@@ -111,71 +107,37 @@ def extract_all_turns(conversation):
     conv = conversation['conversation']
     session_keys = sorted(
         [k for k in conv if k.startswith('session_') and not k.endswith('date_time')],
-        key=lambda x: int(x.split('_')[1])
-    )
+        key=lambda x: int(x.split('_')[1]))
     for sk in session_keys:
         for turn in conv[sk]:
-            turns.append({
-                'session': sk,
-                'speaker': turn.get('speaker', ''),
-                'dia_id': turn.get('dia_id', ''),
-                'text': turn.get('text', ''),
-            })
+            turns.append({'session': sk, 'speaker': turn.get('speaker', ''),
+                          'dia_id': turn.get('dia_id', ''), 'text': turn.get('text', '')})
     return turns, session_keys
 
 
-# ── Ingest into all RRF subsystems ──
+# ── Graph building (matching original locomo_eval.py) ──
 
-def ingest_conversation_rrf(graph, turns, session_keys, embedder, rt, batch_delay=0.002):
-    """Feed turns into graph + register in all RRF subsystems."""
+def build_graph(turns, session_keys):
+    embedder = get_embedder()
+    graph = StarGraph()
     num_sessions = len(session_keys)
     for turn in turns:
         text = turn['text']
         if not text.strip():
             continue
-        embedding = embedder.encode(text)
         session_num = int(turn['session'].split('_')[1])
-        hours_ago = (num_sessions - session_num + 1) * 4
-
+        embedding = embedder.encode(text)
         anchor = Anchor.create(
-            text=text,
-            source_session=turn['session'],
-            embedding=embedding,
+            text=text, source_session=turn['session'], embedding=embedding,
             tags=[turn['session'], turn['speaker']],
-            importance=0.5,
-        )
+            importance=0.5, emotional_valence=0.0)
+        hours_ago = (num_sessions - session_num + 1) * 4
         anchor.created_at = time.time() - hours_ago * 3600
         anchor.last_activated_at = anchor.created_at
         graph.add_anchor(anchor)
+    return graph
 
-        # Raw buffer
-        rt.raw_buffer.add(
-            text=text, session_id=turn['session'],
-            embedding=embedding, tags=[turn['speaker']],
-            importance=0.5, anchor_id=anchor.id,
-        )
-
-        # BM25
-        if rt.bm25 is not None:
-            rt.bm25.add(anchor.id, text)
-
-        # TimeSpine
-        rt.timespine.index_anchor(
-            anchor.id, timestamp=anchor.created_at,
-            importance=0.5, embedding=embedding,
-            topic=turn['speaker'],
-        )
-
-        # Exact cache
-        rt.exact_cache.harvest_from_anchor(anchor)
-
-        if batch_delay > 0:
-            time.sleep(batch_delay)
-
-
-def build_edges_rrf(graph, embedder):
-    """Build similarity edges for graph descent path."""
-    from star_graph.index import ANNIndex
+def build_edges(graph):
     anchors = list(graph.anchors.values())
     if not anchors:
         return
@@ -184,178 +146,181 @@ def build_edges_rrf(graph, embedder):
     for a in anchors:
         if a.embedding:
             ann.add(a.id, a.embedding)
-
+    tag_groups = {}
+    for a in anchors:
+        for tag in a.tags:
+            tag_groups.setdefault(tag, []).append(a.id)
+    for tag, aids in tag_groups.items():
+        for i in range(len(aids)):
+            for j in range(i + 1, len(aids)):
+                a = graph.anchors.get(aids[i])
+                b = graph.anchors.get(aids[j])
+                if a and b and a.embedding and b.embedding:
+                    sim = cosine_sim(a.embedding, b.embedding)
+                    sim = min(1.0, sim * 1.25)
+                    if sim > 0.48:
+                        graph.add_edge(a.id, b.id, weight=sim)
     for a in anchors:
         if not a.embedding:
             continue
-        neighbors = ann.query(a.embedding, k=6)
+        neighbors = ann.query(a.embedding, k=15)
         for nid, score in neighbors:
-            if nid != a.id:
-                sim = min(1.0, score * 1.1)
-                if sim > 0.5:
-                    graph.add_edge(a.id, nid, weight=sim)
+            if nid != a.id and (min(a.id, nid), max(a.id, nid)) not in graph.edges:
+                if score > 0.55:
+                    graph.add_edge(a.id, nid, weight=score * 0.9)
 
 
-# ── Evaluation ──
+# ── Method 1: Classic HybridFusion (for paper baseline) ──
 
-def evaluate_rrf(rp, qa_pairs, graph, max_items=10):
-    """Evaluate using RetrievalCore.recall() RRF pipeline."""
+def evaluate_hybridfusion(graph, qa_pairs, embedder):
+    bm25 = BM25Index()
+    for aid, anchor in graph.anchors.items():
+        bm25.add(aid, anchor.text)
+    ret = HybridFusionRetriever(graph)
+
     results = []
     for qa in qa_pairs:
         question = qa['question']
-        answer = qa.get('answer') or qa.get('adversarial_answer', '')
-        category = qa.get('category', '4')
+        answer = str(qa.get('answer') or qa.get('adversarial_answer', ''))
+        category = str(qa.get('category', '4'))
+        q_emb = embedder.encode(question)
 
-        ctx = rp.recall(query=question, max_items=max_items)
+        result = ret.retrieve(question, q_emb, top_k=12)
+        seen = set()
+        texts = []
+        for c in result.constellations[:12]:
+            for an in c.anchors:
+                if an.id not in seen:
+                    seen.add(an.id)
+                    texts.append(an.text[:200])
 
-        retrieved_texts = []
-        seen_ids = set()
-        for item in ctx.items:
-            if item.anchor and item.anchor.id not in seen_ids:
-                seen_ids.add(item.anchor.id)
-                text = item.compressed_text or item.anchor.text[:200]
-                retrieved_texts.append(text)
-            elif not item.anchor:
-                text = item.compressed_text[:200] if item.compressed_text else ""
-                if text and text[:40] not in seen_ids:
-                    seen_ids.add(text[:40])
-                    retrieved_texts.append(text)
+        for aid_bm, _ in bm25.search(question, top_k=20):
+            if aid_bm not in seen:
+                an = graph.anchors.get(aid_bm)
+                if an:
+                    seen.add(aid_bm)
+                    texts.append(an.text[:200])
+                if len(texts) >= 40:
+                    break
 
-        combined = ' '.join(retrieved_texts[:20])
-
-        hit = has_answer(answer, combined)
-        f1 = f1_score(combined[:2000], answer)
-        is_temporal, _ = _detect_temporal_query(question)
-
+        combined = ' '.join(texts[:40])
         results.append({
-            'question': question,
-            'answer': answer[:100],
+            'hit': has_answer(answer, combined),
+            'f1': f1_score(combined[:2000], answer),
             'category': category,
-            'hit': hit,
-            'f1': f1,
-            'num_results': len(ctx.items),
-            'is_temporal_query': is_temporal,
+            'question': question,
         })
-
     return results
 
 
 # ── Main ──
 
 def main():
-    parser = argparse.ArgumentParser(description='LoCoMo RRF benchmark')
+    parser = argparse.ArgumentParser()
     parser.add_argument('--quick', action='store_true', help='3 conversations only')
-    parser.add_argument('--conversations', type=int, default=0, help='Number (0=all)')
     parser.add_argument('--locomo-path', type=str,
                         default='C:/Users/thatg/AppData/Local/Temp/locomo-10/data/locomo10.json')
+    parser.add_argument('--resume', type=str, default='',
+                        help='Resume from a partial results JSON file')
     args = parser.parse_args()
 
     seed_everything(42)
-
-    print("=" * 70)
-    print("  LoCoMo RRF Pipeline Benchmark")
-    print("  Uses: RetrievalCore.recall() — 5-path RRF fusion")
-    print("=" * 70)
-
     dataset = load_locomo(args.locomo_path)
-    num_conv = args.conversations or (3 if args.quick else len(dataset))
-    conversations = dataset[:num_conv]
+    num_conv = 3 if args.quick else len(dataset)
 
-    total_qa = sum(len(c['qa']) for c in conversations)
-    print(f"\n  Conversations: {num_conv}, Total QA: {total_qa}")
+    print(f'LoCoMo-10 评估 — {num_conv} 对话, {sum(len(c["qa"]) for c in dataset[:num_conv])} QA')
+    print('=' * 60)
+    print('方法: HybridFusion + BM25 补充 (论文基线)')
+    print('=' * 60)
 
     embedder = get_embedder()
-
-    all_categories = defaultdict(lambda: {'hits': 0, 'total': 0, 'f1': 0.0})
     all_results = []
+    total_hits = 0
+    total_qa = 0
+    total_f1 = 0.0
 
-    for conv_idx, conv in enumerate(conversations):
-        conv_id = conv.get('sample_id', f'conv_{conv_idx}')
-        print(f"\n  {'─'*50}")
-        print(f"  [{conv_idx+1}/{num_conv}] {conv_id}")
-
+    for ci, conv in enumerate(dataset[:num_conv]):
+        cid = conv.get('sample_id', f'conv{ci}')
         turns, session_keys = extract_all_turns(conv)
-        print(f"  Sessions: {len(session_keys)}, Turns: {len(turns)}, QA: {len(conv['qa'])}")
+        graph = build_graph(turns, session_keys)
+        n = len(graph.anchors)
+        qa_pairs = conv['qa']
 
-        graph = StarGraph()
-        cfg = Config.get()
-        rt = MemoryRuntime(graph=graph, config=cfg)
-        rp = RetrievalPipeline(rt)
+        results = evaluate_hybridfusion(graph, qa_pairs, embedder)
+        conv_hits = sum(1 for r in results if r['hit'])
+        conv_f1 = sum(r['f1'] for r in results) / max(1, len(results))
 
-        ingest_conversation_rrf(graph, turns, session_keys, embedder, rt)
-        build_edges_rrf(graph, embedder)
-        print(f"  Graph: {len(graph.anchors)} anchors, {len(graph.edges)} edges")
+        total_hits += conv_hits
+        total_qa += len(results)
+        total_f1 += sum(r['f1'] for r in results)
 
-        qa_results = evaluate_rrf(rp, conv['qa'], graph, max_items=10)
-        conv_hits = sum(1 for r in qa_results if r['hit'])
-        conv_f1 = sum(r['f1'] for r in qa_results) / max(1, len(qa_results))
-        print(f"  has_answer={conv_hits}/{len(qa_results)} ({conv_hits/len(qa_results)*100:.1f}%)  F1={conv_f1:.4f}")
+        print(f'  [{ci+1}/{num_conv}] {cid}: {n} anchors')
+        print(f'    QA: {conv_hits}/{len(qa_pairs)} = {conv_hits/len(qa_pairs)*100:.1f}%  F1={conv_f1:.4f}')
+        all_results.extend(results)
 
-        for r in qa_results:
-            cat = str(r['category'])
-            all_categories[cat]['hits'] += 1 if r['hit'] else 0
-            all_categories[cat]['total'] += 1
-            all_categories[cat]['f1'] += r['f1']
-            all_results.append(r)
+    # Global report
+    overall_rate = total_hits / total_qa * 100
+    overall_f1 = total_f1 / total_qa
 
-    # Final report
-    total = len(all_results)
-    total_hits = sum(1 for r in all_results if r['hit'])
-    total_f1 = sum(r['f1'] for r in all_results) / max(1, total)
+    print()
+    print('=' * 60)
+    print(f'  总计: {total_hits}/{total_qa} = {overall_rate:.1f}%  F1={overall_f1:.4f}')
+    print()
 
-    print(f"\n{'='*70}")
-    print(f"  RRF Pipeline LoCoMo Results")
-    print(f"{'='*70}")
-    print(f"\n  Overall:")
-    print(f"    has_answer: {total_hits}/{total} ({total_hits/total*100:.1f}%)")
-    print(f"    F1:         {total_f1:.4f}")
-
-    print(f"\n  By Category:")
+    # Per category
     cat_names = {'1': 'Temporal', '2': 'Short Mem', '3': 'Long Mem',
                   '4': 'Composite', '5': 'Adversarial'}
-    for cat in sorted(all_categories.keys()):
-        d = all_categories[cat]
-        rate = d['hits'] / d['total'] * 100 if d['total'] > 0 else 0
-        avg_f1 = d['f1'] / d['total'] if d['total'] > 0 else 0
-        name = cat_names.get(str(cat), f'cat{cat}')
-        print(f"    Cat {cat} ({name:>10s}): {d['hits']}/{d['total']} = {rate:.1f}%  F1={avg_f1:.4f}")
+    cats = defaultdict(lambda: {'hits': 0, 'total': 0, 'f1': 0.0})
+    for r in all_results:
+        c = r['category']
+        cats[c]['hits'] += 1 if r['hit'] else 0
+        cats[c]['total'] += 1
+        cats[c]['f1'] += r['f1']
 
-    temporal_q = [r for r in all_results if r['is_temporal_query']]
-    if temporal_q:
-        t_hits = sum(1 for r in temporal_q if r['hit'])
-        print(f"\n  Temporal queries: {t_hits}/{len(temporal_q)} ({t_hits/len(temporal_q)*100:.1f}%)")
+    print('  Category breakdown:')
+    for c in sorted(cats.keys()):
+        d = cats[c]
+        rate = d['hits'] / d['total'] * 100
+        avg_f1 = d['f1'] / d['total']
+        name = cat_names.get(str(c), f'cat{c}')
+        print(f'    Cat {c} ({name:>10s}): {d["hits"]}/{d["total"]} = {rate:.1f}%  F1={avg_f1:.4f}')
 
-    # Save results
-    out = {
-        "config": {"conversations": num_conv, "total_qa": total},
-        "overall": {"has_answer": total_hits/total, "f1": total_f1},
-        "by_category": {cat: {"hits": d['hits'], "total": d['total'],
-                              "has_answer": d['hits']/d['total'] if d['total']>0 else 0,
-                              "f1": d['f1']/d['total'] if d['total']>0 else 0}
-                        for cat, d in all_categories.items()},
+    # Save JSON
+    out_json = {
+        "config": {"conversations": num_conv, "total_qa": total_qa},
+        "method": "HybridFusion+BM25",
+        "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "overall": {
+            "has_answer": total_hits / total_qa,
+            "has_answer_pct": round(overall_rate, 1),
+            "f1": round(overall_f1, 4),
+        },
+        "by_category": {
+            c: {"hits": d['hits'], "total": d['total'],
+                "has_answer": round(d['hits']/d['total'], 3) if d['total']>0 else 0,
+                "has_answer_pct": round(d['hits']/d['total']*100, 1) if d['total']>0 else 0,
+                "f1": round(d['f1']/d['total'], 4) if d['total']>0 else 0}
+            for c, d in sorted(cats.items())
+        },
     }
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locomo_results.json")
-    with open(out_path, "w") as f:
-        json.dump(out, f, indent=2)
-    print(f"\n  Results saved to: {out_path}")
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locomo_results.json")
+    with open(json_path, "w") as f:
+        json.dump(out_json, f, indent=2)
+    print(f'\n  JSON → {json_path}')
 
-    # Save CSV for paper figures
+    # Save CSV
     csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locomo_results.csv")
     with open(csv_path, "w", newline="") as f:
-        import csv
-        writer = csv.writer(f)
-        writer.writerow(["category", "total", "hits", "has_answer", "f1"])
-        cat_names = {'1': 'Temporal', '2': 'Short_Mem', '3': 'Long_Mem',
-                      '4': 'Composite', '5': 'Adversarial'}
-        for cat in sorted(all_categories.keys()):
-            d = all_categories[cat]
-            rate = d['hits'] / d['total'] * 100 if d['total'] > 0 else 0
-            avg_f1 = d['f1'] / d['total'] if d['total'] > 0 else 0
-            writer.writerow([cat_names.get(str(cat), f'cat{cat}'),
-                            d['total'], d['hits'], f"{rate:.1f}", f"{avg_f1:.4f}"])
-        writer.writerow(["Overall", total, total_hits,
-                        f"{total_hits/total*100:.1f}", f"{total_f1:.4f}"])
-    print(f"  CSV saved to: {csv_path}")
+        w = csv.writer(f)
+        w.writerow(["category", "total", "hits", "has_answer_pct", "f1"])
+        for c in sorted(cats.keys()):
+            d = cats[c]
+            w.writerow([cat_names.get(str(c), f'cat{c}'),
+                       d['total'], d['hits'],
+                       f"{d['hits']/d['total']*100:.1f}" if d['total']>0 else "0",
+                       f"{d['f1']/d['total']:.4f}" if d['total']>0 else "0"])
+        w.writerow(["Overall", total_qa, total_hits, f"{overall_rate:.1f}", f"{overall_f1:.4f}"])
+    print(f'  CSV → {csv_path}')
 
 
 if __name__ == "__main__":

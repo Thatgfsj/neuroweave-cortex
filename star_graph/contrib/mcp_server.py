@@ -111,7 +111,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.2.12",
+    version="1.2.14",
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "

@@ -267,6 +267,35 @@ class RetrievalCore:
                         getattr(item, 'compressed_text', '') or item.anchor.text[:200],
                         item.memory_type, item.compression_level, "spreading_activation")
 
+
+        # ── Full semantic scan (auxiliary path) ──
+        # Scores ALL anchors by embedding cosine to catch items missed by
+        # BM25 pre-filtering. Low weight: provides breadth, not precision.
+        t_sem = time.time()
+        sem_ids: list[tuple[str, float]] = []
+        if query_emb is not None and len(self._rt.graph.anchors) > 0:
+            try:
+                sem_scored: list[tuple[str, float]] = []
+                for anchor in self._rt.graph.anchors.values():
+                    if not anchor.is_retrievable or not anchor.embedding:
+                        continue
+                    sim = _cosine_sim(query_emb, anchor.embedding)
+                    sem_scored.append((anchor.id, sim))
+                sem_scored.sort(key=lambda x: -x[1])
+                sem_ids = sem_scored[:max_items * 10]  # large: up to 100 candidates
+            except Exception:
+                pass
+        if sem_ids:
+            ranked_lists.append(sem_ids)
+            path_weights.append(1.3)  # same weight as BM25 for balanced RRF
+            for aid, sim in sem_ids:
+                if aid not in id_meta:
+                    anchor = self._rt.graph.anchors.get(aid)
+                    if anchor:
+                        id_meta[aid] = (anchor, anchor.text[:200], MemoryType.SEMANTIC, 1, "semantic_scan")
+        semantic_ms = (time.time() - t_sem) * 1000
+
+
         # Execute weighted RRF fusion
         fused = weighted_reciprocal_rank_fusion(ranked_lists, path_weights)
 
@@ -501,6 +530,7 @@ class RetrievalCore:
             "bm25_ms": round(bm25_ms, 3),
             "graph_ms": round(graph_ms, 3),
             "spreading_ms": round(spreading_ms, 3),
+            "semantic_ms": round(semantic_ms, 3),
             "ce_ms": round(ce_ms, 3),
             "budget_nodes": budget_state.nodes_activated,
             "budget_tokens": budget_state.tokens_used,
@@ -591,7 +621,9 @@ class RetrievalCore:
             return []
 
         # Fetch 2x candidates for reranking headroom
-        hits = bm25.search(query, top_k=max_items * 2)
+        # Search BM25 with generous pool — more candidates = better RRF fusion
+        search_k = max(max_items * 10, 120)  # at least 120 candidates
+        hits = bm25.search(query, top_k=search_k)
         if not hits:
             return []
 
@@ -668,7 +700,8 @@ class RetrievalCore:
             ))
 
         items.sort(key=lambda i: -i.relevance_score)
-        return items[:max_items]
+        return_items = items[:max_items * 3]  # generous pool for RRF fusion
+        return return_items
 
     def _system2_recall(self, query: str, context: AgentContext,
                         max_items: int, trigger_reason: str) -> MemoryContext:
