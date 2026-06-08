@@ -1,0 +1,7 @@
+category,total,hits,has_answer_pct,f1
+Temporal,282,41,14.5,0.0123
+Short Mem,321,20,6.2,0.0032
+Long Mem,96,9,9.4,0.0121
+Composite,841,450,53.5,0.0150
+Adversarial,446,230,51.6,0.0140
+Overall,1986,750,37.8,0.0124

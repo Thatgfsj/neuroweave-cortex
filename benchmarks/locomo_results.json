@@ -1,0 +1,44 @@
+{
+  "config": {
+    "conversations": 10,
+    "total_qa": 1986
+  },
+  "method": "HybridFusion+BM25",
+  "overall": {
+    "has_answer": 0.3776,
+    "has_answer_pct": 37.8,
+    "f1": 0.0124
+  },
+  "by_category": {
+    "1": {
+      "hits": 41,
+      "total": 282,
+      "has_answer_pct": 14.5,
+      "f1": 0.0123
+    },
+    "2": {
+      "hits": 20,
+      "total": 321,
+      "has_answer_pct": 6.2,
+      "f1": 0.0032
+    },
+    "3": {
+      "hits": 9,
+      "total": 96,
+      "has_answer_pct": 9.4,
+      "f1": 0.0121
+    },
+    "4": {
+      "hits": 450,
+      "total": 841,
+      "has_answer_pct": 53.5,
+      "f1": 0.015
+    },
+    "5": {
+      "hits": 230,
+      "total": 446,
+      "has_answer_pct": 51.6,
+      "f1": 0.014
+    }
+  }
+}
