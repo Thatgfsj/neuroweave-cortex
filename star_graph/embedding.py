@@ -53,17 +53,30 @@ class EmbeddingProvider:
             return
         try:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name, local_files_only=True)
+            self._model = SentenceTransformer(self._model_name)
             try:
                 self._dim = self._model.get_embedding_dimension()
             except AttributeError:
                 self._dim = self._model.get_sentence_embedding_dimension()
             self._backend = "sentence-transformers"
-        except Exception:
+        except Exception as e:
+            # Retry with offline mode as fallback
             try:
-                self._init_tfidf()
+                import os as _os2
+                _os2.environ['TRANSFORMERS_OFFLINE'] = '1'
+                _os2.environ['HF_HUB_OFFLINE'] = '1'
+                from sentence_transformers import SentenceTransformer
+                self._model = SentenceTransformer(self._model_name)
+                try:
+                    self._dim = self._model.get_embedding_dimension()
+                except AttributeError:
+                    self._dim = self._model.get_sentence_embedding_dimension()
+                self._backend = "sentence-transformers"
+                return
             except Exception:
                 pass
+            try:
+                self._init_tfidf()
             except Exception:
                 self._backend = "hash"
 
