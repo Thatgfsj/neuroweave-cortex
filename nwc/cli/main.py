@@ -438,5 +438,64 @@ def entry():
     app()
 
 
+# ── benchmark ───────────────────────────────────────────────
+
+@app.command()
+def benchmark(
+    scale: str = typer.Option("quick", "--scale", "-s", help="quick|standard|full"),
+    ablation: bool = typer.Option(False, "--ablation", "-a", help="Run ablation study"),
+    figures: bool = typer.Option(False, "--figures", "-f", help="Generate paper figures"),
+):
+    """Run benchmark suite (LoCoMo, LongMemEval, ablation)."""
+    import json, os, sys
+    from pathlib import Path
+
+    bench_dir = Path(__file__).resolve().parent.parent.parent / "benchmarks"
+    sys.path.insert(0, str(bench_dir.parent))
+
+    console.print("[bold cyan]NeuroWeave Cortex — Benchmark Suite[/bold cyan]\n")
+
+    # 1. LoCoMo benchmark
+    console.print("[yellow]▶ Running LoCoMo benchmark...[/yellow]")
+    try:
+        from benchmarks.run_benchmarks import run_all
+        report = run_all(scale)
+        console.print(f"  [green]LoCoMo complete: {report.get('recall', 'N/A')}[/green]")
+    except Exception as e:
+        console.print(f"  [red]LoCoMo error: {e}[/red]")
+
+    # 2. Ablation study
+    if ablation:
+        console.print("[yellow]▶ Running ablation study...[/yellow]")
+        try:
+            from benchmarks.ablation import main as ablation_main
+            import sys as _sys
+            _sys.argv = ['ablation.py', f'--{scale}']
+            ablation_main()
+        except Exception as e:
+            console.print(f"  [red]Ablation error: {e}[/red]")
+
+    # 3. Generate paper figures
+    if figures:
+        console.print("[yellow]▶ Generating paper figures...[/yellow]")
+        try:
+            from benchmarks.visualize import main as viz_main
+            viz_main()
+        except Exception as e:
+            console.print(f"  [red]Figure error: {e}[/red]")
+
+    # 4. Show results
+    results_path = bench_dir / "locomo_results.json"
+    if results_path.exists():
+        with open(results_path) as f:
+            data = json.load(f)
+        console.print("\n[bold green]📊 Results Summary[/bold green]")
+        if 'overall' in data:
+            o = data['overall']
+            console.print(f"  has_answer: {o.get('has_answer_pct', 'N/A')}%")
+            console.print(f"  F1: {o.get('f1', 'N/A')}")
+        console.print(f"\n  Full report: {results_path}")
+
+
 if __name__ == "__main__":
     entry()
