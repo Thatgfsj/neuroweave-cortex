@@ -150,6 +150,17 @@ mgr.save("agent_memory.db")
 
 ---
 
+## ⚡ LoCoMo-10 Benchmark
+10 conversations · 5,882 turns · 1,986 QA pairs · **Zero LLM calls**
+
+| Method | has_answer | Δ vs Vector |
+|--------|:----------:|:-----------:|
+| Pure Vector Search | 25.3% | — |
+| Cosine + BM25 | 31.5% | +6.2 pp |
+| **NWC (BM40+txt60)** | **44.1%** | **+18.8 pp** |
+
+---
+
 ## 📦 Installation
 
 | Command | Includes |

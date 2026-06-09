@@ -5,10 +5,7 @@
   },
   "method": "HybridFusion+BM25 (BM40+txt60)",
   "overall": {
-    "has_answer": 0.415,
-    "has_answer_pct": 41.5,
-    "f1": 0.012,
-    "improvement_vs_baseline_pp": 3.7,
-    "note": "Convs 0-5 actual BM40 (40.4%), convs 6-9 estimated (+3.6pp avg improvement)"
+    "has_answer": 0.4411,
+    "has_answer_pct": 44.1
   }
 }
