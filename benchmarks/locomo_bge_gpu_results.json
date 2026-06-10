@@ -1,0 +1,26 @@
+{
+  "version": "v1.4.0",
+  "model": "BAAI/bge-large-en-v1.5",
+  "dim": 1024,
+  "device": "cuda",
+  "pipeline": "ANN+BM25+RRF",
+  "conversations": 10,
+  "total_qa": 1986,
+  "hits": 487,
+  "overall": {
+    "has_answer_pct": 24.5,
+    "has_answer": 0.245
+  },
+  "per_conv": {
+    "conv-26": "14.6%",
+    "conv-30": "14.3%",
+    "conv-41": "23.8%",
+    "conv-42": "21.5%",
+    "conv-43": "29.8%",
+    "conv-44": "35.4%",
+    "conv-47": "24.7%",
+    "conv-48": "26.4%",
+    "conv-49": "24.0%",
+    "conv-50": "27.5%"
+  }
+}
