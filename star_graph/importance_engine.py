@@ -70,6 +70,7 @@ class ImportanceSignal:
     emotion_signal: float = 0.0
     repetition_signal: float = 0.0
     goal_relation: float = 0.0
+    retrieval_feedback: float = 0.0    # new: retrieval_count × success_rate
     content_richness: float = 0.0
     future_recall_likelihood: float = 0.0
 
@@ -78,6 +79,7 @@ class ImportanceSignal:
             self.emotion_signal * weights.emotion
             + self.repetition_signal * weights.repetition
             + self.goal_relation * weights.goal
+            + self.retrieval_feedback * weights.retrieval_feedback
             + self.content_richness * weights.richness
             + self.future_recall_likelihood * weights.future
         )
@@ -85,11 +87,12 @@ class ImportanceSignal:
 
 @dataclass
 class ImportanceWeights:
-    emotion: float = 0.20
-    repetition: float = 0.25
-    goal: float = 0.25
-    richness: float = 0.15
-    future: float = 0.15
+    emotion: float = 0.18
+    repetition: float = 0.22
+    goal: float = 0.28
+    retrieval_feedback: float = 0.12  # new: retrieval_count × recall_success
+    richness: float = 0.12
+    future: float = 0.08
 
 
 @dataclass
@@ -101,6 +104,7 @@ class ImportanceResult:
     should_store: bool
     decay_rate: float
     consolidation_priority: int
+    retrieval_feedback: float = 0.0
 
 
 # ── Topic tracker with decay ───────────────────────────────
@@ -164,6 +168,9 @@ class ImportanceEngine:
         self._total_evaluated = 0
         self._total_discarded = 0
         self._start_time = time.time()
+        # Track retrieval count per semantic signature for feedback loop
+        self._retrieval_counts: dict[str, float] = {}  # concept_key → retrieval_count
+        self._retrieval_success_rate: dict[str, float] = {}
 
     # ── Main API ──────────────────────────────────────────
 
@@ -174,7 +181,8 @@ class ImportanceEngine:
                  extracted_concepts: list[str] | None = None,
                  extracted_entities: list[str] | None = None,
                  topic_tags: list[str] | None = None,
-                 intent: str = "") -> ImportanceResult:
+                 intent: str = "",
+                 retrieval_count: int = 0) -> ImportanceResult:
         """Full importance evaluation with perception integration."""
         self._total_evaluated += 1
         now = time.time()
@@ -193,6 +201,8 @@ class ImportanceEngine:
         signal.repetition_signal = self._score_repetition(topic_tags or [], extracted_concepts or [], now)
         signal.goal_relation = self._score_goal_relation(text, active_goals or [], extracted_concepts or [])
         signal.content_richness = richness.composite
+        signal.retrieval_feedback = self._score_retrieval_feedback(
+            extracted_concepts or [], topic_tags or [], retrieval_count)
         signal.future_recall_likelihood = self._score_future(
             signal.repetition_signal, signal.goal_relation, signal.emotion_signal,
             richness.actionability_score)
@@ -234,6 +244,7 @@ class ImportanceEngine:
             decay_rate=self._decay_rate(level),
             consolidation_priority=(2 if level == ImportanceLevel.CORE
                                     else 1 if level == ImportanceLevel.NORMAL else 0),
+            retrieval_feedback=signal.retrieval_feedback,
         )
 
     def evaluate_batch(self, items: list[dict]) -> list[ImportanceResult]:
@@ -407,6 +418,42 @@ class ImportanceEngine:
         """Predict likelihood of future recall."""
         return (repetition * 0.35 + goal_relation * 0.30
                 + emotion * 0.15 + actionability * 0.20)
+
+    def _score_retrieval_feedback(self, concepts: list[str], tags: list[str],
+                                   retrieval_count: int) -> float:
+        """Score based on retrieval history: how often was this topic successfully recalled?
+
+        Uses tracked retrieval_count per concept/tag, combined with the
+        retrieval success rate. Memories that are frequently retrieved but
+        highly relevant get a boost; never-retrieved memories get a small penalty.
+        """
+        candidates = [c.lower() for c in concepts] + [t.lower() for t in tags]
+        if not candidates:
+            # Use global retrieval_count if available
+            if retrieval_count > 0:
+                return min(0.35, 0.05 + retrieval_count * 0.02)
+            return 0.05
+
+        # Average retrieval feedback across matched candidates
+        scores = []
+        for key in candidates:
+            count = self._retrieval_counts.get(key, 0)
+            rate = self._retrieval_success_rate.get(key, 0.5)
+            if count >= 3:
+                scores.append(min(0.95, 0.1 + count * 0.05 + rate * 0.3))
+            elif count >= 1:
+                scores.append(0.2 + count * 0.08)
+            else:
+                scores.append(0.05)  # never retrieved
+
+        return min(1.0, sum(scores) / len(scores))
+
+    def record_retrieval(self, key: str, success: bool = True) -> None:
+        """Called after each retrieval to update the feedback loop."""
+        self._retrieval_counts[key] = self._retrieval_counts.get(key, 0) + 1
+        current_rate = self._retrieval_success_rate.get(key, 0.5)
+        # Exponential moving average
+        self._retrieval_success_rate[key] = current_rate * 0.7 + (1.0 if success else 0.0) * 0.3
 
     @staticmethod
     def _decay_rate(level: str) -> float:

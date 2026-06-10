@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.3.5"
+__version__ = "1.4.0"
 
 import sys
 from typing import Any
@@ -36,6 +36,9 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     # anchor / graph core
     "Anchor":                  ("star_graph.memory_core.anchor", "Anchor"),
     "AnchorVector":            ("star_graph.memory_core.anchor", "AnchorVector"),
+    "MemoryNode":              ("star_graph.memory_core.anchor", "MemoryNode"),
+    "MemoryNodeVector":        ("star_graph.memory_core.anchor", "MemoryNodeVector"),
+    "MemoryNodePrediction":    ("star_graph.memory_core.anchor", "MemoryNodePrediction"),
     "Oscillator":              ("star_graph.memory_core.anchor", "Oscillator"),
     "MemoryState":             ("star_graph.memory_core.anchor", "MemoryState"),
     "ThermalState":            ("star_graph.memory_core.anchor", "ThermalState"),
@@ -132,6 +135,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     # storage
     "Storage":                 ("star_graph.memory_core.storage", "Storage"),
     "JSONStorage":             ("star_graph.memory_core.storage", "JSONStorage"),
+    "QdrantStorage":           ("star_graph.memory_core.qdrant_storage", "QdrantStorage"),
     "StorageBackend":          ("star_graph.memory_core.storage_backend", "StorageBackend"),
     "SQLiteStorage":           ("star_graph.memory_core.sqlite_storage", "SQLiteStorage"),
 

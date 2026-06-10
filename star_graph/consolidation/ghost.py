@@ -349,6 +349,8 @@ class GhostSubsystem:
     def __init__(self):
         self.ghosts: dict[str, GhostNode] = {}
         self._resonance_cache: dict[str, float] = {}
+        # Savings effect tracking (Phase 6)
+        self._revival_history: list[dict] = []
 
     @property
     def negative_ghosts(self) -> list[NegativeGhost]:
@@ -534,3 +536,34 @@ class GhostSubsystem:
                 g.partial_recall_count for g in self.ghosts.values()
             ),
         }
+
+    # ── Phase 6: Savings Effect ──────────────────────────────────
+    # Savings effect: revived memories regain strength faster than
+    # new memories are learned. This measures the efficiency gain.
+
+    def record_revival(self, ghost_id: str, strength_before: float,
+                       strength_after: float) -> None:
+        """Record a revival event for savings effect measurement."""
+        self._revival_history.append({
+            "ghost_id": ghost_id,
+            "time": time.time(),
+            "strength_before": round(strength_before, 4),
+            "strength_after": round(strength_after, 4),
+            "strength_gained": round(strength_after - strength_before, 4),
+        })
+
+    @property
+    def relearning_savings(self) -> float:
+        """Average savings effect across all revived ghosts.
+
+        Savings = (strength_after - strength_before) / strength_before
+        A value > 0 means revived memories regain strength faster
+        than new memories. Values above 0.3 indicate a strong savings effect.
+        """
+        if not self._revival_history:
+            return 0.0
+        gains = [r["strength_gained"] / max(0.01, r["strength_before"])
+                 for r in self._revival_history if r["strength_before"] > 0]
+        if not gains:
+            return 0.0
+        return sum(gains) / len(gains)

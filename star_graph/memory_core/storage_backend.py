@@ -83,9 +83,11 @@ class StorageBackend(ABC):
     # ── Migration ──
 
     @classmethod
-    def detect_and_create(cls, path: str | None = None) -> StorageBackend:
+    def detect_and_create(cls, path: str | None = None,
+                          vector_size: int = 768) -> StorageBackend:
         """Auto-detect the best backend for the given path.
 
+        - 'qdrant://' or 'http://' or 'https://' prefix → QdrantStorage
         - '.db' or '.sqlite' suffix → SQLiteStorage
         - '.json' suffix → JSONStorage
         - No path or unknown → SQLiteStorage (default for new installations)
@@ -96,6 +98,17 @@ class StorageBackend(ABC):
 
         if path is None:
             path = str(Path.home() / ".nwc" / "memory.db")
+
+        # Qdrant via URL prefix
+        if path.startswith("qdrant://") or path.startswith("http://") or path.startswith("https://"):
+            try:
+                from .qdrant_storage import QdrantStorage
+            except ImportError:
+                raise ImportError(
+                    "Qdrant detection requires: pip install qdrant-client"
+                )
+            url = path.replace("qdrant://", "http://", 1)
+            return QdrantStorage(url=url, vector_size=vector_size)
 
         p = Path(path)
         suffix = p.suffix.lower()

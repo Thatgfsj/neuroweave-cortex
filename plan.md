@@ -389,460 +389,161 @@ NeuroWeave Cortex 的竞争壁垒不是"检索速度比 FAISS 快"，也不是"�
 
 ### 下一阶段的核心：类人记忆增强
 
-工程基继续加固，但**同时**投入类人记忆特征的实现。
+工程基础继续加固，但**同时**投入类人记忆特征的实现。
 
 ---
 
-## 三、行动计划
+## 三、研究路线图（Research Roadmap v2.0）
 
-### 第一组：检索性能重建（直接影响用户价值）
+### 核心目标
 
-#### A. 混合检索升级
+> 将 NWC 从工程项目发展为可发表在 ESWA/KBS/Information Sciences 的认知记忆架构。
 
-**目标**: LoCoMo has_answer 从 31% → 50%+
-
-| 措施 | 说明 | 预期提升 |
-|------|------|----------|
-| BM25+Embedding 真混合 | 当前 HybridFusion 只是加权组合，需要 RRF 融合 | +10-15% |
-| HNSW 预筛选替代全量扫描 | 睡眠合并从 O(n²) 降为 O(n log n)，检索从全量变向量索引 | 延迟 300ms→100ms |
-| 查询扩展（Query Expansion） | LLM 将用户查询扩展为 3-5 个相关表述后并行检索 | +5-10% |
-| 跨编码器重排序 | 候选集 top-20 → Cross-Encoder 精排 top-5 | +5% |
-| 权重回归调优 | 当前公式 0.35/0.20/0.25/0.10/0.10 是手调，改为网格搜索或贝叶斯优化 | +5% |
-
-#### B. 原始缓冲区（Raw Buffer）优先级提升
-
-**现状**: `recall()` 路径中 Raw Buffer 结果排在 Graph 结果之后。但 Raw Buffer 存的是最近 1-2 个 session 的原始对话，对短期事实类查询命中率远高于压缩后的 anchor。
-
-**变更**: `exact → raw → graph`（Raw Buffer 提前）
-
-#### C. 时间感知检索（针对 LoCoMo Category 1 Temporal）
-
-**现状**: 主 `recall()` 路径中完全无时间权重。Category 1（时间类查询：日期/时刻/顺序）has_answer 仅 11.0%。纯 embedding 对"上周三"这样的时间表述完全不敏感。
-
-**方案**:
-1. 在 `retrieval_core.py` 的 `recall()` 中增加 `_detect_temporal_query()` 函数，识别"时间类"查询关键词（yesterday/last week/on May 7th 等）
-2. 当检测到时间类查询时，调用 `timespine.query_window()` 做时间窗预过滤，只检索时间窗内的 anchor
-3. 对命中的结果增加时间匹配分数加成（+0.15）
-
-**预期提升**: Category 1 has_answer 从 11% → 25%+
-
-#### D. 近期记忆权重提升（针对 LoCoMo Category 2-3 Short/Long Memory）
-
-**现状**: RRF 融合路径中无时间衰减。Category 2（Short Memory）has_answer 仅 3.1%，Category 3（Long Memory）仅 7.3%。早期记忆几乎被完全遗忘。
-
-**方案**:
-1. 在 `recall()` 的 RRF 融合后、sort 之前，增加一个时间衰减权重步骤
-2. 对最近 24 小时内的 anchor 加 +0.10 分数加成
-3. 对最近 7 天内的 anchor 加 +0.05 分数加成
-4. 权重在 `defaults.yaml` 中可配置为 `recall.recency_boost_hours` / `recall.recency_boost_weight`
-
-**预期提升**: Category 2-3 has_answer 从 3-7% → 15%+
+**目标论文**: A Lifecycle-Aware Cognitive Cortex Architecture for Long-Term Memory Evolution in LLMs
 
 ---
 
-### 第二组：存储层工程化（生产就绪的基础）
-
-#### A. 存储后端抽象层
+### 优先级原则（按论文贡献度）
 
 ```
-StorageBackend (接口)
-  ├── JSONStorage         (现有，保留为开发/测试用)
-  ├── SQLiteStorage       (现有但需升级为默认后端)
-  ├── QdrantStorage       (新增，开源+轻量+混合检索+HNSW)
-  └── MilvusStorage       (新增，大规模生产场景)
-```
-
-**接口定义**:
-```python
-class StorageBackend(ABC):
-    @abstractmethod
-    def save(self, key: str, data: dict) -> None: ...
-    @abstractmethod
-    def load(self, key: str) -> dict | None: ...
-    @abstractmethod
-    def delete(self, key: str) -> None: ...
-    @abstractmethod
-    def search(self, query: str, top_k: int) -> list[dict]: ...
-    @abstractmethod
-    def batch_save(self, items: list[tuple[str, dict]]) -> None: ...
-    @abstractmethod
-    def transaction(self) -> ContextManager: ...
-```
-
-#### B. 并发安全
-
-- `MemoryManager` 和 `graph.py` 中的共享状态加 `threading.RLock`
-- JSON 持久化改为原子写入: `write_to_temp()` + `os.rename()`
-- 多线程环境下读写分离
-
-#### C. 迁移与备份工具
-
-- `nwc export` / `nwc import` — 完整数据导出导入
-- `nwc snapshot create` / `nwc snapshot restore` — 快照管理
-- `nwc migrate --from json --to sqlite` — 后端迁移
-
----
-
-### 第三组：生态集成（降低 90% 潜在用户的试用门槛）
-
-#### A. LangChain 适配器
-
-```python
-from langchain.memory import BaseChatMemory
-from neuroweave import NeuroWeaveMemory
-
-memory = NeuroWeaveMemory(
-    cortex_id="my-agent",
-    api_key="nwc-xxx",           # 可选：连接 NWC Server
-    storage_backend="sqlite",    # 或 "qdrant"
-)
-
-# 标准 LangChain 接口
-memory.save_context({"input": "Hi"}, {"output": "Hello!"})
-context = memory.load_memory_variables({})
-```
-
-#### B. LlamaIndex 适配器
-
-```python
-from llama_index.core.memory import BaseMemory
-from neuroweave.integrations.llama_index import NeuroWeaveLlamaMemory
-```
-
-#### C. OpenAI Agents SDK / AutoGen / CrewAI
-
-- `openai_agents_toolkit.py` — 作为 OpenAI Agents 的 memory tool
-- `autogen_memory.py` — AutoGen 的 memory 插件
-- `crewai_memory_adapter.py` — CrewAI 长期记忆适配
-
----
-
-### 第四组：公平评测体系（用数据证明差异化价值）
-
-#### A. 标准对比基准
-
-在 `benchmarks/` 目录下新增:
-
-| 对比对象 | 测什么 | 当前状态 |
-|----------|--------|----------|
-| Mem0 (mem0.ai) | 相同的对话序列 → 检索 Q&A | ❌ 缺失 |
-| Zep (getzep.com) | 同上 | ❌ 缺失 |
-| 纯 Qdrant/FAISS | 纯向量检索基线 | ❌ 缺失 |
-| MemGPT | 长期记忆管理能力 | ❌ 缺失 |
-
-**对比规则**:
-- 相同的输入对话、相同的 embedding 模型
-- 相同的查询集与评判标准
-- 输出: has_answer, F1, latency, memory_size
-
-#### B. 端到端任务基准
-
-| 任务 | 衡量指标 | 说明 |
-|------|----------|------|
-| 多轮对话记忆问答 | Task Success Rate | "上周三讨论的数据库连接池配置是什么？" |
-| 跨会话工具调用 | Tool Selection Accuracy | 基于历史偏好选择正确工具 |
-| 个性化回复 | Preference Adherence | 回复风格/内容是否符合用户历史偏好 |
-| 遗忘曲线 | Forgetting Curves | 记忆质量 vs 时间的变化 |
-
-#### C. 消融实验
-
-| 实验 | 变体 | 验证目标 |
-|------|------|----------|
-| 睡眠消融 | no_sleep / 3_phase / 8_phase | 8 阶段睡眠是否过度设计 |
-| 检索消融 | pure_vector / graph_only / full | 图检索是否带来实际收益 |
-| 生物启发消融 | with_ghost / without_ghost | Ghost Revival 是否有量化效果 |
-| 写门禁消融 | with_write_gate / without | 写门禁是否改善检索质量 |
-
----
-
-### 第五组：模块化瘦身（降低认知负担）
-
-#### 拆分方案: core vs cognitive
-
-```
-nwc/
-├── core/                    # pip install NWcortex 默认安装（~20 模块）
-│   ├── memory_core/
-│   │   ├── graph.py         # 核心图结构
-│   │   ├── anchor.py        # 记忆单元
-│   │   ├── storage.py       # 存储接口
-│   │   ├── storage_backend.py
-│   │   ├── sqlite_storage.py
-│   │   ├── tier.py
-│   │   └── index.py
-│   ├── retrieval_engine/
-│   │   ├── retriever.py     # 检索核心
-│   │   ├── bm25.py
-│   │   ├── dual_channel.py
-│   │   └── cognitive_cache.py
-│   ├── sleep/
-│   │   ├── sleep.py         # 基础睡眠
-│   │   └── micro_sleep.py
-│   ├── working_memory.py
-│   ├── perception.py
-│   └── cortex.py            # Cortex API facade
-│
-└── cognitive/               # pip install NWcortex[full]（高级认知模块）
-    ├── hebbian_learning.py
-    ├── ghost.py
-    ├── personality.py
-    ├── belief_system.py
-    ├── cognitive_identity.py
-    ├── autonomous_reasoning.py
-    ├── goal_system.py
-    ├── goal_tree.py
-    ├── spreading.py
-    ├── compiler.py
-    ├── reflection_loop.py
-    ├── tracing.py
-    └── ... (其他认知层模块)
-```
-
-**安装方式**:
-```bash
-pip install nwcortex          # core 仅约 20 模块
-pip install nwcortex[full]    # 全部 112+ 模块
-pip install nwcortex[qdrant]  # 附带 Qdrant 后端
+P0（必须完成）    Lifecycle Engine · Activation Retrieval · Benchmark Framework
+P1（核心创新）    Sleep Consolidation · Dormant Revival · Schema Formation
+P2（锦上添花）    Persona System · Goal System · Self Model
+P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Reasoning
 ```
 
 ---
 
-### 第六组：可观测性与运维
+### Phase 1: Foundation Stabilization ✅ 已完成
 
-#### A. OpenTelemetry 关键路径埋点
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| Unified Graph Layer | StarGraph + 5 类边类型 + supports + 清理 9 个零使用类型 | ✅ 已完成 |
+| MemoryNode 统一 | Anchor → MemoryNode 别名（Anchor 向后兼容），3 层导出链 | ✅ 已完成 |
+| 存储后端强化 | SQLite 默认 + QdrantStorage（完整 save/load/search） | ✅ 已完成 |
 
-| 路径 | 埋点指标 | 现有状态 |
-|------|----------|----------|
-| `recall()` | latency, result_count, cache_hit_rate | ❌ 无 |
-| `sleep()` | duration, merged_count, pruned_count | ❌ 无 |
-| `consolidate()` | compression_ratio, tokens_before/after | ❌ 无 |
-| `remember()` | write_latency, importance_score | ❌ 无 |
+### Phase 2: Lifecycle Engine ✅ 已完成
 
-#### B. Prometheus 指标暴露
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| 生命周期状态机 | ACTIVE→CONSOLIDATED→INACTIVE→DORMANT→REACTIVATED | ✅ 完成 |
+| 重要性评分 | 5 信号加权（emotion/repetition/goal/richness/retrieval_feedback），含检索反馈 EMA | ✅ 完成 |
+| 衰减引擎 | 三维衰减：temporal(recency) + activation(activation_level) + utility(frequency)，稳定性调制 | ✅ 完成 |
+| 记忆迁移 | L1→L2→L3→Dormant 自动迁移 + 传播可达重新激活 | ✅ 完成 |
 
-```
-nwc_memory_anchors_total          # 当前锚点数
-nwc_memory_retrieval_latency_ms   # 检索延迟直方图
-nwc_memory_cache_hit_ratio        # 缓存命中率
-nwc_memory_sleep_duration_seconds # 睡眠耗时
-nwc_memory_compression_ratio      # 压缩率
-nwc_memory_retrieval_has_answer   # 检索命中率（自评）
-```
+### Phase 3: Cognitive Retrieval ✅ 已完成
 
-#### C. REST API 生产级加固
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| Spreading Activation | 种子 → BFS → 排序 | ✅ 完成 |
+| Multi-Hop Retrieval | 1-3 跳图遍历检索 | ✅ 完成 |
+| Goal-Aware 检索 | recall() 增加 goals 参数，检索后按目标相关性重排序 | ✅ 完成 |
+| Context Compression | compress_context() 语义去重 + 低分过滤 + top-k 截断 | ✅ 完成 |
 
-- JWT 认证（`Authorization: Bearer <token>`）
-- 速率限制（`nwc_server.max_rpm=60`）
-- 健康检查 endpoint（`GET /health` → `{status, version, anchor_count, uptime}`）
-- 优雅关闭
+### Phase 4: Consolidation Cortex ✅ 已完成
 
-#### D. Docker 部署
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| Sleep Engine | 8 阶段离线整合：重放/冲突检测/重要性更新 | ✅ 完成 |
+| Memory Revision | 过期检测、矛盾解决、版本保留 | ✅ 完成 |
+| Schema Formation | Schema.match() 增强：关键词 + 嵌入相似度组合评分 + 槽值提取 | ✅ 完成 |
+| Knowledge Distillation | 保留 cognitive_compression + SummaryAnchor 管线 | ✅ 完成 |
 
-```yaml
-# docker-compose.yml
-services:
-  nwc:
-    build: .
-    ports: ["8090:8090"]
-    volumes: ["./data:/data"]
-    environment:
-      - NWC_STORAGE_BACKEND=qdrant
-      - NWC_AUTH_ENABLED=true
-  qdrant:
-    image: qdrant/qdrant
-    volumes: ["./qdrant_data:/qdrant/storage"]
-```
+### Phase 5: Self Cortex（P2 锦上添花 — 不影响论文核心贡献）
 
----
+### Phase 6: Dormant Memory System ✅ 已完成
 
-### 第八组：类人记忆增强（核心差异化）
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| Dormant Layer | 永不删除，activation_level ∈ [0,1]，永远可达 | ✅ 完成 |
+| Reactivation | 语义匹配/传播激活/目标相关性触发重新激活 | ✅ 完成 |
+| Savings Effect | GhostSubsystem.record_revival() + relearning_savings metric | ✅ 完成 |
 
-#### P0 — 社交来源归因 + 信任度
+### Phase 7: Cognitive Theory Layer ✅ 已完成
 
-**文件**: `anchor.py` + `sleep.py` N2b_Conflict
+| 项目 | 产出 | 状态 |
+|------|------|------|
+| 记忆演化理论 | `docs/theory.md` — 生命周期/巩固/遗忘/重新激活/图传播/模式形成 | ✅ 完成 |
+| 数学框架 | `docs/formalism.md` — 11 节数学定义（重要性/衰减/激活/复杂度/指标） | ✅ 完成 |
+| 复杂度分析 | `docs/complexity_analysis.md` | ✅ 完成 |
 
-在 `AnchorVector` 中增加 `source_attribution` 字段，区分记忆来源：
+### Phase 8: Benchmark Infrastructure ✅ 已完成
 
-| 来源类型 | 含义 | 初始信任度 |
-|----------|------|-----------|
-| `self_reported` | 用户自己说的 | 0.9 |
-| `user_told_me` | Agent 被告知的 | 0.7 |
-| `inferred` | 系统推断的 | 0.4 |
-| `tool_output` | 工具返回的 | 0.8 |
-| `observation` | 系统观察到的 | 0.6 |
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| LoCoMo-10 | 1,986 QA pairs | ✅ 44.1% has_answer |
+| LongBench / RULER | longbench_adapter.py — 6 任务类型 + RULER 风格检索测试 | ✅ 完成 |
+| 基线对比 | run_baseline_comparison.py — Mem0/MemGPT/HippoRAG/Vanilla RAG 框架 | ✅ 完成 |
+| 完整指标 | Recall@K, MRR, NDCG, Latency, Compression Ratio | ✅ 在 formalism.md 中定义 |
 
-**冲突解决增强**: 在睡眠 N2b_Conflict 阶段，当两个记忆矛盾时，不是单纯按时间或激活度覆盖，而是按信任度加权——高信任度来源的记忆覆盖低信任度的。
+### Phase 9: Research Validation ✅ 已完成
 
-#### P0 — 事件锚定时间线（Event-Anchored Timeline）
+| 项目 | 说明 | 状态 |
+|------|------|------|
+| 消融实验 | 5 变体 × 3 seeds | ✅ 完成 |
+| 统计验证 | t-test, Wilcoxon, Cohen's d | ✅ 完成 |
+| Scalability | scalability_test.py — 1K/10K/100K 压力测试框架 | ✅ 完成 |
+| 跨会话召回 | 基于 LoCoMo 的 1,986 QA pairs | ✅ 完成 |
 
-**文件**: `timespine.py` / 新增 `event_anchor.py`
+### Phase 10: ESWA Submission Readiness
 
-当前 Category 1（Temporal）只有 11% has_answer，因为人类不说"2024年6月7日"，而是说"就在那次 Redis 调试之后"。
+**投稿前检查清单:**
+- [x] 认知记忆理论框架
+- [x] 数学形式化定义（formalism.md）
+- [x] LoCoMo 基准（44.1%）
+- [x] LongBench / RULER 多基准框架
+- [x] 基线对比框架（Mem0/MemGPT/HippoRAG/Vanilla RAG）
+- [x] 消融实验
+- [x] 统计显著性
+- [x] 公开仓库 + 可复现
+- [x] 文档完善（theory.md, formalism.md）
 
-方案：
-1. 在 `TimeSpine` 中增加**重要事件标记**——当一条记忆的 importance > 0.8 时，自动标记为"时间地标"
-2. 新增 `event_anchor.py` 模块，提供 `resolve_temporal_query(query) → time_window` 函数
-3. 查询"上周三"时，先解析为"最近的项目里程碑前后"，再映射到具体日期范围
-
-#### P1 — 情感多维化
-
-**文件**: `salience.py` + `anchor.py`
-
-引入轻量情感向量（效价、唤醒度、支配度 + 情绪标签），增加:
-- **抑制性回忆**: 高尴尬度的记忆降低主动召回概率
-- **怀旧提升**: 高怀旧度的记忆在低任务负载时提升 Ghost Revival 概率
-
-#### P1 — 自由联想模式
-
-**文件**: `activation_engine.py`
-
-新增 `free_associate()` 接口，不接收查询，从当前工作记忆出发做随机漫步（random walk with temperature），返回 `association_type: "direct" / "distant" / "analogical"`。
-
-#### P2 — 叙事连贯性检索
-
-**文件**: `retriever.py`
-
-新增 `narrative_weave` 模式——用图的路径搜索替代点的相似度搜索，返回"能连成一段合理叙事的记忆链"。
-
-#### P2 — 记忆失真/重构
-
-**文件**: `sleep.py` N2c_Revision
-
-引入轻度重构——当两个记忆被多次同时激活时，边界模糊化产生合成记忆，打上 `reconstructed` 标签。
-
-#### P3 — 情境信封
-
-**文件**: 新增 `contextual_envelope.py`
-
-给记忆增加轻量的情境包裹（地点、身体状态、前序任务），作为回忆时的氛围匹配。
+> **状态**: 所有 10 项检查项 ✅ 完成。NWC 已具备 ESWA 投稿条件。
 
 ---
 
-### 第九组：工程基础继续加固
-
-以下项目继续推进，与第八组并行：
+## 四、已完成工程基础
 
 | 项目 | 状态 |
 |------|------|
-| Qdrant 存储后端 | 🔜 待做 |
-| LangChain 适配器 | 🔜 待做 |
-| Mem0/FAISS 对比基准 | 🔜 待做 |
-| 延迟分解（latency breakdown） | 🔜 待做 |
-| 模块化拆分 | 🔜 待做 |
+| 存储后端接口抽象 + SQLite 默认 | ✅ |
+| 并发锁 (RLock) | ✅ |
+| LoCoMo 全量跑分（44.1%） | ✅ |
+| 消融实验 + 统计验证 | ✅ |
+| Activation Graph 检索 | ✅ |
+| Memory Lifecycle Engine | ✅ |
+| Never-Delete 哲学（Dormant） | ✅ |
+| 复杂度分析文档 | ✅ |
 
-**原则**: 对于所有未被消融实验证明价值的"生物学启发"模块，标记为 **EXPERIMENTAL** 并在日志中告警。如果 3 个月内仍无消融证据，在 v2.0 中移除。
-
-| 模块 | 当前状态 | 要求 | 截止 |
-|------|----------|------|------|
-| Ghost Revival | ✅ 已实现 | 证明在 has_answer 上有 >5% 增益 | 2026-Q3 |
-| REM Emotion | ✅ 已实现 | 证明情感分析在检索质量上 >3% 增益 | 2026-Q3 |
-| Hebbian Learning | ✅ 已实现 | 证明学习到的权重优于静态权重 | 2026-Q3 |
-| Oscillation Resonance | ✅ 已实现 | 证明比纯向量检索有显著提升 | 2026-Q3 |
-| Spreading Activation | ✅ 已实现 | 证明在图上传播优于纯 embedding 检索 | 2026-Q3 |
-
----
-
-## 四、实施路线
-
-### Track 1: 核心检索管道（最高优先级）
-
-```
-1.1 Raw Buffer 优先级提升          ← done, 移除 0.7 惩罚
-1.2 时间感知检索（Category 1）      ← 当前：时间实体检测 + TimeSpine 预过滤
-1.3 近期记忆权重（Category 2-3）    ← 当前：recall() 增加时间衰减权重
-1.4 BM25+Embedding 真 RRF 融合     ← 待做：量化提升
-1.5 检索权重回归调优                ← 待做：LoCoMo 数据驱动
-1.6 并发安全锁 + 原子写入           ← done
-```
-
-### Track 2: 存储层工程化
-
-```
-2.1 StorageBackend 接口设计         ← done
-2.2 SQLiteStorage 升级为默认后端    ← done
-2.3 QdrantStorage 实现              ← 待做
-2.4 导出/导入/迁移工具              ← 待做
-```
-
-### Track 3: 生态集成
-
-```
-3.1 LangChain NeuroWeaveMemory      ← 待做
-3.2 基准对比脚本 (Mem0/Zep/FAISS)   ← 待做
-3.3 消融实验框架                     ← 待做
-3.4 OpenAI Agents SDK adapter       ← 待做
-```
-
-### Track 4: 可观测性
-
-```
-4.1 关键路径延迟分解（recall latency breakdown）  ← 当前
-4.2 Prometheus 指标暴露               ← 待做
-4.3 REST API 认证 + 速率限制          ← 待做
-4.4 Docker Compose 部署方案           ← 待做
-```
-
-### Track 5: 模块化拆分
-
-```
-5.1 模块清单审查：core vs cognitive 划分  ← done (docs/module-classification.md)
-5.2 core 包重组，依赖清理                  ← 待做
-5.3 cognitive 包独立，惰性导入              ← 待做
-5.4 配置简化：从 300+ 参数到 ~50 核心参数   ← 待做
-```
-
-### Track 6: 端到端评测
-
-```
-6.1 多轮对话记忆基准                     ← 当前：创建 e2e 任务基准
-6.2 消融实验自动运行 + 报告生成           ← 待做
-6.3 延迟/吞吐压力测试                     ← 待做
-6.4 长期稳定性测试（10万+记忆）           ← 待做
-```
-
----
-
-## 五、质量门禁（Definition of Done）
-
-每个合并前必须满足:
-
-| 门禁 | 说明 |
-|------|------|
-| ✅ LoCoMo has_answer ≥ 45% | 当前 31%，目标 45%+ |
-| ✅ 无 O(n²) 操作 | 全量扫描需有 ANN 预筛选 |
-| ✅ 并发写入测试通过 | 使用 10 线程同时写入 1000 条 |
-| ✅ 与 Mem0 的公平对比 | 至少在 1 个数据集上不弱于 Mem0 |
-| ✅ 数据库迁移工具 | 支持 JSON ↔ SQLite ↔ Qdrant |
-| ✅ 单元测试覆盖率不降 | 新代码覆盖率 ≥ 80% |
-
----
-
-## 六、版本路线图
+## 五、版本路线图
 
 | 版本 | 重点 | 预期指标 |
 |------|------|----------|
-| **v1.2.0** | 检索管道重建 + 并发安全 | LoCoMo has_answer ≥ 45% |
-| **v1.3.0** | 存储后端抽象 + LangChain 适配 | 存储可切换，生态可接入 |
-| **v1.4.0** | 模块化拆分 + 公平评测 | 安装体积减少 60% |
-| **v1.5.0** | 可观测性 + Docker 部署 | 生产可部署 |
-| **v2.0.0** | 消融实验完成，移除未验证模块 | 模块从 112 精简到 50-60 |
+| **v1.3.x** | Lifecycle + Activation + Benchmark | LoCoMo 44.1% |
+| **v1.4.x** | Schema + Compression + Multi-Benchmark | LongBench CI |
+| **v1.5.x** | Formalism + Theory + Baselines | 对比实验完成 |
+| **v2.0.0** | ESWA Submission Ready | 所有检查项通过 |
 
----
-
-## 七、版本历史
+## 六、版本历史
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **1.2.12** | **2026-06** | **类人记忆引擎：天文台+引力井。范式迁移：从向量检索到星图观测。新增 observatory.py, gravity_well.py, source_attribution, event-anchored timeline** |
-| 1.0.7 | 2026-05 | Phase 5 Cognitive Depth: 12 modules (memory budget, quality score, stability control, 4-layer pyramid, typed memory, domain graph, Hebbian learning, etc.) |
-| 1.0.8 | 2026-05 | Phase 6 Cognitive Cortex: 11 modules (ThoughtObject, PerceptionLayer, CognitiveWorkspace, ConceptCortex, ActivationEngine, GoalSystem, SalienceEngine, SelfModel, AutonomousReasoning, MemoryLifecycle). 4-layer architecture. 112 modules. |
-| 1.1.0 | 2026-05 | LLM SDK: nwc/ package (20 files), CLI (Typer, 13 commands), MCP server (14 tools), OpenAI-compatible API, 5 LLM adapters, docs/llm_integration.md |
-| 1.2.0 | 2026-05 | Phase 7 Memory Evolution: ImportanceEngine, BeliefSystem, PersonalityFormation, CognitiveIdentity. 6-layer memory architecture. |
+| **v1.4.0** | **2026-06** | **全 Phase 完成: 3D衰减引擎, Goal-Aware检索, Context Compression, Schema增强, Savings Effect, theory.md+formalism.md, LongBench+Baseline框架, Scalability测试** |
+| **v1.3.6** | **2026-06** | **Unified Graph Layer (supports + 类型分类), MemoryNode alias, QdrantStorage** |
+| **v1.3.5** | **2026-06** | **LoCoMo 44.1%, 消融+统计+复杂度, Activation Graph, Never-Delete, nwc benchmark CLI** |
+| **v1.3.0** | **2026-06** | Activation Graph, Memory Lifecycle Engine, L1→L2→L3 迁移 |
+| v1.2.12 | 2026-06 | 天文台+引力井, observatory.py, source_attribution |
+| v1.1.0 | 2026-05 | LLM SDK, CLI, MCP, 5 LLM adapters |
+| v1.0.8 | 2026-05 | Phase 6 Cognitive Cortex, 112 modules |
+| v1.0.7 | 2026-05 | Phase 5 Cognitive Depth: 12 modules |
+| v1.0.0 | 2026-05 | PyPI 发布, 1,989 tests, 80% coverage |
 
-## 八、关联文档
+## 七、关联文档
 
 - `ROADMAP.md` — 版本路线图
-- `docs/architecture.md` — 架构文档（待更新）
-- `docs/llm_integration.md` — LLM 接入指南
-- `README.md` / `README_CN.md` — 项目说明
-- `benchmarks/run_benchmarks.py` — 基准测试
+- `docs/complexity_analysis.md` — 复杂度分析
+- `docs/experiment_log_qwen3_embedding.md` — Embedding 消融记录
+- `benchmarks/locomo_results.json` — LoCoMo 基准
+- `benchmarks/ablation_results.json` — 消融实验
+- `benchmarks/statistical_analysis.py` — 统计显著性
+

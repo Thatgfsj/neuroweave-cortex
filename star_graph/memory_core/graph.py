@@ -30,8 +30,10 @@ class Edge:
     Simple edge — kept for backward compatibility. For rich temporal edges
     with versioning, confidence, and lifecycle, use RichEdge.
 
-    Edge types: topical, semantic, causal, temporal, contradiction,
-    superseded_by, invalidated_by, caused_by, derived_from.
+    Edge type taxonomy:
+      causes, fixes, depends_on, caused_by, derived_from, supports,
+      contradicts, superseded_by, invalidated_by, before, after,
+      related_workflow, summarizes, resolves, causal, temporal, topical.
     """
 
     source: str
@@ -97,55 +99,66 @@ EDGE_INVALIDATED_BY = "invalidated_by"  # evidence contradicts this (A is dispro
 EDGE_CONTRADICTS = "contradicts"        # mutual contradiction (A and B cannot both be true)
 EDGE_CAUSED_BY = "caused_by"            # reverse causal (A was caused by B)
 EDGE_DERIVED_FROM = "derived_from"      # inference chain (A was deduced from B)
+EDGE_SUPPORTS = "supports"              # positive reinforcement / agreement (A supports B)
 
 # Explicable edge relation types — edges MUST use one of these (or a domain
 # subtype) to pass the sparsification gate. Topical/cosine-only edges are rejected.
+#
+# Taxonomy — five categories:
+#   Causal/Logical     causes, fixes, depends_on, caused_by, derived_from, supports, resolves
+#   Contradiction      contradicts, superseded_by, invalidated_by
+#   Temporal           before, after
+#   Domain/Grouping    related_workflow
+#   Semantic (legacy)  causal, temporal, topical  — allowed but discouraged; prefer above
+#
 EXPLICABLE_RELATIONS: set[str] = {
-    "causes", "fixes", "depends_on", "contradicts", "upgrades",
-    "summarizes", "related_workflow", "same_project", "same_user_goal",
-    "superseded_by", "invalidated_by", "caused_by", "derived_from",
-    "causal", "temporal", "topical",              # legacy — allowed but discouraged
-    "refines", "generalizes", "analogous_to",     # abstraction relations
-    "before", "after", "during",                  # temporal ordering
-    "resolves", "duplicates", "conflicts_with",   # resolution relations
+    # --- Causal / Logical (explicit) ---
+    "causes", "fixes", "depends_on", "caused_by", "derived_from",
+    "supports", "resolves",
+    # --- Contradiction / Evolution ---
+    "contradicts", "superseded_by", "invalidated_by",
+    # --- Temporal ---
+    "before", "after",
+    # --- Domain / Grouping ---
+    "related_workflow", "summarizes",
+    # --- Legacy (allowed but discouraged — prefer a typed alternative) ---
+    "causal", "temporal", "topical",
 }
 # Legacy edge types that are NOT explicable — auto-rejected when implicit
 LEGACY_EDGE_TYPES: set[str] = {"topical", "semantic", "similar", "related"}
 # Relations that are "strong" — carry causal/explicit weight, not just semantic
 STRONG_RELATIONS: set[str] = {
-    "causes", "fixes", "depends_on", "contradicts", "upgrades",
+    "causes", "fixes", "depends_on", "contradicts",
     "superseded_by", "invalidated_by", "caused_by", "derived_from",
-    "resolves", "conflicts_with", "duplicates",
+    "supports", "resolves",
 }
 
 # Edge traversal weight multipliers — different edge types contribute
 # differently to graph traversal and spreading activation.
 EDGE_TRAVERSAL_WEIGHTS: dict[str, float] = {
+    # --- Causal / Logical ---
     "causes": 1.5,           # causal = most important for reasoning
     "fixes": 1.4,            # fix relationships = high utility
     "depends_on": 1.3,       # dependency = structural
-    "contradicts": 0.5,      # contradiction = useful but downweighted
-    "upgrades": 1.2,         # upgrade = improvement path
-    "summarizes": 1.1,       # summary = compression link
-    "related_workflow": 1.2, # workflow = process continuity
-    "same_project": 1.2,     # project grouping
-    "same_user_goal": 1.3,   # goal alignment
-    "superseded_by": 0.4,    # outdated = low traversal
-    "invalidated_by": 0.3,   # disproven = very low traversal
     "caused_by": 1.4,        # reverse causal
     "derived_from": 1.2,     # inference chain
-    "causal": 1.5,           # causal (legacy)
-    "temporal": 1.2,         # temporal = ordering matters
-    "topical": 1.0,          # baseline semantic
-    "refines": 1.1,          # refinement
-    "generalizes": 1.0,      # generalization
-    "analogous_to": 0.9,     # analogy = weaker
+    "supports": 1.2,         # positive reinforcement / agreement
+    "resolves": 1.3,         # resolution
+    # --- Contradiction / Evolution ---
+    "contradicts": 0.5,      # contradiction = useful but downweighted
+    "superseded_by": 0.4,    # outdated = low traversal
+    "invalidated_by": 0.3,   # disproven = very low traversal
+    # --- Temporal ---
     "before": 1.0,           # temporal before
     "after": 1.0,            # temporal after
-    "during": 1.1,           # temporal overlap
-    "resolves": 1.3,         # resolution
-    "duplicates": 0.6,       # duplicate = only for dedup
-    "conflicts_with": 0.7,   # conflict
+    # --- Domain / Grouping ---
+    "related_workflow": 1.2, # workflow = process continuity
+    "summarizes": 1.1,       # summary = compression link
+    # --- Legacy ---
+    "causal": 1.5,           # causal (legacy, prefer "causes"/"caused_by")
+    "temporal": 1.2,         # temporal (legacy, prefer "before"/"after")
+    "topical": 1.0,          # baseline semantic (legacy)
+    # --- Structural / Infrastructure ---
     "instance_of": 1.0,      # abstraction link
     "bridge": 0.8,           # cross-constellation bridge
     "transitive_closure": 0.7, # inferred transitive
@@ -171,16 +184,29 @@ class RichEdge:
     - Causal strength (how strongly A implies/causes B)
     - State-transition types for knowledge evolution
 
-    Edge types:
-      topical — shared subject matter (default)
-      semantic — embedding similarity
-      causal — A causes B
-      temporal — A happened before/after B
-      contradiction — A and B conflict
-      superseded_by — A is replaced by newer B
-      invalidated_by — A is disproven by B
-      caused_by — A was caused by B (reverse causal)
-      derived_from — A was inferred from B
+    Edge type taxonomy (canonical set):
+      Causal/Logical:
+        causes           — A causes B
+        fixes            — A fixes/resolves an issue in B
+        depends_on       — A depends on B
+        caused_by        — A was caused by B (reverse causal)
+        derived_from     — A was inferred/deduced from B
+        supports         — A supports/confirms B (positive evidence)
+        resolves         — A resolves/answers B
+      Contradiction/Evolution:
+        contradicts      — A and B cannot both be true (mutual)
+        superseded_by    — A is replaced by newer B
+        invalidated_by   — A is disproven by B
+      Temporal:
+        before           — A happened before B
+        after            — A happened after B
+      Domain/Grouping:
+        related_workflow — A and B belong to the same workflow
+        summarizes       — A is a summary/compression of B
+      Legacy (discouraged — use a typed alternative):
+        causal           — generic causal (prefer causes/caused_by)
+        temporal         — generic temporal (prefer before/after)
+        topical          — shared subject matter
 
     Retrieval scoring:
       score = weight + 0.2*confidence + 0.1*recency_bonus + 0.15*reinforcement_bonus
@@ -589,12 +615,43 @@ class Schema:
     tags: list[str] = field(default_factory=list)
 
     def match(self, text: str, embedding: list[float] | None = None) -> tuple[float, dict]:
-        """Try to match text against this schema. Returns (confidence, slot_values)."""
-        # Simple implementation: check if schema keywords appear
+        """Try to match text against this schema. Returns (confidence, slot_values).
+
+        Matching combines keyword overlap with embedding cosine similarity
+        when an embedding is available. Slot values are extracted via keyword
+        presence in the input text.
+        """
         template_words = set(self.template.lower().split())
         text_words = set(text.lower().split())
+
+        # Keyword overlap score
         overlap = len(template_words & text_words) / max(1, len(template_words))
-        return overlap, {}
+
+        # Embedding similarity (when available)
+        emb_score = 0.0
+        if embedding is not None and hasattr(self, '_embedding') and self._embedding:
+            import numpy as np
+            a = np.array(embedding, dtype=np.float32)
+            b = np.array(self._embedding, dtype=np.float32)
+            norm = np.linalg.norm(a) * np.linalg.norm(b)
+            if norm > 0:
+                emb_score = float(np.dot(a, b) / norm)
+
+        # Combined: 60% keyword, 40% embedding (when both available)
+        if embedding is not None and emb_score > 0:
+            score = overlap * 0.6 + emb_score * 0.4
+        else:
+            score = overlap
+
+        # Slot value extraction: find which slot keywords appear in text
+        slot_values: dict[str, str] = {}
+        for slot_name, slot_desc in self.slots.items():
+            slot_keywords = set(slot_desc.lower().split())
+            matched = slot_keywords & text_words
+            if matched:
+                slot_values[slot_name] = ", ".join(matched)
+
+        return min(1.0, score), slot_values
 
 
 class StarGraph:
@@ -777,7 +834,8 @@ class StarGraph:
                 or valid_until > 0
                 or relation
                 or edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS,
-                                 EDGE_CAUSED_BY, EDGE_DERIVED_FROM, "causal", "temporal")
+                                 EDGE_CAUSED_BY, EDGE_DERIVED_FROM, EDGE_SUPPORTS,
+                                 "resolves", "causal", "temporal")
             )
 
             if is_rich:

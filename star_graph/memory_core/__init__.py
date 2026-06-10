@@ -5,6 +5,9 @@ def __getattr__(name: str):
     _registry = {
         "Anchor": ("star_graph.anchor", "Anchor"),
         "AnchorVector": ("star_graph.anchor", "AnchorVector"),
+        "MemoryNode": ("star_graph.anchor", "MemoryNode"),
+        "MemoryNodeVector": ("star_graph.anchor", "MemoryNodeVector"),
+        "MemoryNodePrediction": ("star_graph.anchor", "MemoryNodePrediction"),
         "MemoryState": ("star_graph.anchor", "MemoryState"),
         "StarGraph": ("star_graph.graph", "StarGraph"),
         "Edge": ("star_graph.graph", "Edge"),
@@ -13,6 +16,7 @@ def __getattr__(name: str):
         "JSONStorage": ("star_graph.storage", "JSONStorage"),
         "StorageBackend": ("star_graph.storage_backend", "StorageBackend"),
         "SQLiteStorage": ("star_graph.sqlite_storage", "SQLiteStorage"),
+        "QdrantStorage": ("star_graph.qdrant_storage", "QdrantStorage"),
         "MemoryTier": ("star_graph.tier", "MemoryTier"),
         "TierEntry": ("star_graph.tier", "TierEntry"),
         "ShortTermMemory": ("star_graph.tier", "ShortTermMemory"),
@@ -33,7 +37,9 @@ def __getattr__(name: str):
 
 
 __all__ = list(__getattr__.__kwdefaults__["_registry"].keys()) if False else [
-    "Anchor", "AnchorVector", "MemoryState",
+    "Anchor", "AnchorVector",
+    "MemoryNode", "MemoryNodeVector", "MemoryNodePrediction",
+    "MemoryState",
     "StarGraph", "Edge", "Constellation", "Schema",
     "JSONStorage", "StorageBackend", "SQLiteStorage",
     "MemoryTier", "TierEntry", "ShortTermMemory", "MiddleTermMemory",

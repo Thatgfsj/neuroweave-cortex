@@ -23,6 +23,9 @@ EDGE_TYPE_RICHNESS_WEIGHTS = {
     "fixes": 1.4,
     "resolves": 1.4,
     "depends_on": 1.3,
+    "caused_by": 1.3,
+    "derived_from": 1.3,
+    "supports": 1.3,
     "before": 1.2,
     "after": 1.2,
     "preference": 1.2,
@@ -191,7 +194,7 @@ def _causal_involvement_score(graph, anchor_id: str,
                                edge_types: list[str]) -> float:
     """Score how involved this node is in causal chains."""
     causal_types = {"causes", "causal", "caused_by", "fixes", "resolves",
-                    "depends_on", "derived_from"}
+                    "depends_on", "derived_from", "supports"}
 
     causal_edge_count = sum(1 for et in edge_types if et in causal_types)
     total_edges = max(1, len(edge_types))

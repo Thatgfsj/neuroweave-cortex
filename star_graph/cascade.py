@@ -169,7 +169,7 @@ class CascadeRecall:
                           min_strength: float) -> list[tuple[str, RichEdge | object]]:
         """Get causal/temporal edges for an anchor, ranked by traversal weight."""
         results: list[tuple[str, RichEdge | object]] = []
-        causal_types = {"caused_by", "derived_from", "causal"}
+        causal_types = {"caused_by", "derived_from", "causal", "supports"}
         temporal_types = {"before", "after"}
 
         for neighbor_id in self.graph._adjacency.get(anchor_id, set()):
@@ -184,7 +184,7 @@ class CascadeRecall:
                 # Causal edge types that indicate direction
                 forward_causal = {"causes", "causal"}      # A causes B (A→B)
                 backward_causal = {"caused_by", "derived_from"}  # A caused by B (B→A)
-                bidirectional_causal = {"depends_on", "fixes", "resolves"}
+                bidirectional_causal = {"depends_on", "fixes", "resolves", "supports"}
 
                 if direction == "backward":
                     if etype in backward_causal and causal_str >= min_strength:

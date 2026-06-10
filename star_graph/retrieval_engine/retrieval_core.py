@@ -82,7 +82,8 @@ class RetrievalCore:
 
     def recall(self, query: str = "",
                context: AgentContext | None = None,
-               max_items: int = 10) -> MemoryContext:
+               max_items: int = 10,
+               goals: list[str] | None = None) -> MemoryContext:
         """Multi-path retrieval with tracing instrumentation and auto System-2 trigger.
 
         Path 0 (Exact Cache): Deterministic O(1) entity-pair lookup.
@@ -484,6 +485,22 @@ class RetrievalCore:
         else:
             ce_ms = 0
 
+        # ── Goal-Aware re-ranking (Phase 3) ───────────────────
+        # If goals are provided, boost items semantically aligned with goals.
+        if goals and merged_items:
+            goal_text = " ".join(goals)
+            goal_lower = goal_text.lower()
+            goal_words = set(goal_lower.split())
+            for item in merged_items:
+                item_text = (item.compressed_text or
+                            (item.anchor.text[:200] if item.anchor else "")).lower()
+                item_words = set(item_text.split())
+                overlap = len(item_words & goal_words)
+                if overlap > 0:
+                    goal_boost = min(0.15, overlap * 0.03)
+                    item.relevance_score = min(1.0, item.relevance_score + goal_boost)
+            merged_items.sort(key=lambda i: -i.relevance_score)
+
         # Auto-trigger System-2 if System-1 confidence is low
         s1_confidence = graph_result.get("confidence", 1.0)
         if s1_confidence < 0.35 and len(merged_items) < max_items:
@@ -601,6 +618,55 @@ class RetrievalCore:
                 retrieved_memories=rrf_trace_entries,
             ).to_dict(),
         )
+
+    # ── Phase 3: Context Compression ──────────────────────────
+    # Compresses a large result set (100+) into a compact useful set (~10)
+    # via semantic dedup + relevance filtering.
+
+    def compress_context(self, merged_items: list,
+                         max_items: int = 10) -> list:
+        """Compress a list of MemoryItems into a compact, diverse set.
+
+        Strategy:
+          1. Filter low-relevance items (score < 0.15)
+          2. Deduplicate near-duplicate text (cosine-sim via word overlap)
+          3. Keep top-k by relevance score
+        """
+        # Step 1: Filter low relevance
+        items = [i for i in merged_items if i.relevance_score >= 0.15]
+        if not items:
+            return merged_items[:max_items]
+
+        # Step 2: Deduplicate by text overlap
+        kept: list = []
+        seen_normalized: set = set()
+        for item in items:
+            text = (item.compressed_text or
+                    (item.anchor.text[:200] if item.anchor else "")).strip().lower()
+            if not text:
+                kept.append(item)
+                continue
+            # Normalize: keep only alphanumeric tokens
+            import re
+            tokens = set(re.findall(r'\w+', text))
+            # Check overlap with existing items
+            is_dup = False
+            for existing in kept:
+                ext_text = (existing.compressed_text or
+                           (existing.anchor.text[:200] if existing.anchor else "")).strip().lower()
+                ext_tokens = set(re.findall(r'\w+', ext_text))
+                if not tokens or not ext_tokens:
+                    continue
+                jaccard = len(tokens & ext_tokens) / max(1, len(tokens | ext_tokens))
+                if jaccard > 0.85:  # near-duplicate
+                    is_dup = True
+                    break
+            if not is_dup:
+                kept.append(item)
+
+        # Step 3: Take top-k by score
+        kept.sort(key=lambda i: -i.relevance_score)
+        return kept[:max_items]
 
     # ── Explainability API (#62) ──────────────────────────────────
 

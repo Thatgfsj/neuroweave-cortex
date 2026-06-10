@@ -13,3 +13,20 @@ dist/
 .pytest_cache/
 htmlcov/
 certificates/
+
+# API keys (never commit)
+.deepseek_key
+.env
+
+# Academic papers (not for public repository)
+papers/
+*.pdf
+*.synctex.gz
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc

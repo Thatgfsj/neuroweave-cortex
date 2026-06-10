@@ -536,43 +536,80 @@ class Anchor:
         cls._survival_fn = fn
 
     def decay(self, elapsed_hours: float, half_life: float | None = None,
-              survival_fn=None) -> None:
-        """Apply time-based decay to recency.
+              survival_fn=None, activation_decay: float = 0.0,
+              utility_decay: float = 0.0) -> None:
+        """Apply multi-dimensional decay: temporal + activation + utility.
 
-        If a survival function is available (class-level or passed), uses the
-        configurable curve. Otherwise falls back to simple exponential decay.
+        Mathematical framework:
+          Δrecency = recency * e^(-λ_t * t)                     # temporal decay
+          Δactivation = activation_level * (1 - e^(-λ_a * Δt))  # activation decay
+          Δfrequency = frequency * e^(-λ_u * t)                 # utility decay
+
+        Where λ_t, λ_a, λ_u are dimension-specific decay rates modulated
+        by state (DORMANT decays slower, ACTIVE decays faster).
+
+        Args:
+            elapsed_hours: Time since last activation.
+            half_life: Override for temporal half-life.
+            survival_fn: Optional survival curve function.
+            activation_decay: Additional decay to activation_level (from Edge work).
+            utility_decay: Additional decay to utility/frequency (from retrieval).
         """
+        from math import exp
+
         sf = survival_fn or Anchor._survival_fn
+        from ..config import Config
+        c = Config.get().anchor.decay
+
+        # ── 1. Temporal decay (recency) ────────────────────────
         if sf is not None:
             from ..survival import derive_strength
             strength = derive_strength(self)
             retention = sf.survive(elapsed_hours, strength)
 
             # State modifiers adjust retention
-            from ..config import Config
-            c = Config.get().anchor.decay
             if self.state == MemoryState.GHOST:
                 retention *= c.ghost_half_life_factor
             elif self.state == MemoryState.DORMANT:
                 retention = retention + (1.0 - retention) * 0.3  # slower decay
             elif self.state == MemoryState.REACTIVATED:
-                retention = retention + (1.0 - retention) * 0.15  # moderate decay
-
+                retention = retention + (1.0 - retention) * 0.15
             self.vector.recency *= retention
         else:
-            from ..config import Config
-            c = Config.get().anchor.decay
-            if half_life is None:
-                half_life = c.base_half_life_hours
+            hl = half_life if half_life is not None else c.base_half_life_hours
             if self.state == MemoryState.GHOST:
-                half_life *= c.ghost_half_life_factor
+                hl *= c.ghost_half_life_factor
             elif self.state == MemoryState.DORMANT:
-                half_life *= c.dormant_half_life_factor
+                hl *= c.dormant_half_life_factor
             elif self.state == MemoryState.REACTIVATED:
-                half_life *= c.reactivated_half_life_factor
-            self.vector.recency *= 0.5 ** (elapsed_hours / half_life)
+                hl *= c.reactivated_half_life_factor
+            self.vector.recency *= 0.5 ** (elapsed_hours / hl)
 
-        self.vector.recency = max(0.01, self.vector.recency)
+        self.vector.recency = max(0.01, min(1.0, self.vector.recency))
+
+        # ── 2. Activation decay ────────────────────────────────
+        # Activation level decays toward a baseline (0.1) over time.
+        # Each retrieval bumps it; decay rate is faster for lower stability.
+        base_activation = 0.1
+        stability_damping = 1.0 - self.vector.stability * 0.6  # 1.0 → 0.4
+        act_lambda = c.activation_decay_rate * stability_damping
+        act_decay = 1.0 - exp(-act_lambda * elapsed_hours)
+        self.activation_level = base_activation + (
+            self.activation_level - base_activation) * (1.0 - act_decay)
+        # Apply additional activation decay from edge work
+        if activation_decay > 0:
+            self.activation_level = max(base_activation,
+                                        self.activation_level - activation_decay)
+        self.activation_level = max(0.01, min(1.0, self.activation_level))
+
+        # ── 3. Utility decay (frequency) ───────────────────────
+        # Frequency naturally decays when knowledge isn't used.
+        # Stable memories decay slower.
+        util_lambda = c.utility_decay_rate * stability_damping
+        util_retention = exp(-util_lambda * elapsed_hours)
+        self.vector.frequency = max(0.05, self.vector.frequency * util_retention)
+        if utility_decay > 0:
+            self.vector.frequency = max(0.05, self.vector.frequency - utility_decay)
 
     def activate(self) -> None:
         """Called when this anchor is retrieved/used — triggers reconsolidation."""
@@ -943,3 +980,8 @@ class Anchor:
         self.vector.confidence = min(1.0, self.vector.confidence + 0.05)
 
 
+# ── Canonical aliases for cognitive architecture naming ────────────
+# MemoryNode is the canonical name; Anchor is kept for backward compat.
+MemoryNode = Anchor
+MemoryNodeVector = AnchorVector
+MemoryNodePrediction = AnchorPrediction

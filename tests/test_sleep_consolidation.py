@@ -43,7 +43,7 @@ def make_populated_graph(n: int = 50) -> StarGraph:
     for i in range(0, len(ids) - 1, 2):
         if i + 1 < len(ids):
             graph.add_edge(ids[i], ids[i + 1], weight=0.3 + 0.2 * (i % 3),
-                           edge_type="topical", relation="same_project")
+                           edge_type="topical", relation="related_workflow")
 
     return graph
 
