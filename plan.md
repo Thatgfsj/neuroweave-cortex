@@ -530,7 +530,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 |---------|------|------------|
 | **v1.4.0** | **2026-06** | **全 Phase 完成: 3D衰减引擎, Goal-Aware检索, Context Compression, Schema增强, Savings Effect, theory.md+formalism.md, LongBench+Baseline框架, Scalability测试** |
 | **v1.3.6** | **2026-06** | **Unified Graph Layer (supports + 类型分类), MemoryNode alias, QdrantStorage** |
-| **v1.3.5** | **2026-06** | **LoCoMo 44.1%, 消融+统计+复杂度, Activation Graph, Never-Delete, nwc benchmark CLI** |
+| **v1.3.5** | **2026-06** | **LoCoMo 44.1% (NWC HybridFusion), 消融+统计+复杂度, Activation Graph, Never-Delete, nwc benchmark CLI** |
 | **v1.3.0** | **2026-06** | Activation Graph, Memory Lifecycle Engine, L1→L2→L3 迁移 |
 | v1.2.12 | 2026-06 | 天文台+引力井, observatory.py, source_attribution |
 | v1.1.0 | 2026-05 | LLM SDK, CLI, MCP, 5 LLM adapters |

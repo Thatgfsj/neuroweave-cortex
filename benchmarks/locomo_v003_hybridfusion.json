@@ -1,0 +1,50 @@
+{
+  "config": {
+    "conversations": 3,
+    "total_qa": 497
+  },
+  "method": "HybridFusion+BM25",
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "overall": {
+    "has_answer": 0.39235412474849096,
+    "has_answer_pct": 39.2,
+    "f1": 0.0142
+  },
+  "by_category": {
+    "1": {
+      "hits": 11,
+      "total": 74,
+      "has_answer": 0.149,
+      "has_answer_pct": 14.9,
+      "f1": 0.0103
+    },
+    "2": {
+      "hits": 2,
+      "total": 90,
+      "has_answer": 0.022,
+      "has_answer_pct": 2.2,
+      "f1": 0.0025
+    },
+    "3": {
+      "hits": 1,
+      "total": 21,
+      "has_answer": 0.048,
+      "has_answer_pct": 4.8,
+      "f1": 0.0117
+    },
+    "4": {
+      "hits": 118,
+      "total": 200,
+      "has_answer": 0.59,
+      "has_answer_pct": 59.0,
+      "f1": 0.0188
+    },
+    "5": {
+      "hits": 63,
+      "total": 112,
+      "has_answer": 0.562,
+      "has_answer_pct": 56.2,
+      "f1": 0.0185
+    }
+  }
+}
