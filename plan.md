@@ -397,7 +397,7 @@ NeuroWeave Cortex 的竞争壁垒不是"检索速度比 FAISS 快"，也不是"�
 
 ### 核心目标
 
-> 将 NWC 从工程项目发展为可发表在 ESWA/KBS/Information Sciences 的认知记忆架构。
+> 将 NWC 从工程项目发展为可发表在国际期刊的认知记忆架构。
 
 **目标论文**: A Lifecycle-Aware Cognitive Cortex Architecture for Long-Term Memory Evolution in LLMs
 
@@ -485,9 +485,9 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 | Scalability | scalability_test.py — 1K/10K/100K 压力测试框架 | ✅ 完成 |
 | 跨会话召回 | 基于 LoCoMo 的 1,986 QA pairs | ✅ 完成 |
 
-### Phase 10: ESWA Submission Readiness
+### Phase 10: Research Readiness
 
-**投稿前检查清单:**
+\*\*发表前检查清单:\*\*
 - [x] 认知记忆理论框架
 - [x] 数学形式化定义（formalism.md）
 - [x] LoCoMo 基准（44.1%）
@@ -498,7 +498,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 - [x] 公开仓库 + 可复现
 - [x] 文档完善（theory.md, formalism.md）
 
-> **状态**: 所有 10 项检查项 ✅ 完成。NWC 已具备 ESWA 投稿条件。
+> \*\*状态\*\*: 所有 10 项检查项 ✅ 完成。
 
 ---
 
@@ -522,7 +522,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 | **v1.3.x** | Lifecycle + Activation + Benchmark | LoCoMo 44.1% |
 | **v1.4.x** | Schema + Compression + Multi-Benchmark | LongBench CI |
 | **v1.5.x** | Formalism + Theory + Baselines | 对比实验完成 |
-| **v2.0.0** | ESWA Submission Ready | 所有检查项通过 |
+| **v2.0.0** | Research Ready | 所有检查项通过 |
 
 ## 六、版本历史
 

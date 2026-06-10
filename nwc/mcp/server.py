@@ -256,7 +256,7 @@ class McpServer:
                 "jsonrpc": "2.0", "id": req_id,
                 "result": {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "neuroweave-cortex", "version": "1.1.0"},
+                    "serverInfo": {"name": "neuroweave-cortex", "version": "1.4.0"},
                     "capabilities": {"tools": {}},
                 },
             }

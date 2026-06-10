@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NeuroWeave Cortex API",
-    version="1.1.0",
+    version="1.4.0",
     description="Cognitive Runtime API — memory, context, and graph for LLM agents.",
     lifespan=lifespan,
 )

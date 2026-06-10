@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.4-blue?style=flat-square" alt="version"/>
+  <img src="https://img.shields.io/badge/version-1.4.0-blue?style=flat-square" alt="version"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="license"/>
   <img src="https://img.shields.io/badge/python-3.11%2B-orange?style=flat-square" alt="python"/>
   <img src="https://img.shields.io/badge/status-beta-yellow?style=flat-square" alt="status"/>
@@ -66,7 +66,7 @@ Query → LLM generates embedding → LLM decides what's relevant → Return
 ```
 Problem: **LLM is the router.** Every retrieval is a new LLM computation. Nothing stabilizes.
 
-### The NWC Way (v1.3.1):
+### The NWC Way (v1.4.0):
 ```
 Query → Embedding → Find seed nodes → Activation spread → Return
 ```

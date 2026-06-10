@@ -48,7 +48,7 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "status": "healthy",
                 "uptime_seconds": time.time() - _start_time,
-                "version": "1.0.1",
+                "version": "1.4.0",
                 "anchors": len(mgr.graph.anchors),
                 "edges": len(mgr.graph.edges),
             })
