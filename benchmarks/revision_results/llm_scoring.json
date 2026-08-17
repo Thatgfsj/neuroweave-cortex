@@ -1,0 +1,43 @@
+{
+  "protocol": "LLM-as-judge has-answer",
+  "num_qa": 500,
+  "systems": [
+    "nwc_full",
+    "hybrid_rrf"
+  ],
+  "judges": [
+    "minimax-abab",
+    "minimax-text01"
+  ],
+  "results": {
+    "minimax-abab": {
+      "nwc_full": {
+        "has_answer_pct": 59.6,
+        "yes": 298,
+        "total": 500,
+        "elapsed_min": 5.0
+      },
+      "hybrid_rrf": {
+        "has_answer_pct": 44.8,
+        "yes": 224,
+        "total": 500,
+        "elapsed_min": 4.9
+      }
+    },
+    "minimax-text01": {
+      "nwc_full": {
+        "has_answer_pct": 66.0,
+        "yes": 330,
+        "total": 500,
+        "elapsed_min": 5.6
+      },
+      "hybrid_rrf": {
+        "has_answer_pct": 47.0,
+        "yes": 235,
+        "total": 500,
+        "elapsed_min": 5.4
+      }
+    }
+  },
+  "string_match_ref": null
+}

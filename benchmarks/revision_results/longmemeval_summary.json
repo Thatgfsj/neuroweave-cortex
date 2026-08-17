@@ -1,0 +1,65 @@
+{
+  "dataset": "LongMemEval-small",
+  "entries": 500,
+  "elapsed_min": 45.2,
+  "overall": {
+    "vanilla_rag": {
+      "has_answer_pct": 30.0,
+      "hits": 150,
+      "total": 500
+    },
+    "bm25": {
+      "has_answer_pct": 28.8,
+      "hits": 144,
+      "total": 500
+    },
+    "hybrid_rrf": {
+      "has_answer_pct": 32.0,
+      "hits": 160,
+      "total": 500
+    },
+    "nwc_full": {
+      "has_answer_pct": 38.8,
+      "hits": 194,
+      "total": 500
+    }
+  },
+  "by_task": {
+    "single-session-user": {
+      "vanilla_rag": 61.4,
+      "bm25": 60.0,
+      "hybrid_rrf": 65.7,
+      "nwc_full": 70.0
+    },
+    "multi-session": {
+      "vanilla_rag": 16.5,
+      "bm25": 12.0,
+      "hybrid_rrf": 16.5,
+      "nwc_full": 30.1
+    },
+    "single-session-preference": {
+      "vanilla_rag": 0.0,
+      "bm25": 0.0,
+      "hybrid_rrf": 0.0,
+      "nwc_full": 0.0
+    },
+    "temporal-reasoning": {
+      "vanilla_rag": 21.1,
+      "bm25": 25.6,
+      "hybrid_rrf": 24.8,
+      "nwc_full": 29.3
+    },
+    "knowledge-update": {
+      "vanilla_rag": 48.7,
+      "bm25": 46.2,
+      "hybrid_rrf": 51.3,
+      "nwc_full": 60.3
+    },
+    "single-session-assistant": {
+      "vanilla_rag": 33.9,
+      "bm25": 28.6,
+      "hybrid_rrf": 33.9,
+      "nwc_full": 33.9
+    }
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "a1_no_lifecycle": {
+    "hits": 574,
+    "total": 1986,
+    "acc": 28.9,
+    "by_category": {
+      "Temporal": {
+        "hits": 26,
+        "total": 282,
+        "acc": 9.2
+      },
+      "Short": {
+        "hits": 10,
+        "total": 321,
+        "acc": 3.1
+      },
+      "Long": {
+        "hits": 6,
+        "total": 96,
+        "acc": 6.2
+      },
+      "Composite": {
+        "hits": 344,
+        "total": 841,
+        "acc": 40.9
+      },
+      "Adversarial": {
+        "hits": 188,
+        "total": 446,
+        "acc": 42.2
+      }
+    }
+  },
+  "a2_no_activation": {
+    "hits": 580,
+    "total": 1986,
+    "acc": 29.2,
+    "by_category": {
+      "Temporal": {
+        "hits": 25,
+        "total": 282,
+        "acc": 8.9
+      },
+      "Short": {
+        "hits": 8,
+        "total": 321,
+        "acc": 2.5
+      },
+      "Long": {
+        "hits": 6,
+        "total": 96,
+        "acc": 6.2
+      },
+      "Composite": {
+        "hits": 346,
+        "total": 841,
+        "acc": 41.1
+      },
+      "Adversarial": {
+        "hits": 195,
+        "total": 446,
+        "acc": 43.7
+      }
+    }
+  },
+  "a3_no_lexical": {
+    "hits": 431,
+    "total": 1986,
+    "acc": 21.7,
+    "by_category": {
+      "Temporal": {
+        "hits": 24,
+        "total": 282,
+        "acc": 8.5
+      },
+      "Short": {
+        "hits": 6,
+        "total": 321,
+        "acc": 1.9
+      },
+      "Long": {
+        "hits": 5,
+        "total": 96,
+        "acc": 5.2
+      },
+      "Composite": {
+        "hits": 255,
+        "total": 841,
+        "acc": 30.3
+      },
+      "Adversarial": {
+        "hits": 141,
+        "total": 446,
+        "acc": 31.6
+      }
+    }
+  },
+  "a4_no_confidence": {
+    "hits": 570,
+    "total": 1986,
+    "acc": 28.7,
+    "by_category": {
+      "Temporal": {
+        "hits": 25,
+        "total": 282,
+        "acc": 8.9
+      },
+      "Short": {
+        "hits": 8,
+        "total": 321,
+        "acc": 2.5
+      },
+      "Long": {
+        "hits": 6,
+        "total": 96,
+        "acc": 6.2
+      },
+      "Composite": {
+        "hits": 340,
+        "total": 841,
+        "acc": 40.4
+      },
+      "Adversarial": {
+        "hits": 191,
+        "total": 446,
+        "acc": 42.8
+      }
+    }
+  },
+  "a5_single_layer": {
+    "hits": 445,
+    "total": 1986,
+    "acc": 22.4,
+    "by_category": {
+      "Temporal": {
+        "hits": 24,
+        "total": 282,
+        "acc": 8.5
+      },
+      "Short": {
+        "hits": 8,
+        "total": 321,
+        "acc": 2.5
+      },
+      "Long": {
+        "hits": 4,
+        "total": 96,
+        "acc": 4.2
+      },
+      "Composite": {
+        "hits": 265,
+        "total": 841,
+        "acc": 31.5
+      },
+      "Adversarial": {
+        "hits": 144,
+        "total": 446,
+        "acc": 32.3
+      }
+    }
+  },
+  "bm25": {
+    "hits": 638,
+    "total": 1986,
+    "acc": 32.1,
+    "by_category": {
+      "Temporal": {
+        "hits": 24,
+        "total": 282,
+        "acc": 8.5
+      },
+      "Short": {
+        "hits": 15,
+        "total": 321,
+        "acc": 4.7
+      },
+      "Long": {
+        "hits": 6,
+        "total": 96,
+        "acc": 6.2
+      },
+      "Composite": {
+        "hits": 388,
+        "total": 841,
+        "acc": 46.1
+      },
+      "Adversarial": {
+        "hits": 205,
+        "total": 446,
+        "acc": 46.0
+      }
+    }
+  },
+  "hybrid_rrf": {
+    "hits": 639,
+    "total": 1986,
+    "acc": 32.2,
+    "by_category": {
+      "Temporal": {
+        "hits": 26,
+        "total": 282,
+        "acc": 9.2
+      },
+      "Short": {
+        "hits": 13,
+        "total": 321,
+        "acc": 4.0
+      },
+      "Long": {
+        "hits": 6,
+        "total": 96,
+        "acc": 6.2
+      },
+      "Composite": {
+        "hits": 390,
+        "total": 841,
+        "acc": 46.4
+      },
+      "Adversarial": {
+        "hits": 204,
+        "total": 446,
+        "acc": 45.7
+      }
+    }
+  },
+  "nwc_full": {
+    "hits": 853,
+    "total": 1986,
+    "acc": 43.0,
+    "by_category": {
+      "Temporal": {
+        "hits": 52,
+        "total": 282,
+        "acc": 18.4
+      },
+      "Short": {
+        "hits": 23,
+        "total": 321,
+        "acc": 7.2
+      },
+      "Long": {
+        "hits": 10,
+        "total": 96,
+        "acc": 10.4
+      },
+      "Composite": {
+        "hits": 509,
+        "total": 841,
+        "acc": 60.5
+      },
+      "Adversarial": {
+        "hits": 259,
+        "total": 446,
+        "acc": 58.1
+      }
+    }
+  },
+  "vanilla_rag": {
+    "hits": 445,
+    "total": 1986,
+    "acc": 22.4,
+    "by_category": {
+      "Temporal": {
+        "hits": 24,
+        "total": 282,
+        "acc": 8.5
+      },
+      "Short": {
+        "hits": 8,
+        "total": 321,
+        "acc": 2.5
+      },
+      "Long": {
+        "hits": 4,
+        "total": 96,
+        "acc": 4.2
+      },
+      "Composite": {
+        "hits": 265,
+        "total": 841,
+        "acc": 31.5
+      },
+      "Adversarial": {
+        "hits": 144,
+        "total": 446,
+        "acc": 32.3
+      }
+    }
+  }
+}
