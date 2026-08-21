@@ -181,19 +181,6 @@ pytest tests/ -v
 
 ---
 
-## 📄 Citation
-
-```bibtex
-@software{neuroweave_cortex,
-  title = {NeuroWeave Cortex: A Hippocampal-Inspired Cognitive Memory System},
-  author = {Thatgfsj},
-  year = {2026},
-  url = {https://github.com/Thatgfsj/neuroweave-cortex}
-}
-```
-
----
-
 ## ⚖️ License
 
 MIT
