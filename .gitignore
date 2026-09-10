@@ -30,3 +30,6 @@ papers/
 *.log
 *.out
 *.toc
+.mimosa/
+neuroweave-cortex.md
+local-O-projects-neuroweave-cortex.md

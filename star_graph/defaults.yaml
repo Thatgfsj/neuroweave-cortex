@@ -54,6 +54,10 @@ anchor:
     ghost_half_life_factor: 0.3
     dormant_half_life_factor: 1.5
     reactivated_half_life_factor: 0.7
+    # 3D decay (docs/formalism.md §3): per-hour rates, modulated by
+    # stability via λ_eff = λ · (1 - stability·0.6)
+    activation_decay_rate: 0.01    # λ_a — activation readiness half-life ≈ 3 days
+    utility_decay_rate: 0.005      # λ_u — usefulness half-life ≈ 2 weeks
 
   consolidation:
     strengthen_threshold: 0.15
@@ -519,11 +523,19 @@ goal_tree:
   archive_stale_hours: 168.0         # archive goals idle for 7 days
   archive_achieved_hours: 720.0      # archive achieved goals after 30 days
 
-# ── Retrieval Budget (S-5) ──
+# ── Retrieval Budget (S-5) — single source of truth ──
+# Read by RetrievalBudget.from_config (star_graph/retrieval_engine/retrieval_budget.py);
+# the module constants there (MAX_HOPS/MAX_NODES/MAX_TOKENS) are only fallbacks.
+# Layering: these are the POST-FUSION caps enforced in recall(). The activation
+# spread layer has its own ceiling of 50 nodes (activation_graph.MAX_ACTIVATED_NODES,
+# the C in complexity_analysis.md Theorem 2 O(C·b)); recall() spreads with
+# max_nodes=max_items*2 ≤ 50, so the layers never multiply into runaway growth.
 retrieval_budget:
-  max_hops: 3                        # max BFS depth from seed nodes
-  max_nodes: 24                      # max activated nodes per query
-  max_tokens: 6000                   # max token budget for retrieved content
+  max_hops: 3                        # max BFS depth from seed nodes (advisory; BFS call sites hardcode 2-3)
+  max_nodes: 24                      # max items kept after RRF fusion per query
+  max_tokens: 6000                   # max token budget for retrieved content (char/4 estimate)
+  spread_max_nodes: 50               # diffusion ceiling in recall (activation_graph MAX_ACTIVATED_NODES, = theorem C)
+  spread_max_depth: 2                # diffusion depth in recall (activation-graph path)
 
 # ── Versioned Memory / Cognitive Trajectory (A-9) ──
 versioned_memory:
@@ -957,23 +969,29 @@ memory_lifecycle:
 
 # ── Phase 7: Memory Evolution ────────────────────────────
 
+# Importance Engine v2 (cognitive gatekeeper) — mirrors star_graph/importance_engine.py.
+# The engine reads these via Config.get() and falls back to identical hardcoded
+# defaults if keys are missing. θ_discard = discard_threshold (authoritative value).
 importance_engine:
-  weights:
-    emotion: 0.25
-    repetition: 0.30
-    goal: 0.20
-    novelty: 0.15
-    future: 0.10
-  thresholds:
-    discard: 0.2
-    low: 0.5
-    normal: 0.8
-    core: 1.0
+  discard_threshold: 0.15          # I(m) < this → DISCARD (not stored)
+  low_threshold: 0.35              # discard..low → LOW (stored, fast decay)
+  normal_threshold: 0.60           # low..normal → NORMAL; >= normal → CORE
+  richness_fast_gate:              # independent structural pre-filter (NOT θ_discard)
+    composite_below: 0.08          # force-discard when richness composite < this
+    force_score: 0.05              # score assigned to richness-gate discards
+  weights:                           # W-code+nov (A/B benchmarked, benchmarks/AB_README.md) — sums to 1.000
+    emotion: 0.162
+    repetition: 0.198
+    goal: 0.252
+    retrieval_feedback: 0.108
+    richness: 0.108
+    future: 0.072
+    novelty: 0.100                   # 1 − topic overlap with known knowledge
   decay_rates:
     discard: 1.0
-    low: 0.3
-    normal: 0.1
-    core: 0.02
+    low: 0.25
+    normal: 0.08
+    core: 0.015
 
 belief_system:
   initial_strength: 0.5

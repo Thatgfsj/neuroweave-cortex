@@ -170,7 +170,11 @@ class TestMemoryEvolutionEngine:
         result = engine._apply_thermal_degradation()
         assert "hot" in result
         assert "cold" in result
-        assert "finalized" in result
+        # Never-Delete stats: archived (was "finalized"/dead), thawed, frozen floor
+        assert "archived" in result
+        assert "thawed" in result
+        assert "frozen" in result
+        assert "dead" not in result
 
     def test_evolution_summary(self):
         g = StarGraph()
@@ -207,11 +211,13 @@ class TestEvolutionWithAnchors:
         result = engine._apply_time_decay(100.0)
         assert "decayed" in result
 
-    def test_time_decay_with_ghost(self):
+    def test_time_decay_with_ghost_value_maps_dormant(self):
+        """Never-Delete: legacy ghost state deserializes as DORMANT."""
         from star_graph.anchor import MemoryState
         g = StarGraph()
         a = Anchor.create(text="ghost memory")
-        a.state = MemoryState.GHOST
+        a.state = MemoryState("ghost")
+        assert a.state == MemoryState.DORMANT
         a.last_activated_at = 0.0
         g.add_anchor(a)
         engine = MemoryEvolutionEngine(g)

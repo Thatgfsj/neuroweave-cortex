@@ -207,7 +207,6 @@ class LayerManager:
         consolidated_states = {
             MemoryState.CONSOLIDATING,
             MemoryState.DORMANT,
-            MemoryState.GHOST,
             MemoryState.REACTIVATED,
         }
         if anchor.state in consolidated_states:

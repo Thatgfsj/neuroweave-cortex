@@ -18,7 +18,8 @@ Tools exposed:
     remember         — store a memory
     remember_working — store in fast ephemeral working-memory buffer
     recall           — context-aware retrieval
-    forget           — remove a memory (with ghost trace)
+    forget           — logical forgetting: lower weight, enter dormant state
+                       (the memory is never deleted and can be reactivated)
     sleep            — run 5-phase sleep consolidation
     consolidate      — micro-consolidation (incremental, non-blocking)
     stats            — memory system statistics
@@ -102,7 +103,9 @@ def _warmup_embedder():
         anchor = mgr.remember("__warmup__", tags=["system"], skip_gate=True)
         if anchor:
             mgr.recall("__warmup__", max_items=1)
-            mgr.forget(anchor.id, create_ghost=False)  # don't leave trash
+            # Never-Delete: logically forget the warmup anchor (dormant +
+            # invalidated so it never surfaces in user recalls).
+            mgr.forget(anchor.id, create_ghost=False, invalid=True)
     except Exception:
         pass  # retrieval warmup best-effort
 
@@ -180,7 +183,10 @@ TOOLS = [
     ),
     Tool(
         name="forget",
-        description="Remove a memory. Creates a ghost trace for potential fuzzy recall later.",
+        description="Logical forgetting: lowers the memory's weight and demotes it "
+                    "to the dormant state. The memory is NEVER deleted — it stays "
+                    "in the graph and can be reactivated via activation propagation. "
+                    "Records a ghost trace for potential fuzzy recall later.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -399,6 +405,10 @@ async def call_tool(name: str, arguments: dict):
                         "status": "forgotten",
                         "anchor_id": anchor_id,
                         "text_preview": anchor.text[:120],
+                        "state": anchor.state.value,
+                        "activation_level": anchor.activation_level,
+                        "note": "logical forgetting — the memory is never deleted; "
+                                "it is dormant and can be reactivated by recall",
                         "ghost_created": True,
                         "total_ghosts": ghost_count,
                     }, ensure_ascii=False, indent=2),

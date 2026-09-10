@@ -1,0 +1,50 @@
+{
+  "experiment": "retrieval_formula_ab",
+  "title": "实验二：检索公式 A/B（mode=synthetic, seed=7, 记忆=300, 查询=50, top_k=10）",
+  "mode": "synthetic",
+  "seed": 7,
+  "smoke": false,
+  "n_records": 300,
+  "n_queries": 50,
+  "top_k": 10,
+  "timestamp": "20260911_023414",
+  "arms": [
+    {
+      "arm": "R-hybrid",
+      "description": "HybridFusionRetriever 现行默认 α=.50 β=.12 γ=.18 δ=.08 ε=.12",
+      "n_written": 300,
+      "n_gate_stored": 200,
+      "n_gate_discarded": 100,
+      "n_gate_errors": 0,
+      "avg_stored_importance": 0.31283601483516493,
+      "avg_novelty": 0.0,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.04,
+      "hit_at_5": 0.06,
+      "mrr": 0.03554761904761904,
+      "has_answer": 0.14,
+      "n_queries": 50,
+      "avg_recall_ms": 58.42090400401503,
+      "weights": {}
+    },
+    {
+      "arm": "R-plan",
+      "description": "plan.md 五因子: semantic.35 + temporal.20 + importance.25 + relationship.10 + frequency.10",
+      "n_written": 300,
+      "n_gate_stored": 200,
+      "n_gate_discarded": 100,
+      "n_gate_errors": 0,
+      "avg_stored_importance": 0.31283601483516493,
+      "avg_novelty": 0.0,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.02,
+      "hit_at_5": 0.02,
+      "mrr": 0.020158730158730157,
+      "has_answer": 0.1,
+      "n_queries": 50,
+      "avg_recall_ms": 35.12846000492573,
+      "weights": {}
+    }
+  ],
+  "markdown": "## 实验二：检索公式 A/B（mode=synthetic, seed=7, 记忆=300, 查询=50, top_k=10）\n\n| 配置 | 存储量/总量 | 平均重要度 | 平均novelty | hit@1 | hit@3 | hit@5 | MRR | has_answer | 平均召回耗时(ms) |\n|---|---|---|---|---|---|---|---|---|---|\n| R-hybrid | 200/300 | 0.313 | 0.000 | 0.000 | 0.040 | 0.060 | 0.036 | 0.140 | 58.4 |\n| R-plan | 200/300 | 0.313 | 0.000 | 0.000 | 0.020 | 0.020 | 0.020 | 0.100 | 35.1 |"
+}

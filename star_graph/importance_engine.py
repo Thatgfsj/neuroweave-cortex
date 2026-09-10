@@ -1,14 +1,20 @@
-"""Importance Engine v2 — cognitive gatekeeper with real perception analysis.
+"""Importance Engine v2.1 — cognitive gatekeeper with real perception analysis.
 
 Integrates with PerceptionLayer for intent/emotion analysis, GoalSystem for
 goal-relationship scoring, and maintains a proper topic tracker with time decay.
 
-Formula:
-    importance = emotion_signal × 0.20
-               + repetition_signal × 0.25
-               + goal_relation × 0.25
-               + content_richness × 0.15
-               + future_recall_likelihood × 0.15
+Weights adopted after A/B benchmarking (benchmarks/AB_README.md — W-code+nov):
+the v2 signal set plus a novelty signal (1 − topic overlap with known
+knowledge); novelty is required by the project's human-like memory goals.
+
+Formula (see ImportanceWeights for the authoritative values):
+    importance = emotion_signal       × w_emotion   (default 0.162)
+               + repetition_signal    × w_repetition (default 0.198)
+               + goal_relation        × w_goal       (default 0.252)
+               + retrieval_feedback   × w_retrieval_feedback (default 0.108)
+               + content_richness     × w_richness   (default 0.108)
+               + future_recall_likelihood × w_future (default 0.072)
+               + novelty_signal       × w_novelty    (default 0.100)
 
 Content richness factors:
     - Entity density (named entities, technical terms)
@@ -16,11 +22,15 @@ Content richness factors:
     - Actionability (is this a task/command/decision?)
     - Information density (meaningful words / total words)
 
-Noise gate:
+Noise gate (thresholds configurable via `importance_engine` in
+star_graph/defaults.yaml):
     0.00–0.15 → DISCARD  (greetings, filler, pure noise)
     0.15–0.35 → LOW      (casual chat, disposable)
     0.35–0.60 → NORMAL   (standard, participates in consolidation)
     0.60–1.00 → CORE     (forced to Semantic/Pattern, low decay)
+
+A separate richness fast gate force-discards inputs with richness composite
+< 0.08 and zero entities/technical terms, regardless of the weighted score.
 """
 
 from dataclasses import dataclass, field
@@ -31,21 +41,48 @@ import math
 from typing import Optional
 
 
+# ── Config-driven thresholds ───────────────────────────────
+# All gate thresholds live in defaults.yaml under `importance_engine`.
+# Values below are fallbacks used when the section/key is absent.
+
+DEFAULT_DISCARD_THRESHOLD = 0.15
+DEFAULT_LOW_THRESHOLD = 0.35
+DEFAULT_NORMAL_THRESHOLD = 0.60
+DEFAULT_RICHNESS_GATE_COMPOSITE = 0.08
+DEFAULT_RICHNESS_GATE_FORCE_SCORE = 0.05
+
+
+def _cfg_float(dotted_path: str, fallback: float) -> float:
+    """Read a float from the global Config by dotted path, falling back safely."""
+    try:
+        from .config import Config
+        value = Config.get().get_path(dotted_path, fallback)
+        return float(value) if value is not None else fallback
+    except Exception:
+        return fallback
+
+
 # ── Levels ─────────────────────────────────────────────────
 
 class ImportanceLevel:
-    DISCARD = "discard"   # < 0.15
-    LOW = "low"           # 0.15–0.35
-    NORMAL = "normal"     # 0.35–0.60
-    CORE = "core"         # > 0.60
+    DISCARD = "discard"   # < importance_engine.discard_threshold (default 0.15)
+    LOW = "low"           # discard–low (default 0.15–0.35)
+    NORMAL = "normal"     # low–normal (default 0.35–0.60)
+    CORE = "core"         # >= normal (default >= 0.60)
 
     @staticmethod
     def classify(score: float) -> str:
-        if score < 0.15:
+        discard = _cfg_float("importance_engine.discard_threshold",
+                             DEFAULT_DISCARD_THRESHOLD)
+        low = _cfg_float("importance_engine.low_threshold",
+                         DEFAULT_LOW_THRESHOLD)
+        normal = _cfg_float("importance_engine.normal_threshold",
+                            DEFAULT_NORMAL_THRESHOLD)
+        if score < discard:
             return ImportanceLevel.DISCARD
-        elif score < 0.35:
+        elif score < low:
             return ImportanceLevel.LOW
-        elif score < 0.60:
+        elif score < normal:
             return ImportanceLevel.NORMAL
         else:
             return ImportanceLevel.CORE
@@ -73,6 +110,7 @@ class ImportanceSignal:
     retrieval_feedback: float = 0.0    # new: retrieval_count × success_rate
     content_richness: float = 0.0
     future_recall_likelihood: float = 0.0
+    novelty_signal: float = 0.0        # 1 − overlap with known knowledge
 
     def compute(self, weights: "ImportanceWeights") -> float:
         return (
@@ -82,17 +120,21 @@ class ImportanceSignal:
             + self.retrieval_feedback * weights.retrieval_feedback
             + self.content_richness * weights.richness
             + self.future_recall_likelihood * weights.future
+            + self.novelty_signal * weights.novelty
         )
 
 
 @dataclass
 class ImportanceWeights:
-    emotion: float = 0.18
-    repetition: float = 0.22
-    goal: float = 0.28
-    retrieval_feedback: float = 0.12  # new: retrieval_count × recall_success
-    richness: float = 0.12
-    future: float = 0.08
+    # W-code+nov (A/B benchmarked, benchmarks/AB_README.md): v2 signals ×0.90
+    # + novelty 0.100 — sums to exactly 1.000.
+    emotion: float = 0.162
+    repetition: float = 0.198
+    goal: float = 0.252
+    retrieval_feedback: float = 0.108
+    richness: float = 0.108
+    future: float = 0.072
+    novelty: float = 0.100
 
 
 @dataclass
@@ -108,6 +150,10 @@ class ImportanceResult:
 
 
 # ── Topic tracker with decay ───────────────────────────────
+
+BURST_WINDOW_SECONDS = 3600  # mentions within 1h of each other count as a burst
+BURST_MAX = 20               # cap so a sustained burst saturates instead of growing unbounded
+
 
 @dataclass
 class TopicEntry:
@@ -171,6 +217,9 @@ class ImportanceEngine:
         # Track retrieval count per semantic signature for feedback loop
         self._retrieval_counts: dict[str, float] = {}  # concept_key → retrieval_count
         self._retrieval_success_rate: dict[str, float] = {}
+        # Known-knowledge vocabulary for novelty scoring (term → seen count).
+        # Updated AFTER scoring so a text never overlaps itself.
+        self._known_terms: dict[str, int] = {}
 
     # ── Main API ──────────────────────────────────────────
 
@@ -206,14 +255,25 @@ class ImportanceEngine:
         signal.future_recall_likelihood = self._score_future(
             signal.repetition_signal, signal.goal_relation, signal.emotion_signal,
             richness.actionability_score)
+        terms = self._extract_terms(text, extracted_concepts or [],
+                                    extracted_entities or [], topic_tags or [])
+        signal.novelty_signal = self._score_novelty(terms)
 
-        # Force-discard pure casual/small-talk
-        if richness.composite < 0.08 and richness.entity_count == 0 and richness.technical_term_count == 0:
-            score = 0.05
+        # Force-discard pure casual/small-talk. NOTE: this richness fast gate is
+        # an independent structural pre-filter, distinct from θ_discard below —
+        # it bypasses the weighted score entirely when the input has no
+        # entities/technical terms and near-zero content richness.
+        richness_gate = _cfg_float("importance_engine.richness_fast_gate.composite_below",
+                                   DEFAULT_RICHNESS_GATE_COMPOSITE)
+        if (richness.composite < richness_gate
+                and richness.entity_count == 0
+                and richness.technical_term_count == 0):
+            force_score = _cfg_float("importance_engine.richness_fast_gate.force_score",
+                                     DEFAULT_RICHNESS_GATE_FORCE_SCORE)
             level = ImportanceLevel.DISCARD
             self._total_discarded += 1
             return ImportanceResult(
-                score=0.05, level=ImportanceLevel.DISCARD, signal=signal,
+                score=force_score, level=ImportanceLevel.DISCARD, signal=signal,
                 richness=richness, should_store=False, decay_rate=1.0,
                 consolidation_priority=0)
 
@@ -231,12 +291,24 @@ class ImportanceEngine:
                 entry.topic = tag
                 entry.first_seen = now
             entry.count += 1
-            entry.last_seen = now
-            # Burst detection: if seen within last hour, increment burst
-            if now - entry.last_seen < 3600:
-                entry.recent_burst += 1
+            # Burst detection: compare against the *previous* last_seen BEFORE
+            # updating it. The old order wrote last_seen = now first, which made
+            # `now - entry.last_seen < 3600` always true and burst counts grow
+            # forever. Outside the window the burst restarts at 1; inside it the
+            # count increments but is capped at BURST_MAX.
+            # elapsed == 0 (same tag in both tags and concepts of one call) or
+            # slightly negative (clock skew) counts as within-window.
+            elapsed = now - entry.last_seen
+            if elapsed < BURST_WINDOW_SECONDS:
+                entry.recent_burst = min(entry.recent_burst + 1, BURST_MAX)
             else:
-                entry.recent_burst = 1
+                entry.recent_burst = 1  # first sighting (last_seen == 0) or window expired
+            entry.last_seen = now
+
+        # Fold this text's terms into known knowledge AFTER scoring so the
+        # novelty of the current text is never diluted by itself.
+        for term in terms:
+            self._known_terms[term] = self._known_terms.get(term, 0) + 1
 
         return ImportanceResult(
             score=score, level=level, signal=signal, richness=richness,
@@ -418,6 +490,38 @@ class ImportanceEngine:
         """Predict likelihood of future recall."""
         return (repetition * 0.35 + goal_relation * 0.30
                 + emotion * 0.15 + actionability * 0.20)
+
+    @staticmethod
+    def _extract_terms(text: str, concepts: list[str], entities: list[str],
+                       tags: list[str]) -> set[str]:
+        """Keyword set used for novelty overlap (latin words + CJK bigrams).
+
+        Concepts/entities/tags are added as whole terms so structured signals
+        participate in the overlap even when tokenization would split them.
+        """
+        terms: set[str] = set()
+        for word in re.findall(r"[a-z0-9]{2,}", text.lower()):
+            terms.add(word)
+        # CJK bigrams (single hanzi are too granular for meaningful overlap)
+        for seq in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+            for i in range(len(seq) - 1):
+                terms.add(seq[i:i + 2])
+        for item in concepts + entities + tags:
+            if item:
+                terms.add(str(item).lower())
+        return terms
+
+    def _score_novelty(self, terms: set[str]) -> float:
+        """1 − max overlap with known knowledge (plan.md: 新话题 vs 已存储知识).
+
+        Empty known-knowledge or empty terms → fully novel (1.0). The known
+        vocabulary is updated after scoring, so first-seen texts are always
+        novelty 1.0 and verbatim repeats converge to 0.
+        """
+        if not self._known_terms or not terms:
+            return 1.0
+        overlap = sum(1 for term in terms if term in self._known_terms)
+        return max(0.0, 1.0 - overlap / len(terms))
 
     def _score_retrieval_feedback(self, concepts: list[str], tags: list[str],
                                    retrieval_count: int) -> float:

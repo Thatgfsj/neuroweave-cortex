@@ -145,7 +145,7 @@ nwc mcp --load my_memories.json
 | `context` | Get compressed cognitive context for LLM injection |
 | `reflect` | Run sleep consolidation |
 | `evolve` | Memory evolution cycle |
-| `forget` | Remove a memory with ghost trace |
+| `forget` | 逻辑遗忘：降低权重转入休眠（DORMANT），记忆永不删除、可被重新激活 |
 | `fuzzy_recall` | Low-confidence recall from ghost traces |
 | `stats` | Memory system statistics |
 | `get_profile` | Inferred user profile |
@@ -356,7 +356,7 @@ NWC is NOT a vector database with a pretty API. It's a **cognitive runtime**:
 - **Self-model prompt injection** — LLM sees compressed cognitive state, not raw memory dumps
 - **Autonomous reasoning** — contradiction detection → activation → resolution (no LLM required)
 - **Sleep consolidation** — 8-phase sleep that actually changes the memory graph
-- **Ghost revival** — forgotten memories can be revived by related new experiences (savings effect)
-- **9-stage lifecycle** — memories move through Perception → Working → ... → Ghost → Dead
+- **Ghost revival** — dormant memories can be revived by related new experiences (savings effect; residual-trace recall via `fuzzy_recall`)
+- **6-state lifecycle** — memories move through ACTIVE → REHEARSING → CONSOLIDATING → INACTIVE → DORMANT → REACTIVATED (Never-Delete: no Ghost/Dead states since v1.3.2)
 
 This is the difference between "a library that stores vectors" and "an external cognitive cortex for AI agents."

@@ -268,10 +268,33 @@ class VectorSimilarityRetriever(Retriever):
                     ))
             scored.sort(key=lambda x: -x[0])
         else:
-            # Fallback linear scan
+            # Fallback linear scan — cosine similarities computed with one
+            # vectorized matmul; per-pair fallback for ragged dimensions.
+            anchors_list = list(self.graph.anchors.values())
+            embs = [a.embedding for a in anchors_list]
+            d = len(embedding)
+            sims = None
+            if d > 0 and all(e and len(e) == d for e in embs):
+                mat = np.asarray(embs, dtype=np.float64)
+                q = np.asarray(embedding, dtype=np.float64)
+                denom = np.linalg.norm(mat, axis=1) * np.linalg.norm(q) + 1e-8
+                sims = np.maximum(mat @ q / denom, 0.0)
+
             scored = []
-            for anchor in self.graph.anchors.values():
-                if anchor.embedding:
+            for i, anchor in enumerate(anchors_list):
+                if sims is not None and anchor.embedding:
+                    sim = float(sims[i])
+                    score = sim * anchor.retention_score
+                    scored.append((
+                        score,
+                        anchor,
+                        "linear_vector",
+                        {
+                            "semantic_similarity": sim,
+                            "retention": anchor.retention_score,
+                        },
+                    ))
+                elif anchor.embedding:
                     sim = max(0.0, self._cosine_sim(embedding, anchor.embedding))
                     score = sim * anchor.retention_score
                     scored.append((
@@ -426,6 +449,32 @@ class OscillationResonanceRetriever(Retriever):
             "retention": anchor.retention_score,
         }
 
+    def _batch_semantic_sims(self, query: str, embedding: list[float],
+                             anchors: list[Anchor]) -> list[float]:
+        """Semantic similarity of the query to each anchor, vectorized.
+
+        Single matrix-vector product for the common case where every anchor
+        embedding has the same dim as the query; per-pair fallback (with the
+        text-overlap path for anchors without embeddings) otherwise. Mirrors
+        _cosine_sim semantics: dot / (na * nb + 1e-8), clamped at 0.
+        """
+        embs = [a.embedding for a in anchors]
+        d = len(embedding)
+        if d > 0 and all(e and len(e) == d for e in embs):
+            mat = np.asarray(embs, dtype=np.float64)
+            q = np.asarray(embedding, dtype=np.float64)
+            dots = mat @ q
+            denom = np.linalg.norm(mat, axis=1) * np.linalg.norm(q) + 1e-8
+            return [max(0.0, float(s)) for s in dots / denom]
+        # Ragged dims or missing embeddings — per-pair fallback.
+        out: list[float] = []
+        for a in anchors:
+            if a.embedding:
+                out.append(max(0.0, self._cosine_sim(embedding, a.embedding)))
+            else:
+                out.append(self._text_overlap(query, a.text))
+        return out
+
     def retrieve(self, query: str, embedding: list[float] | None = None,
                  top_k: int = 3) -> RetrievalResult:
         t0 = time.perf_counter()
@@ -448,38 +497,46 @@ class OscillationResonanceRetriever(Retriever):
         query_phasor, driving_freq = self._derive_driving_phasor(query, embedding)
         query_phase = math.atan2(query_phasor.imag, query_phasor.real) % (2 * math.pi)
 
-        # Score every anchor: (1-w)*semantic_sim + w*phase_coherence, weighted by retention
-        scored: list[tuple[float, Anchor, dict[str, float]]] = []
-        for anchor in self.graph.anchors.values():
-            if anchor.embedding:
-                semantic_sim = max(0.0, self._cosine_sim(embedding, anchor.embedding))
-            else:
-                semantic_sim = self._text_overlap(query, anchor.text)
+        # Score every anchor: (1-w)*semantic_sim + w*phase_coherence, weighted by retention.
+        # Semantic sims are computed with one vectorized matmul; explainability
+        # trace components are computed only for the final top candidates.
+        anchors_list = list(self.graph.anchors.values())
+        semantic_sims = self._batch_semantic_sims(query, embedding, anchors_list)
+
+        scored: list[tuple[float, Anchor, float, float]] = []
+        for anchor, semantic_sim in zip(anchors_list, semantic_sims):
             phase_coh = self._phase_coherence(query_phase, anchor)
             score_base = (1.0 - self.phase_weight) * semantic_sim + self.phase_weight * phase_coh
             score = max(0.0, score_base * anchor.retention_score)
-            trace_comps = self._trace_components(query_phasor, driving_freq, anchor)
-            trace_comps["semantic_similarity"] = semantic_sim
-            trace_comps["activation"] = score_base * 0.3
-            scored.append((score, anchor, trace_comps))
+            scored.append((score, anchor, semantic_sim, score_base))
         scored.sort(key=lambda x: -x[0])
 
         sorted_anchors = scored
 
         constellations = []
-        for score, anchor, comps in sorted_anchors[:top_k]:
+        for score, anchor, _, _ in sorted_anchors[:top_k]:
             constellations.append(Constellation(anchors=[anchor], edges=[]))
 
         latency = (time.perf_counter() - t0) * 1000
         top_score = sorted_anchors[0][0] if sorted_anchors else 0.0
 
+        # Trace components are explainability-only output: compute them for
+        # the final top candidates (top_k×3 window), not for every anchor.
+        trace_limit = min(len(sorted_anchors), max(top_k, top_k * 3))
+        comps_by_id: dict[str, dict[str, float]] = {}
+        for score, anchor, semantic_sim, score_base in sorted_anchors[:trace_limit]:
+            comps = self._trace_components(query_phasor, driving_freq, anchor)
+            comps["semantic_similarity"] = semantic_sim
+            comps["activation"] = score_base * 0.3
+            comps_by_id[anchor.id] = comps
+
         trace_rows: list[tuple[Anchor, float, str, dict[str, float]]] = []
-        for score, anchor, comps in sorted_anchors[:top_k]:
+        for score, anchor, _, _ in sorted_anchors[:top_k]:
             trace_rows.append((
                 anchor,
                 score,
                 "oscillation_resonance",
-                comps,
+                comps_by_id.get(anchor.id, {}),
             ))
 
         return RetrievalResult(
@@ -715,17 +772,21 @@ class HybridFusionRetriever(Retriever):
     """Properly fuses embedding similarity, temporal context, and graph structure.
 
     This replaces the broken oscillation-resonance approach with a
-    principled multi-signal fusion:
+    principled multi-signal fusion (the production retrieval pipeline —
+    LoCoMo-10 44.2% has_answer):
 
         score = α * semantic_sim + β * temporal + γ * ppr + δ * confidence
+                + ε * lexical
 
     where:
         - semantic_sim: direct cosine similarity to query embedding
         - temporal: recency bonus for recently accessed memories
         - ppr: Personalized PageRank score (graph structure)
         - confidence: edge confidence from RichEdge traversal
+        - lexical: BM25/keyword lexical overlap channel
 
-    Default weights: α=0.55, β=0.15, γ=0.20, δ=0.10
+    Default weights: α=0.50, β=0.12, γ=0.18, δ=0.08, ε=0.12
+    (confirmed winner of the retrieval A/B — benchmarks/AB_README.md)
     """
 
     def __init__(self, graph: StarGraph,

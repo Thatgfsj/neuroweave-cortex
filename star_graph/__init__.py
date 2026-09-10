@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 import sys
 from typing import Any
@@ -391,7 +391,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ActivationEngine":        ("star_graph.activation_engine", "ActivationEngine"),
     "ActivationSeed":          ("star_graph.activation_engine", "ActivationSeed"),
     "ActivationToken":         ("star_graph.activation_engine", "ActivationToken"),
-    "ActivatedNode":           ("star_graph.activation_engine", "ActivatedNode"),
+    # Renamed: plain "ActivatedNode" refers to star_graph.spreading.ActivatedNode
+    "ActivationEngineNode":    ("star_graph.activation_engine", "ActivatedNode"),
     "SemanticPath":            ("star_graph.activation_engine", "SemanticPath"),
     "ActivationResult":        ("star_graph.activation_engine", "ActivationResult"),
 
@@ -489,7 +490,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "LayerManager":            ("star_graph.memory_layers", "LayerManager"),
 
     # typed memory
-    "MemoryType":              ("star_graph.typed_memory", "MemoryType"),
+    # Renamed: plain "MemoryType" refers to star_graph.cortex_api.scheduler.MemoryType
+    "TypedMemoryType":         ("star_graph.typed_memory", "MemoryType"),
     "TypeStrategy":            ("star_graph.typed_memory", "TypeStrategy"),
     "TypeManager":             ("star_graph.typed_memory", "TypeManager"),
 
@@ -516,7 +518,8 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 
     # agent state memory
     "AgentState":              ("star_graph.agent_state", "AgentState"),
-    "GoalNode":                ("star_graph.agent_state", "GoalNode"),
+    # Renamed: plain "GoalNode" refers to star_graph.goal_tree.GoalNode
+    "AgentGoalNode":           ("star_graph.agent_state", "GoalNode"),
     "ToolCallRecord":          ("star_graph.agent_state", "ToolCallRecord"),
     "Checkpoint":              ("star_graph.agent_state", "Checkpoint"),
     "AgentStateManager":       ("star_graph.agent_state", "AgentStateManager"),
@@ -528,11 +531,13 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 
     # v1.3: activation-graph & memory lifecycle
     "ActivationGraph":         ("star_graph.activation_graph", "ActivationGraph"),
-    "ActivatedNode":           ("star_graph.activation_graph", "ActivatedNode"),
+    # Renamed: plain "ActivatedNode" refers to star_graph.spreading.ActivatedNode
+    "ActivationGraphNode":     ("star_graph.activation_graph", "ActivatedNode"),
     "get_activation_graph":    ("star_graph.activation_graph", "get_activation_graph"),
     "compute_edge_strength":   ("star_graph.activation_graph", "compute_edge_strength"),
     "MemoryLifecycleEngine":   ("star_graph.memory_lifecycle", "MemoryLifecycleEngine"),
-    "MemoryLayer":             ("star_graph.memory_lifecycle", "MemoryLayer"),
+    # Renamed: plain "MemoryLayer" refers to star_graph.memory_layers.MemoryLayer
+    "LifecycleMemoryLayer":    ("star_graph.memory_lifecycle", "MemoryLayer"),
     "MemoryMigration":         ("star_graph.memory_lifecycle", "MemoryMigration"),
 
     # v1.2.11: observatory & gravity well (cleaned for v1.3)

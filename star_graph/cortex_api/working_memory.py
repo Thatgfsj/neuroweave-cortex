@@ -141,10 +141,11 @@ class WorkingMemory:
             scored = scored[:max_items]
         return scored
 
-    def promote(self, entry: WorkingMemoryEntry, manager) -> str:
+    def promote(self, entry: WorkingMemoryEntry, manager) -> str | None:
         """Promote a working memory entry to a full long-term Anchor.
 
-        Returns the new anchor ID.
+        Returns the new anchor ID, or None if the write gate rejected the
+        promotion (the entry stays in working memory).
         """
         anchor = manager.remember(
             text=entry.text,
@@ -153,6 +154,8 @@ class WorkingMemory:
             emotional_valence=entry.emotional_valence,
             importance=max(0.5, entry.importance),
         )
+        if anchor is None:
+            return None
         self._entries = [e for e in self._entries if e is not entry]
         return anchor.id
 
@@ -175,9 +178,12 @@ class WorkingMemory:
         self._exact_index.clear()
 
     def clear_session(self, session_id: str):
-        """Clear entries from a specific session."""
+        """Clear entries from a specific session (and their exact-index keys)."""
+        removed = [e for e in self._entries if e.source_session == session_id]
         self._entries = [e for e in self._entries
                          if e.source_session != session_id]
+        for e in removed:
+            self._unindex_entry(e)
 
     # ── Internal ──────────────────────────────────────────
 

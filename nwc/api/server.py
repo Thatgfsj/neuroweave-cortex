@@ -9,6 +9,7 @@ Endpoints:
     /graph                 — Get memory graph overview
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -37,8 +38,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+    # "*" origins cannot be combined with allow_credentials=True (browsers
+    # reject the response and Starlette will not echo the origin) — keep the
+    # wildcard for open local/dev use with credentials disabled.
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -151,7 +155,7 @@ async def chat_completions(req: ChatRequest):
     if req.inject_memory:
         user_msg = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
         if user_msg:
-            frame = cortex.context(user_msg)
+            frame = await asyncio.to_thread(cortex.context, user_msg)
             system_content = frame.to_system_prompt()
             # Prepend cognitive context as system message
             messages = [ChatMessage(role="system", content=system_content)] + list(req.messages)
@@ -165,7 +169,7 @@ async def chat_completions(req: ChatRequest):
             llm = get_llm(cfg.llm.provider, cfg.llm.model, cfg.llm.api_key, cfg.llm.base_url)
             from nwc.llm.base import ChatMessage as BaseMsg
             llm_messages = [BaseMsg(role=m.role, content=m.content) for m in messages]
-            resp = llm.chat_sync(llm_messages)
+            resp = await asyncio.to_thread(llm.chat_sync, llm_messages)
             return ChatResponse(
                 choices=[ChatChoice(message=ChatMessage(role="assistant", content=resp.content))],
                 model=cfg.llm.model,
@@ -174,7 +178,8 @@ async def chat_completions(req: ChatRequest):
         pass
 
     # Fallback: return memory-augmented context as response
-    frame = cortex.context(req.messages[-1].content if req.messages else "")
+    frame = await asyncio.to_thread(
+        cortex.context, req.messages[-1].content if req.messages else "")
     return ChatResponse(
         choices=[ChatChoice(message=ChatMessage(
             role="assistant",
@@ -192,7 +197,7 @@ async def health():
     """Health check."""
     if not cortex:
         raise HTTPException(503, "Cortex not initialized")
-    s = cortex.stats()
+    s = await asyncio.to_thread(cortex.stats)
     return {"status": "healthy", **s}
 
 
@@ -201,7 +206,10 @@ async def memory_write(req: MemoryWriteRequest):
     """Store a memory."""
     if not cortex:
         raise HTTPException(503, "Cortex not initialized")
-    anchor_id = cortex.remember(req.text, tags=req.tags, importance=req.importance)
+    anchor_id = await asyncio.to_thread(
+        cortex.remember, req.text,
+        tags=req.tags, importance=req.importance,
+        emotional_valence=req.emotional_valence)
     return MemoryWriteResponse(id=anchor_id)
 
 
@@ -210,7 +218,8 @@ async def memory_query(req: MemoryQueryRequest):
     """Retrieve memories by semantic query."""
     if not cortex:
         raise HTTPException(503, "Cortex not initialized")
-    result = cortex.recall(req.query, max_items=req.max_items, context=req.context)
+    result = await asyncio.to_thread(
+        cortex.recall, req.query, max_items=req.max_items, context=req.context)
     return MemoryQueryResponse(
         memory=[MemoryItem(**m) for m in result.memory],
         entities=result.entities,
@@ -224,7 +233,7 @@ async def memory_context(req: ContextRequest):
     """Get compressed cognitive context for LLM injection."""
     if not cortex:
         raise HTTPException(503, "Cortex not initialized")
-    frame = cortex.context(req.prompt)
+    frame = await asyncio.to_thread(cortex.context, req.prompt)
     return ContextResponse(
         focus=frame.focus,
         active_goals=frame.active_goals,
@@ -241,7 +250,7 @@ async def graph():
     """Get memory graph overview."""
     if not cortex:
         raise HTTPException(503, "Cortex not initialized")
-    s = cortex.stats()
+    s = await asyncio.to_thread(cortex.stats)
     return GraphResponse(
         anchors=s.get("anchors", s.get("anchor_count", 0)),
         edges=s.get("edges", s.get("edge_count", 0)),

@@ -173,7 +173,7 @@ class AsyncMemoryManager:
         return result
 
     async def forget(self, anchor_id: str, create_ghost: bool = True):
-        """Async: Remove a memory."""
+        """Async: Logically forget a memory (demote to DORMANT — never deleted)."""
         await self._init()
         loop = asyncio.get_running_loop()
 

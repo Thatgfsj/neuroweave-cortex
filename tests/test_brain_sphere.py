@@ -185,10 +185,10 @@ class TestBrainSphere:
     def test_query_common_nodes_skips_non_retrievable(self):
         bs = BrainSphere()
         a = make_anchor("a1", "test", embedding=[0.1] * 128)
-        a.state = __import__('star_graph.anchor', fromlist=['MemoryState']).MemoryState.GHOST
+        a.invalid_at = 1.0  # only invalid_at blocks retrieval (Never-Delete)
         bs.cache_node(a)
         results = bs.query_common_nodes(query_embedding=[0.1] * 128, min_similarity=0.0)
-        # GHOST state is not retrievable
+        # invalidated anchors are not retrievable
         assert isinstance(results, list)
 
     def test_evict_node(self):

@@ -805,18 +805,17 @@ class SleepConsolidate:
     def _apply_thermal_forgetting(self) -> dict:
         """Apply thermal lifecycle degradation.
 
-        Five-level thermal downgrade:
+        Thermal downgrade (Never-Delete — no DEAD state, FROZEN is the floor):
         - HOT→WARM: retention dropped below 0.4, reduce priority
         - WARM→COLD: long-unaccessed, retention < 0.15, offload to index
-        - COLD→FROZEN: retention < 0.06, disk-only archive tier
-        - FROZEN→DEAD: retention < 0.01, hash-only audit trail
+        - COLD→FROZEN: retention < 0.06, archive tier (still propagation-reachable)
         """
-        stats = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0, "dead": 0,
+        stats = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0,
                  "downgraded": 0, "finalized": 0}
         import time as _time
         now = _time.time()
 
-        from ..anchor import ThermalState, MemoryState as MS
+        from ..anchor import ThermalState
         for anchor in self.graph.anchors.values():
             ts = anchor.thermal_state
             stats[ts.value] = stats.get(ts.value, 0) + 1
@@ -842,13 +841,6 @@ class SleepConsolidate:
                     anchor.vector.stability = max(0.0, anchor.vector.stability - 0.02)
                     stats["downgraded"] += 1
 
-            elif ts == ThermalState.FROZEN:
-                # FROZEN→DEAD: retention below 0.01
-                if anchor.retention_score < 0.01:
-                    anchor.state = MS.GHOST
-                    anchor._ghost_reactivation_prob = 0.005
-                    stats["finalized"] += 1
-
         return stats
 
     # ── Phase 8: Index Rebuild ─────────────────────────────
@@ -865,20 +857,20 @@ class SleepConsolidate:
     # ── Helpers ─────────────────────────────────────────
 
     def _refresh_cortical_index(self) -> None:
-        """Rebuild cortical index, excluding FROZEN and DEAD anchors."""
+        """Rebuild cortical index, excluding FROZEN archive-tier anchors."""
         from ..anchor import ThermalState
         self.graph.cortical_index = [
             (a.embedding, a.id)
             for a in self.graph.anchors.values()
             if a.embedding and a.is_cortical
-            and a.thermal_state not in (ThermalState.FROZEN, ThermalState.DEAD)
+            and a.thermal_state != ThermalState.FROZEN
         ]
-        # Sync ANN index — exclude FROZEN/DEAD
+        # Sync ANN index — exclude FROZEN archive tier
         ann = self.graph._get_ann_index() if self.graph._ann_index is not None else None
         if ann is not None:
             ann.clear()
             for a in self.graph.anchors.values():
-                if a.embedding and a.thermal_state not in (ThermalState.FROZEN, ThermalState.DEAD):
+                if a.embedding and a.thermal_state != ThermalState.FROZEN:
                     ann.add(a.id, a.embedding)
             ann.rebuild()
 

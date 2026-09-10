@@ -87,11 +87,20 @@ class TestTopologyRank:
     def test_topology_rank_non_retrievable_excluded(self):
         g = make_rich_graph()
         ids = list(g.anchors.keys())
-        # Freeze one anchor
+        # Never-Delete: FROZEN alone must NOT exclude an anchor (it stays
+        # propagation-reachable); only user invalidation blocks retrieval.
+        g.anchors[ids[0]].invalid_at = 1234.0
+        results = topology_rank(g, candidate_ids=[ids[0]], top_k=5)
+        assert len(results) == 0  # invalidated anchor is not retrievable
+
+    def test_topology_rank_frozen_included(self):
+        """Never-Delete: FROZEN archive-tier anchors remain rankable."""
+        g = make_rich_graph()
+        ids = list(g.anchors.keys())
         from star_graph import ThermalState
         g.anchors[ids[0]]._thermal_state = ThermalState.FROZEN
         results = topology_rank(g, candidate_ids=[ids[0]], top_k=5)
-        assert len(results) == 0  # FROZEN is not retrievable
+        assert len(results) == 1
 
     def test_topology_rank_with_query_embedding(self):
         g = make_rich_graph()

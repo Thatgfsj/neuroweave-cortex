@@ -7,6 +7,7 @@ Inherited by MemoryRuntime alongside RuntimeCore.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from ..anchor import Anchor
 from ..shard import MemoryShardManager
 from ..cost_estimator import SleepCostEstimator, CostEstimate
 from ..snapshot import SnapshotManager, SnapshotMeta
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeLifecycle:
@@ -27,7 +30,7 @@ class RuntimeLifecycle:
         Returns a dict with keys 'micro' (MicroSleepResult or None) and 'full' (dict or None).
         Only triggers one sleep type per check (micro takes priority).
         """
-        result: dict = {"micro": None, "full": None}
+        result: dict = {"micro": None, "full": None, "errors": []}
         now = time.time()
         sleep_cfg = getattr(self.cfg, 'sleep', None)
 
@@ -45,7 +48,8 @@ class RuntimeLifecycle:
                 result["micro"] = self.micro_consolidate()
                 self._auto_micro_count += 1
             except Exception:
-                pass
+                logger.warning("auto micro-sleep (micro_consolidate) failed", exc_info=True)
+                result["errors"].append("micro_consolidate")
             self._last_micro_sleep = now
             self._anchors_since_micro = 0
 
@@ -56,7 +60,8 @@ class RuntimeLifecycle:
                 result["full"] = self.sleep(current_time=now)
                 self._auto_full_count += 1
             except Exception:
-                pass
+                logger.warning("auto full sleep failed", exc_info=True)
+                result["errors"].append("full_sleep")
             self._last_full_sleep = now
             self._last_micro_sleep = now
             self._anchors_since_micro = 0
@@ -90,11 +95,14 @@ class RuntimeLifecycle:
         """
         # 1. Per-cortex independent sleep consolidation
         cortex_reports = {}
+        errors: list[str] = []  # names of subsystems whose sleep step failed
         for cortex in self.router.cortices:
             try:
                 cortex_reports[cortex.config.name] = cortex.consolidate()
             except Exception as e:
+                logger.warning("sleep: cortex %s consolidation failed", cortex.config.name, exc_info=True)
                 cortex_reports[cortex.config.name] = {"error": str(e)}
+                errors.append(f"cortex:{cortex.config.name}")
 
         # 2. Cross-cortex operations (Hub bridging, global schema, edge pruning)
         from ..sleep import SleepCycle
@@ -133,7 +141,8 @@ class RuntimeLifecycle:
                 "compression_chain": compiler_result_raw.get("stats", {}).get("compression_chain", ""),
             }
         except Exception:
-            pass
+            logger.warning("sleep: cognitive compiler pipeline failed", exc_info=True)
+            errors.append("compiler")
 
         # 6d. Self-reflection loop: detect and correct contradictions
         reflection_reports = []
@@ -146,14 +155,16 @@ class RuntimeLifecycle:
             )
             reflection_reports = [r.to_dict() for r in new_reports]
         except Exception:
-            pass
+            logger.warning("sleep: self-reflection loop failed", exc_info=True)
+            errors.append("reflection_loop")
 
         # 6e. Edge budget: enforce across all nodes (#49)
         eb_result = {"over_budget_nodes": 0, "total_evicted": 0}
         try:
             eb_result = self.edge_budget.enforce_all(self.graph)
         except Exception:
-            pass
+            logger.warning("sleep: edge budget enforcement failed", exc_info=True)
+            errors.append("edge_budget")
 
         # 6f. Four-layer compression: message→event→semantic→personality (#51)
         fl_result = {"layer0_compressed": 0, "layer1_compressed": 0,
@@ -164,7 +175,8 @@ class RuntimeLifecycle:
             fl_result["layer2_compressed"] = self.four_layer.compress_layer2()
             fl_result["decayed"] = self.four_layer.decay_all()
         except Exception:
-            pass
+            logger.warning("sleep: four-layer compression failed", exc_info=True)
+            errors.append("four_layer")
 
         # 6g. Thermal store demotion scan — hot→cold→archive (#53)
         ts_result = {"hot_to_cold": 0, "cold_to_archive": 0}
@@ -172,21 +184,24 @@ class RuntimeLifecycle:
             ts_result = self.thermal_store.demote_scan(self.graph, now=current_time)
             self.thermal_store.flush()
         except Exception:
-            pass
+            logger.warning("sleep: thermal store demotion scan failed", exc_info=True)
+            errors.append("thermal_store")
 
         # 6h. Edge time decay — continuous decay across all edges (#54)
         ed_result = {"decayed": 0, "evicted": 0}
         try:
             ed_result = self.edge_decay_mgr.decay_all_edges(self.graph, now=current_time)
         except Exception:
-            pass
+            logger.warning("sleep: edge time decay failed", exc_info=True)
+            errors.append("edge_decay")
 
         # 6i. Self-organization — auto-cluster, merge duplicates, detect topics (#55)
         so_result = {"topics_detected": 0, "merges": 0, "communities_assigned": 0}
         try:
             so_result = self.self_org.organize(self.graph, current_time=current_time)
         except Exception:
-            pass
+            logger.warning("sleep: self-organization failed", exc_info=True)
+            errors.append("self_org")
 
         # 6j. Personality model — full extraction from graph (#56)
         personality_version = 0
@@ -194,7 +209,8 @@ class RuntimeLifecycle:
             profile = self.personality.extract_from_graph(self.graph)
             personality_version = profile.version
         except Exception:
-            pass
+            logger.warning("sleep: personality extraction failed", exc_info=True)
+            errors.append("personality")
 
         # 6k. Goal tree — detect new goals, propagate progress, archive stale (#57)
         gt_result = {"new_goals": 0, "propagated": 0, "archived": 0}
@@ -204,14 +220,16 @@ class RuntimeLifecycle:
             gt_result["propagated"] = self.goal_tree.propagate_progress()
             gt_result["archived"] = self.goal_tree.archive_stale(hours=168.0)
         except Exception:
-            pass
+            logger.warning("sleep: goal tree maintenance failed", exc_info=True)
+            errors.append("goal_tree")
 
         # 6l. Cluster memory — rebuild cluster index from communities (A-10)
         cm_result = {"clusters_built": 0}
         try:
             cm_result["clusters_built"] = self.cluster_router.build_index(self.graph)
         except Exception:
-            pass
+            logger.warning("sleep: cluster memory index rebuild failed", exc_info=True)
+            errors.append("cluster_memory")
 
         # 6m. Versioned memory — detect belief evolution chains (A-9)
         vm_result = {"new_beliefs": 0}
@@ -219,7 +237,8 @@ class RuntimeLifecycle:
             new_beliefs = self.versioned_memory.detect_from_graph(self.graph)
             vm_result["new_beliefs"] = len(new_beliefs)
         except Exception:
-            pass
+            logger.warning("sleep: versioned memory belief detection failed", exc_info=True)
+            errors.append("versioned_memory")
 
         # 6n. Episodic memory — summarize completed sessions (B-13)
         em_result = {"sessions_summarized": 0}
@@ -230,7 +249,8 @@ class RuntimeLifecycle:
                     if summary:
                         em_result["sessions_summarized"] += 1
         except Exception:
-            pass
+            logger.warning("sleep: episodic memory session summarization failed", exc_info=True)
+            errors.append("episodic_memory")
 
         # 6o. Memory Lifecycle Engine — L1→L2 promotion, L2→L3 archival
         lifecycle_result = {"promoted_l1": 0, "archived_l2": 0}
@@ -245,7 +265,8 @@ class RuntimeLifecycle:
                 "total_migrations": len(mle.migrations),
             }
         except Exception:
-            pass
+            logger.warning("sleep: memory lifecycle engine failed", exc_info=True)
+            errors.append("memory_lifecycle")
 
         # 6p. Activation graph edge decay — weaken unused edges
         act_result = {"edges_decayed": 0}
@@ -254,7 +275,8 @@ class RuntimeLifecycle:
             ag = get_activation_graph(self.graph)
             act_result["edges_decayed"] = ag.decay_all()
         except Exception:
-            pass
+            logger.warning("sleep: activation graph edge decay failed", exc_info=True)
+            errors.append("activation_graph")
 
         # 7. Decay ghosts and clean up cold storage for purged ones
         ghost_purged, purged_ids = self.ghosts.decay_all()
@@ -298,6 +320,8 @@ class RuntimeLifecycle:
             "episodic_memory": em_result,
             "activation_graph_decay": act_result,
             "memory_lifecycle": lifecycle_result,
+            # Subsystems whose sleep step failed (see logger.warning above).
+            "errors": errors,
         }
 
     def micro_sleep(self, steps: int = 2) -> dict:
@@ -366,7 +390,10 @@ class RuntimeLifecycle:
         storage = StorageBackend.detect_and_create(filepath)
         storage.save(self.graph)
         if self._ghosts:
-            ghost_path = Path(filepath).with_suffix("_ghosts.json")
+            # with_suffix() would raise on ".db" (suffix must start with ".");
+            # build from stem so both memory.db and memory.json work.
+            ghost_path = Path(filepath).parent / (
+                Path(filepath).stem + "_ghosts.json")
             with open(ghost_path, "w", encoding="utf-8") as f:
                 ghost_data = {}
                 for gid, g in self._ghosts.ghosts.items():

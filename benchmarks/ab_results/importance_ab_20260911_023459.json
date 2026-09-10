@@ -1,0 +1,92 @@
+{
+  "experiment": "importance_weights_ab",
+  "title": "实验一：重要性权重 A/B（mode=synthetic, seed=13, 记忆=300, 查询=50, top_k=10）",
+  "mode": "synthetic",
+  "seed": 13,
+  "smoke": false,
+  "n_records": 300,
+  "n_queries": 50,
+  "top_k": 10,
+  "timestamp": "20260911_023459",
+  "arms": [
+    {
+      "arm": "W-code",
+      "description": "代码默认权重 (importance_engine.py v2 defaults)",
+      "n_written": 300,
+      "n_gate_stored": 200,
+      "n_gate_discarded": 100,
+      "n_gate_errors": 0,
+      "avg_stored_importance": 0.31200809218281716,
+      "avg_novelty": 0.0,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.0,
+      "hit_at_5": 0.0,
+      "mrr": 0.003333333333333333,
+      "has_answer": 0.02,
+      "n_queries": 50,
+      "avg_recall_ms": 60.968011994846165,
+      "weights": {
+        "emotion": 0.18,
+        "repetition": 0.22,
+        "goal": 0.28,
+        "retrieval_feedback": 0.12,
+        "richness": 0.12,
+        "future": 0.08,
+        "novelty": 0.0
+      }
+    },
+    {
+      "arm": "W-plan",
+      "description": "plan.md 旧设计权重 (novelty=0.15, 无 retrieval_feedback/richness)",
+      "n_written": 300,
+      "n_gate_stored": 202,
+      "n_gate_discarded": 98,
+      "n_gate_errors": 0,
+      "avg_stored_importance": 0.33139465089366094,
+      "avg_novelty": 0.565844877344878,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.0,
+      "hit_at_5": 0.0,
+      "mrr": 0.003333333333333333,
+      "has_answer": 0.02,
+      "n_queries": 50,
+      "avg_recall_ms": 58.44167800620198,
+      "weights": {
+        "emotion": 0.25,
+        "repetition": 0.3,
+        "goal": 0.2,
+        "retrieval_feedback": 0.0,
+        "richness": 0.0,
+        "future": 0.1,
+        "novelty": 0.15
+      }
+    },
+    {
+      "arm": "W-code+nov",
+      "description": "代码默认 + novelty=0.1（其余六项 ×0.90 归一化，合计=1.00）",
+      "n_written": 300,
+      "n_gate_stored": 202,
+      "n_gate_discarded": 98,
+      "n_gate_errors": 0,
+      "avg_stored_importance": 0.3190453213527397,
+      "avg_novelty": 0.565844877344878,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.0,
+      "hit_at_5": 0.0,
+      "mrr": 0.003333333333333333,
+      "has_answer": 0.02,
+      "n_queries": 50,
+      "avg_recall_ms": 58.755875991191715,
+      "weights": {
+        "emotion": 0.162,
+        "repetition": 0.198,
+        "goal": 0.25200000000000006,
+        "retrieval_feedback": 0.108,
+        "richness": 0.108,
+        "future": 0.07200000000000001,
+        "novelty": 0.1
+      }
+    }
+  ],
+  "markdown": "## 实验一：重要性权重 A/B（mode=synthetic, seed=13, 记忆=300, 查询=50, top_k=10）\n\n| 配置 | 存储量/总量 | 平均重要度 | 平均novelty | hit@1 | hit@3 | hit@5 | MRR | has_answer | 平均召回耗时(ms) |\n|---|---|---|---|---|---|---|---|---|---|\n| W-code | 200/300 | 0.312 | 0.000 | 0.000 | 0.000 | 0.000 | 0.003 | 0.020 | 61.0 |\n| W-plan | 202/300 | 0.331 | 0.566 | 0.000 | 0.000 | 0.000 | 0.003 | 0.020 | 58.4 |\n| W-code+nov | 202/300 | 0.319 | 0.566 | 0.000 | 0.000 | 0.000 | 0.003 | 0.020 | 58.8 |"
+}

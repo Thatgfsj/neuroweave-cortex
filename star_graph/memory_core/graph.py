@@ -17,7 +17,7 @@ import threading
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from .anchor import Anchor, AnchorVector
 from ..config import Config
@@ -666,7 +666,7 @@ class StarGraph:
         self.schemas: dict[str, Schema] = {}
         # v0.4: ANN index for sub-linear retrieval
         self._ann_index = None  # lazy init on first use
-        self.abstracts: dict[str, any] = {}  # AbstractNode dict, lazy import
+        self.abstracts: dict[str, Any] = {}  # AbstractNode dict, lazy import
         from ..ghost import GhostSubsystem
         self._ghost_subsystem = GhostSubsystem()  # always initialized
         self.reflections: dict[str, ReflectionNode] = {}  # v0.5: meta-cognitive insights
@@ -805,18 +805,19 @@ class StarGraph:
 
             key = self._key(src, tgt)
 
-            # Already connected — reinforce instead of duplicate
+            # Already connected — reinforce instead of duplicate.
+            # State-transition edges (superseded_by / invalidated_by / contradicts)
+            # mark the existing edge as stale first: the newer belief supersedes
+            # or contradicts whatever the old edge encoded. (This stale-marking
+            # used to sit *after* the early return below, where it was dead code
+            # and never executed.)
             if key in self.edges:
                 existing = self.edges[key]
+                if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS) \
+                        and isinstance(existing, RichEdge):
+                    existing.mark_stale(replaced_by_edge_key=str(key))
                 existing.strengthen(0.05)
                 return existing
-
-            # State-transition edges: mark the old edge as stale
-            if edge_type in (EDGE_SUPERSEDED_BY, EDGE_INVALIDATED_BY, EDGE_CONTRADICTS):
-                if key in self.edges:
-                    existing = self.edges[key]
-                    if isinstance(existing, RichEdge):
-                        existing.mark_stale(replaced_by_edge_key=str(key))
 
             # Edge budget enforcement — prevent node degree explosion
             max_edges = getattr(self, '_max_edges_per_node', 0)
@@ -869,31 +870,38 @@ class StarGraph:
 
     def find_reflections(self, anchor_ids: list[str],
                          types: list[str] | None = None) -> list[ReflectionNode]:
-        """Find reflection nodes connected to any of the given anchor IDs."""
+        """Find reflection nodes connected to any of the given anchor IDs.
+
+        Results are deduplicated by reflection id, and by text so the same
+        insight registered under two different ids surfaces only once.
+        """
         result: list[ReflectionNode] = []
-        seen: set[str] = set()
+        seen_ids: set[str] = set()
+        seen_texts: set[str] = set()
         for rid, r in self.reflections.items():
-            if rid in seen:
+            if rid in seen_ids or r.text in seen_texts:
                 continue
             if types and r.reflection_type not in types:
                 continue
             if any(aid in r.source_anchor_ids for aid in anchor_ids):
                 if r.is_relevant:
                     result.append(r)
-                    seen.add(rid)
+                    seen_ids.add(rid)
+                    seen_texts.add(r.text)
                     r.last_accessed_at = time.time()
         return sorted(result, key=lambda r: -(r.strength * r.confidence))
 
     def remove_anchor(self, anchor_id: str) -> None:
         with self._lock:
-            if anchor_id in self.anchors:
-                self.anchors.pop(anchor_id)
-            to_remove = [(a, b) for (a, b) in self.edges if a == anchor_id or b == anchor_id]
-            for key in to_remove:
-                self.edges.pop(key, None)
+            self.anchors.pop(anchor_id, None)
+            # O(degree) removal via the adjacency index (every edge is
+            # registered under both endpoints), instead of the old O(E) scan
+            # over self.edges. Discard from each neighbor's set in the same
+            # pass so edges and _adjacency stay consistent.
+            for neighbor in self._adjacency.get(anchor_id, set()):
+                self.edges.pop(self._key(anchor_id, neighbor), None)
+                self._adjacency[neighbor].discard(anchor_id)
             self._adjacency.pop(anchor_id, None)
-            for adj in self._adjacency.values():
-                adj.discard(anchor_id)
             self.cortical_index = [(e, aid) for e, aid in self.cortical_index if aid != anchor_id]
             if self._ann_index is not None:
                 self._ann_index.remove(anchor_id)

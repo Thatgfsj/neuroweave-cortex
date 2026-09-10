@@ -196,7 +196,7 @@ class TopicCache:
         for aid, anchor in graph.anchors.items():
             if not anchor.is_retrievable:
                 continue
-            if anchor.thermal_state in (ThermalState.FROZEN, ThermalState.DEAD):
+            if anchor.thermal_state == ThermalState.FROZEN:
                 continue
             score = anchor.retention_score
             for tag in anchor.tags:

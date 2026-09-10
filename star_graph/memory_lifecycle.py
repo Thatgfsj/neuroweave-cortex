@@ -58,6 +58,10 @@ class MemoryLifecycleEngine:
         self.llm_fn = llm_fn  # optional LLM for compression/expansion
         self.migrations: list[MemoryMigration] = []
         # Archive store: anchor_id → compressed_text
+        # TODO: _dormant_store lives as a dynamic attribute on the graph object,
+        # so it is lost across process restarts / snapshot round-trips (only
+        # in-memory). Persisting it (e.g. alongside graph snapshots or inside
+        # the storage backend) needs a storage-layer change — out of scope here.
         self._dormant_store: dict[str, str] = getattr(graph, '_dormant_store', {})
         if not hasattr(graph, '_dormant_store'):
             graph._dormant_store = self._dormant_store
@@ -97,7 +101,7 @@ class MemoryLifecycleEngine:
     # ── L2 → L3 archival ───────────────────────────────────
 
     def dim_l2_to_l3(self, now: float | None = None) -> list[MemoryMigration]:
-        """Move stale/low-importance L2 memories to L3 dormant."""""
+        """Move stale/low-importance L2 memories to L3 dormant."""
         if now is None:
             now = time.time()
         archived: list[MemoryMigration] = []
@@ -117,7 +121,12 @@ class MemoryLifecycleEngine:
                 compressed = self._llm_compress(anchor.text)
             else:
                 compressed = anchor.text[:120] + "..." if len(anchor.text) > 120 else anchor.text
-            
+
+            # Write the compression result back onto the anchor so the
+            # retrieval side can use it. The original anchor.text is never
+            # overwritten (Never-Delete: only accessibility changes) — the
+            # compressed copy is attached like the dynamic `_layer` attribute.
+            anchor.compressed_text = compressed
             self._dormant_store[aid] = compressed
             anchor._layer = MemoryLayer.L3_DORMANT
             
@@ -135,7 +144,7 @@ class MemoryLifecycleEngine:
 
     def reactivate_dormant_to_l2(self, query_embedding: list[float],
                             top_k: int = 3) -> list[MemoryMigration]:
-        """Check if any dormant memory matches current query."""""
+        """Check if any dormant memory matches current query."""
         from star_graph.math_utils import cosine_sim as _cos
         
         reactivated: list[MemoryMigration] = []
@@ -155,6 +164,11 @@ class MemoryLifecycleEngine:
             if anchor and hasattr(anchor, '_layer'):
                 anchor._layer = MemoryLayer.L2_LONG_TERM
                 anchor.last_activated_at = time.time()
+                # Keep the compressed copy reachable from the anchor itself so
+                # the retrieval side can use it (covers anchors rebuilt from
+                # persistence without the dynamic attribute).
+                if not getattr(anchor, 'compressed_text', ''):
+                    anchor.compressed_text = self._dormant_store.get(aid, '')
                 self.migrations.append(MemoryMigration(
                     anchor_id=aid, from_layer=MemoryLayer.L3_DORMANT,
                     to_layer=MemoryLayer.L2_LONG_TERM,

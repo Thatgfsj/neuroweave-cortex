@@ -3,7 +3,7 @@
 Each anchor is a summary of a conversation turn or session, augmented with
 a dynamic importance vector and a 6-state memory lifecycle.
 
-v0.4 adds: MemoryState machine (ACTIVE→REHEARSING→CONSOLIDATING→DORMANT→GHOST→REACTIVATED),
+v0.4 adds: MemoryState machine (ACTIVE→REHEARSING→CONSOLIDATING→INACTIVE→DORMANT→REACTIVATED),
 meaningful oscillator derivation from embeddings, and interference-aware retention.
 
 Layer boundary: this module uses an embedder registry to avoid importing from
@@ -111,17 +111,18 @@ class ThermalState(enum.Enum):
     HOT    → high-frequency, full retrieval, highest priority
     WARM   → low frequency but important, compressed summary available
     COLD   → index-only, must be thawed for full retrieval
-    FROZEN → disk-only, excluded from ANN index, archive tier
-    DEAD   → metadata/hash only, not retrievable (audit trail)
+    FROZEN → disk-only archive tier, excluded from ANN index, still
+             reachable via activation propagation (deep-sleep floor)
 
     Thermal state is DERIVED from retention_score and access patterns —
     it is not stored directly. This avoids dual-state-machine sync issues.
+    Never-Delete (v1.3.2): there is no DEAD state — FROZEN is the floor;
+    every memory remains retrievable via propagation.
     """
     HOT = "hot"
     WARM = "warm"
     COLD = "cold"
     FROZEN = "frozen"
-    DEAD = "dead"
 
 
 class MemoryState(enum.Enum):
@@ -147,6 +148,14 @@ class MemoryState(enum.Enum):
     DORMANT = "dormant"            # Previously "ghost" — dormant but with residual trace
     REACTIVATED = "reactivated"    # Dormant revived — lower stability, elevated surprise
 
+    @classmethod
+    def _missing_(cls, value: object) -> "MemoryState":
+        # v1.3.2 Never-Delete: GHOST was merged into DORMANT. Legacy persisted
+        # "ghost" states deserialize as DORMANT instead of crashing.
+        if value == "ghost":
+            return cls.DORMANT
+        return None
+
 
 # Explicit MemoryState → ThermalState mapping.
 _STATE_THERMAL_MAP = {
@@ -160,20 +169,26 @@ _STATE_THERMAL_MAP = {
 # DORMANT with very low retention maps to FROZEN (done in thermal_state property logic)
 
 # State transition rules: (current, event) → next
-# Events: 'create', 'replay', 'consolidate', 'retrieve', 'dim', 'revive', 'stabilize'
+# Events: 'create', 'replay', 'consolidate', 'retrieve', 'dim', 'prune', 'revive', 'stabilize'
 # 'dim' = reduce activation (sleep pruning), NOT deletion
+# 'prune' = alias of 'dim' (v1.3.2: prune→dim, sleep phases call transition('prune'))
 # 'revive' = reactivate from dormant via propagation
+# 'retrieve' on a DORMANT anchor = reactivation (similarity gate already passed
+#     if propagation reached it — formalism §1: DORMANT→REACTIVATED)
 _TRANSITIONS = {
     (MemoryState.ACTIVE, 'replay'): MemoryState.REHEARSING,
     (MemoryState.ACTIVE, 'consolidate'): MemoryState.CONSOLIDATING,
     (MemoryState.ACTIVE, 'dim'): MemoryState.INACTIVE,
+    (MemoryState.ACTIVE, 'prune'): MemoryState.INACTIVE,
     (MemoryState.REHEARSING, 'consolidate'): MemoryState.CONSOLIDATING,
     (MemoryState.REHEARSING, 'retrieve'): MemoryState.ACTIVE,
     (MemoryState.CONSOLIDATING, 'stabilize'): MemoryState.INACTIVE,
     (MemoryState.CONSOLIDATING, 'retrieve'): MemoryState.ACTIVE,
     (MemoryState.INACTIVE, 'retrieve'): MemoryState.ACTIVE,
     (MemoryState.INACTIVE, 'dim'): MemoryState.DORMANT,
+    (MemoryState.INACTIVE, 'prune'): MemoryState.DORMANT,
     (MemoryState.DORMANT, 'revive'): MemoryState.REACTIVATED,
+    (MemoryState.DORMANT, 'retrieve'): MemoryState.REACTIVATED,
     (MemoryState.REACTIVATED, 'consolidate'): MemoryState.CONSOLIDATING,
     (MemoryState.REACTIVATED, 'stabilize'): MemoryState.INACTIVE,
 }
@@ -385,7 +400,13 @@ class Anchor:
         except Exception:
             import math as _math
             freq = 0.5
-            phase = _math.fmod(abs(hash(text)) * 0.001, 2 * _math.pi)
+            # Deterministic fallback: builtin hash() is salted per process
+            # (PYTHONHASHSEED), so the oscillator phase differed across runs,
+            # contradicting the documented cross-process determinism. Derive
+            # the phase from blake2b, same as the anchor id above.
+            digest = int.from_bytes(
+                hashlib.blake2b(text.encode(), digest_size=4).digest(), "big")
+            phase = _math.fmod(digest * 0.001, 2 * _math.pi)
             coupling = 0.3
 
         # Derive salience: weighted combination of importance, emotional salience, and specificity
@@ -448,8 +469,6 @@ class Anchor:
             self.vector.stability = min(1.0, self.vector.stability + c.consolidating_stability_boost)
         elif state == MemoryState.DORMANT:
             self.vector.stability = max(self.vector.stability, c.dormant_min_stability)
-        elif state == MemoryState.GHOST:
-            pass  # GhostNode handles this
         elif state == MemoryState.REACTIVATED:
             self.vector.stability = c.reactivated_stability
             self.vector.surprise = c.reactivated_surprise
@@ -568,18 +587,14 @@ class Anchor:
             retention = sf.survive(elapsed_hours, strength)
 
             # State modifiers adjust retention
-            if self.state == MemoryState.GHOST:
-                retention *= c.ghost_half_life_factor
-            elif self.state == MemoryState.DORMANT:
+            if self.state == MemoryState.DORMANT:
                 retention = retention + (1.0 - retention) * 0.3  # slower decay
             elif self.state == MemoryState.REACTIVATED:
                 retention = retention + (1.0 - retention) * 0.15
             self.vector.recency *= retention
         else:
             hl = half_life if half_life is not None else c.base_half_life_hours
-            if self.state == MemoryState.GHOST:
-                hl *= c.ghost_half_life_factor
-            elif self.state == MemoryState.DORMANT:
+            if self.state == MemoryState.DORMANT:
                 hl *= c.dormant_half_life_factor
             elif self.state == MemoryState.REACTIVATED:
                 hl *= c.reactivated_half_life_factor
@@ -717,8 +732,6 @@ class Anchor:
         # Apply state modifiers
         if self.state == MemoryState.REHEARSING:
             score *= c.rehearsing_boost
-        elif self.state == MemoryState.GHOST:
-            score *= c.ghost_penalty
         elif self.state == MemoryState.REACTIVATED:
             score *= c.reactivated_penalty
 
@@ -842,21 +855,15 @@ class Anchor:
         Primary: derived from MemoryState via _STATE_THERMAL_MAP (set during transition()).
         Fallback: computed from retention_score + recency + frequency for edge cases.
 
-        HOT  — ACTIVE, REHEARSING, REACTIVATED
-        WARM — CONSOLIDATING, DORMANT
-        COLD — GHOST with partial recall
-        DEAD — GHOST with near-zero reactivation probability
+        HOT    — ACTIVE, REHEARSING, REACTIVATED
+        WARM   — CONSOLIDATING, INACTIVE
+        COLD   — long-unaccessed, index-only
+        FROZEN — deep archive floor (Never-Delete: never removed, never DEAD;
+                 still reachable via activation propagation)
         """
         # Use synchronized thermal state from the state machine if available
-        if self._thermal_state is not None and self.state != MemoryState.GHOST:
+        if self._thermal_state is not None:
             return self._thermal_state
-
-        # GHOST requires nuanced handling: check reactivation probability
-        if self.state == MemoryState.GHOST:
-            react_prob = getattr(self, '_ghost_reactivation_prob', 0.0)
-            if react_prob <= 0.05:
-                return ThermalState.DEAD
-            return ThermalState.COLD
 
         # Fallback: compute from retention for anchors created before _thermal_state sync
         r = self.retention_score
@@ -874,9 +881,7 @@ class Anchor:
             return ThermalState.WARM
         if r > 0.06:
             return ThermalState.COLD
-        if r > 0.01:
-            return ThermalState.FROZEN
-        return ThermalState.DEAD
+        return ThermalState.FROZEN
 
     @property
     def thermal_priority(self) -> float:
@@ -885,14 +890,13 @@ class Anchor:
         HOT:  1.0 (full priority)
         WARM: 0.6 (medium priority)
         COLD: 0.2 (low priority, must be explicitly sought)
-        DEAD: 0.0 (not retrievable)
+        FROZEN: 0.05 (archive floor — reachable via propagation, never 0)
         """
         return {
             ThermalState.HOT: 1.0,
             ThermalState.WARM: 0.6,
             ThermalState.COLD: 0.2,
             ThermalState.FROZEN: 0.05,
-            ThermalState.DEAD: 0.0,
         }[self.thermal_state]
 
     @property
@@ -901,43 +905,40 @@ class Anchor:
 
         HOT memories are cheap (active in working set).
         COLD memories are expensive (must be thawed from index).
-        DEAD memories are inaccessible.
+        FROZEN memories are most expensive (archive tier) but not impossible.
         """
         return {
             ThermalState.HOT: 0.0,
             ThermalState.WARM: 0.3,
             ThermalState.COLD: 0.8,
             ThermalState.FROZEN: 0.95,
-            ThermalState.DEAD: 1.0,
         }[self.thermal_state]
 
     @property
     def storage_tier(self) -> str:
         """Which storage backend tier this memory belongs in.
 
-        HOT  → in-memory graph (fast, plastic)
-        WARM → disk-backed graph (indexed, retrievable)
-        COLD → index-only (metadata + embedding, text offloaded)
-        DEAD → audit log (hash only, retention for compliance)
+        HOT    → in-memory graph (fast, plastic)
+        WARM   → disk-backed graph (indexed, retrievable)
+        COLD   → index-only (metadata + embedding, text offloaded)
+        FROZEN → archive (compressed, still reachable via propagation)
         """
         return {
             ThermalState.HOT: "memory",
             ThermalState.WARM: "disk",
             ThermalState.COLD: "index",
             ThermalState.FROZEN: "archive",
-            ThermalState.DEAD: "audit",
         }[self.thermal_state]
 
     def thaw(self) -> bool:
-        """Attempt to revive from COLD → WARM/HOT.
+        """Attempt to revive from COLD/FROZEN → WARM/HOT.
 
         Success depends on having enough residual information
-        (embedding or ghost trace) to reconstruct the memory.
+        (embedding or residual trace) to reconstruct the memory.
+        Never-Delete: even FROZEN memories can be thawed.
         """
-        if self.thermal_state == ThermalState.DEAD:
-            return False
         if self.thermal_state == ThermalState.COLD:
-            if self.state == MemoryState.GHOST:
+            if self.state == MemoryState.DORMANT:
                 self.transition('revive')
             else:
                 # Boost retention enough to reach WARM
@@ -945,17 +946,16 @@ class Anchor:
                 self.last_activated_at = time.time()
                 self.vector.frequency = max(self.vector.frequency, 0.05)
             return True
-        return True  # already HOT or WARM
+        return True  # already HOT or WARM (or FROZEN — resurrection allowed)
 
     @property
     def is_thermally_retrievable(self) -> bool:
         """Can this memory be retrieved at its current thermal state?
 
-        HOT/WARM: yes
-        COLD: partial (metadata + summary only)
-        DEAD: no
+        Never-Delete (v1.3.2): every thermal state is retrievable —
+        accessibility varies (priority/cost), existence never does.
         """
-        return self.thermal_state != ThermalState.DEAD
+        return True
 
     @property
     def thermal_summary(self) -> str:

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.0-blue?style=flat-square" alt="version"/>
+  <img src="https://img.shields.io/badge/version-1.4.2-blue?style=flat-square" alt="version"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="license"/>
   <img src="https://img.shields.io/badge/python-3.11%2B-orange?style=flat-square" alt="python"/>
   <img src="https://img.shields.io/badge/status-beta-yellow?style=flat-square" alt="status"/>
@@ -157,7 +157,7 @@ mgr.save("agent_memory.db")
 |--------|:----------:|:-----------:|
 | Pure Vector Search | 25.3% | — |
 | Cosine + BM25 | 31.5% | +6.2 pp |
-| **NWC (BM40+txt60)** | **44.1%** | **+18.8 pp** |
+| **NWC (BM40+txt60)** | **44.2%** | **+18.9 pp** |
 
 ---
 

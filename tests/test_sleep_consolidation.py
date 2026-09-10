@@ -420,12 +420,16 @@ class TestTemporalSlice:
 class TestThermalForgetting:
     """Verify five-level thermal lifecycle with FROZEN tier."""
 
-    def test_frozen_not_retrievable(self):
-        """FROZEN anchors should not be retrievable."""
+    def test_frozen_still_retrievable(self):
+        """Never-Delete: FROZEN (archive floor) memories stay retrievable —
+        accessibility is low (priority 0.05), existence never zero."""
         from star_graph import ThermalState
         a = Anchor.create("old frozen memory", importance=0.02)
         a.state = MemoryState.DORMANT
         a._thermal_state = ThermalState.FROZEN
+        assert a.is_retrievable is True
+        # Only user-invalidated memories are excluded from retrieval
+        a.invalid_at = 1234.0
         assert a.is_retrievable is False
 
     def test_frozen_thermal_priority_low(self):

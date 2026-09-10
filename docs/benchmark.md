@@ -1,5 +1,7 @@
 # Benchmark Comparison: Star Graph Memory vs Alternatives
 
+> **历史文档**：内容停留在 Star Graph v0.3 时期，数值与术语（含 "9-phase sleep"、"Ghost anchors" 等旧说法）以 README / plan.md 为准；现行架构为 6 状态生命周期 + 8 阶段睡眠（Never-Delete，无 GHOST/DEAD 状态）。
+
 ## Systems Compared
 
 | System | Type | Retrieval | Consolidation | Open Source |

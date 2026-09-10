@@ -19,6 +19,13 @@ from typing import Optional
 
 import numpy as np
 
+# TF-IDF vocabulary schedule: refit at most every _TFIDF_REFIT_EVERY texts
+# during warm-up, then freeze the vocabulary for good once the corpus reaches
+# _TFIDF_FREEZE_AT texts. Frozen vocab = same text always maps to the same
+# vector, and encode cost drops from O(corpus) refit to O(text) transform.
+_TFIDF_FREEZE_AT = 1024
+_TFIDF_REFIT_EVERY = 64
+
 
 class EmbeddingProvider:
     """Produces real semantic embeddings + meaningful oscillation parameters.
@@ -31,6 +38,7 @@ class EmbeddingProvider:
         self._model = None
         self._tfidf = None
         self._tfidf_texts: list[str] = []
+        self._tfidf_frozen: bool = False
         self._model_name = model_name
         self._dim = dim
         self._backend: str = "none"
@@ -86,6 +94,32 @@ class EmbeddingProvider:
         self._backend = "tfidf"
         self._dim = 384
 
+    def _update_tfidf(self, new_texts: list[str]) -> None:
+        """Accumulate texts and (re)fit the TF-IDF vocabulary on a schedule.
+
+        Refits at most once per _TFIDF_REFIT_EVERY accumulated texts during
+        warm-up; once the corpus reaches _TFIDF_FREEZE_AT texts the vocabulary
+        is frozen and the stored corpus is released. After freezing, encoding
+        only transforms — no more per-call O(corpus) refit, no vocab drift.
+        """
+        if self._tfidf is None:
+            self._init_tfidf()
+        if self._tfidf_frozen:
+            return
+        prev = len(self._tfidf_texts)
+        self._tfidf_texts.extend(new_texts)
+        n = prev + len(new_texts)
+        crossed_bucket = (n // _TFIDF_REFIT_EVERY) > (prev // _TFIDF_REFIT_EVERY)
+        if prev == 0 or n >= _TFIDF_FREEZE_AT or crossed_bucket:
+            self._tfidf.fit(self._tfidf_texts)
+        if n >= _TFIDF_FREEZE_AT:
+            self._tfidf_frozen = True
+            self._tfidf_texts = []  # frozen vocab → corpus no longer needed
+
+    def _transform_tfidf(self, texts: list[str]) -> np.ndarray:
+        """Transform texts to dense rows with the (frozen) TF-IDF vocabulary."""
+        return self._tfidf.transform(texts).toarray()
+
     def encode(self, text: str) -> list[float]:
         """Produce a real semantic embedding for a text."""
         self._ensure_model()
@@ -95,10 +129,8 @@ class EmbeddingProvider:
         elif self._backend == "tfidf":
             # TF-IDF requires a corpus — accumulate texts for meaningful vectors
             try:
-                self._tfidf_texts.append(text)
-                self._tfidf.fit(self._tfidf_texts)
-                mat = self._tfidf.transform([text])
-                dense = mat.toarray()[0]
+                self._update_tfidf([text])
+                dense = self._transform_tfidf([text])[0]
                 norm = math.sqrt(sum(x * x for x in dense))
                 if norm > 1e-8:
                     dense = dense / norm
@@ -112,7 +144,26 @@ class EmbeddingProvider:
             return self._hash_embed(text)
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self.encode(t) for t in texts]
+        """Embed a batch in one vectorizer/model pass (no per-item refit)."""
+        if not texts:
+            return []
+        self._ensure_model()
+        if self._backend == "sentence-transformers":
+            vecs = self._model.encode(texts, show_progress_bar=False,
+                                      normalize_embeddings=True)
+            return np.asarray(vecs).tolist()
+        elif self._backend == "tfidf":
+            try:
+                self._update_tfidf(texts)
+                dense = self._transform_tfidf(texts)
+                norms = np.sqrt((dense * dense).sum(axis=1))
+                dense = dense / np.where(norms > 1e-8, norms, 1.0)[:, None]
+                if dense.shape[1] < self._dim:
+                    dense = np.pad(dense, ((0, 0), (0, self._dim - dense.shape[1])))
+                return dense[:, :self._dim].tolist()
+            except Exception:
+                return [self._hash_embed(t) for t in texts]
+        return [self._hash_embed(t) for t in texts]
 
     def _hash_embed(self, text: str) -> list[float]:
         """Last-resort fallback: at least SHA256 not hash() (cross-run stable)."""

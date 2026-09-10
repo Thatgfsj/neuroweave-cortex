@@ -215,14 +215,17 @@ class MemoryManager:
 
     def forget_with_certificate(self, anchor_id: str, query: str = "",
                                 reason: str = "user_request") -> dict:
-        """Forget a memory and generate an Ed25519-signed deletion certificate.
+        """Forget a memory and generate an Ed25519-signed forgetting certificate.
 
-        Returns dict with 'deleted' bool, 'certificate' JWS string, and 'cert_path'.
-        GDPR Article 17 compliant — the certificate proves provable deletion.
+        Never-Delete (v1.3.2): the memory is logically forgotten — demoted to
+        DORMANT with minimal weight — and additionally stamped with invalid_at,
+        the sole mechanism that excludes it from retrieval results. No physical
+        deletion occurs. Returns dict with 'deleted' bool (logical), 'certificate'
+        JWS string, and 'cert_path'.
         """
         from ..forget_certificate import ForgetCertificate
 
-        anchor = self._rt.forget(anchor_id, create_ghost=True)
+        anchor = self._rt.forget(anchor_id, create_ghost=True, invalid=True)
         if anchor is None:
             return {"deleted": False, "error": "anchor not found", "certificate": "", "cert_path": ""}
 

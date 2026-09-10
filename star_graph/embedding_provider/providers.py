@@ -22,6 +22,11 @@ import numpy as np
 
 logger = logging.getLogger("star_graph.embedding")
 
+# TF-IDF vocabulary schedule (see LocalProvider._update_tfidf):
+# refit at most every _TFIDF_REFIT_EVERY texts during warm-up, then freeze.
+_TFIDF_FREEZE_AT = 1024
+_TFIDF_REFIT_EVERY = 64
+
 
 # ── Abstract base ──────────────────────────────────────────────────────
 
@@ -67,6 +72,7 @@ class LocalProvider(EmbeddingProvider):
         self._model = None
         self._tfidf = None
         self._tfidf_texts: list[str] = []
+        self._tfidf_frozen: bool = False
         self._backend: str = "none"
 
     @property
@@ -105,25 +111,41 @@ class LocalProvider(EmbeddingProvider):
         vecs = self._model.encode(texts, show_progress_bar=False)
         return vecs.tolist()
 
-    def _encode_tfidf(self, texts: list[str]) -> list[list[float]]:
-        from sklearn.feature_extraction.text import TfidfVectorizer
+    def _ensure_tfidf(self) -> None:
         if self._tfidf is None:
+            from sklearn.feature_extraction.text import TfidfVectorizer
             self._tfidf = TfidfVectorizer(max_features=self._dim)
             self._dim = min(self._dim, 384)
+
+    def _update_tfidf(self, texts: list[str]) -> None:
+        """Accumulate texts and (re)fit the TF-IDF vocabulary on a schedule.
+
+        Refits at most once per _TFIDF_REFIT_EVERY accumulated texts during
+        warm-up; once the corpus reaches _TFIDF_FREEZE_AT texts the vocabulary
+        is frozen and the stored corpus is released. After freezing, encoding
+        only transforms — no more per-batch O(corpus) refit, no vocab drift.
+        """
+        self._ensure_tfidf()
+        if self._tfidf_frozen:
+            return
+        prev = len(self._tfidf_texts)
         self._tfidf_texts.extend(texts)
-        self._tfidf.fit(self._tfidf_texts)
-        results = []
-        for t in texts:
-            mat = self._tfidf.transform([t])
-            dense = mat.toarray()[0]
-            norm = math.sqrt(sum(x * x for x in dense))
-            if norm > 1e-8:
-                dense = dense / norm
-            vec = dense.tolist()
-            if len(vec) < self._dim:
-                vec += [0.0] * (self._dim - len(vec))
-            results.append(vec[:self._dim])
-        return results
+        n = prev + len(texts)
+        crossed_bucket = (n // _TFIDF_REFIT_EVERY) > (prev // _TFIDF_REFIT_EVERY)
+        if prev == 0 or n >= _TFIDF_FREEZE_AT or crossed_bucket:
+            self._tfidf.fit(self._tfidf_texts)
+        if n >= _TFIDF_FREEZE_AT:
+            self._tfidf_frozen = True
+            self._tfidf_texts = []  # frozen vocab → corpus no longer needed
+
+    def _encode_tfidf(self, texts: list[str]) -> list[list[float]]:
+        self._update_tfidf(texts)
+        dense = self._tfidf.transform(texts).toarray()
+        norms = np.sqrt((dense * dense).sum(axis=1))
+        dense = dense / np.where(norms > 1e-8, norms, 1.0)[:, None]
+        if dense.shape[1] < self._dim:
+            dense = np.pad(dense, ((0, 0), (0, self._dim - dense.shape[1])))
+        return dense[:, :self._dim].tolist()
 
     @staticmethod
     def _hash_embed(text: str, dim: int) -> list[float]:

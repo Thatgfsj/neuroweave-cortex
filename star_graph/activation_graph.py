@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
+
+import numpy as np
 
 from star_graph.math_utils import cosine_sim as _cosine_sim
 
@@ -39,6 +42,26 @@ class ActivatedNode:
     depth: int
     path: list[str]
     source: str  # "seed", "spread", "reinforced"
+
+
+def _batch_cosine_sim(query: list[float], embeddings: list[list[float]]) -> np.ndarray | None:
+    """Cosine similarity of `query` against every vector in `embeddings`.
+
+    Mirrors math_utils.cosine_sim semantics (0.0 for near-zero denominators).
+    Returns None when shapes are ragged so the caller can fall back to the
+    per-pair Python loop.
+    """
+    d = len(query)
+    if d == 0 or any(len(e) != d for e in embeddings):
+        return None
+    mat = np.asarray(embeddings, dtype=np.float64)
+    q = np.asarray(query, dtype=np.float64)
+    dots = mat @ q
+    denom = np.linalg.norm(mat, axis=1) * np.linalg.norm(q)
+    sims = np.zeros_like(dots)
+    valid = denom >= 1e-12
+    sims[valid] = dots[valid] / denom[valid]
+    return sims
 
 
 def compute_edge_strength(edge, now: float | None = None) -> float:
@@ -78,16 +101,29 @@ class ActivationGraph:
                    top_k: int = 5,
                    min_similarity: float = 0.3) -> list[tuple[str, float]]:
         """Find seed nodes by embedding similarity.
-        
+
         Returns list of (node_id, similarity) sorted descending.
+
+        Vectorized: all anchor similarities come from a single
+        matrix-vector product instead of a per-anchor Python loop.
         """
-        scored: list[tuple[float, str]] = []
-        for aid, anchor in self.graph.anchors.items():
-            if not hasattr(anchor, 'embedding') or not anchor.embedding:
-                continue
-            sim = _cosine_sim(query_embedding, anchor.embedding)
-            if sim >= min_similarity:
-                scored.append((sim, aid))
+        candidates = [
+            (aid, anchor.embedding)
+            for aid, anchor in self.graph.anchors.items()
+            if hasattr(anchor, 'embedding') and anchor.embedding
+        ]
+        if not candidates:
+            return []
+        ids = [aid for aid, _ in candidates]
+        embs = [emb for _, emb in candidates]
+        sims = _batch_cosine_sim(query_embedding, embs)
+        if sims is None:  # ragged embedding dims — per-pair fallback
+            sims = [_cosine_sim(query_embedding, emb) for emb in embs]
+        else:
+            sims = sims.tolist()
+        scored: list[tuple[float, str]] = [
+            (sim, aid) for aid, sim in zip(ids, sims) if sim >= min_similarity
+        ]
         scored.sort(key=lambda x: -x[0])
         return [(aid, sim) for sim, aid in scored[:top_k]]
 
@@ -112,73 +148,82 @@ class ActivationGraph:
             now = time.time()
             
         activated: dict[str, float] = {}  # node_id → cumulative activation
+        depths: dict[str, int] = {}       # node_id → BFS depth at first activation
+        paths: dict[str, list[str]] = {}  # node_id → activation path from seed
         seen: set[str] = set()
-        queue: list[tuple[str, float, int, list[str]]] = []  # node_id, act, depth, path
-        
+        seed_ids = {nid for nid, _ in seeds}
+        queue: deque[tuple[str, float, int, list[str]]] = deque()  # node_id, act, depth, path
+
         # Initialize queue with seeds at activation = seed_similarity
         for nid, sim in seeds:
             if nid not in seen:
                 seen.add(nid)
                 activated[nid] = sim
+                depths[nid] = 0
+                paths[nid] = [nid]
                 queue.append((nid, sim, 0, [nid]))
-        
+
         # BFS spreading — can propagate through dormant memories
         # Dormant memories have low activation but are NOT ignored.
         # They can be "re-lit" by strong activation from neighbors.
         while queue and len(activated) < max_nodes:
-            nid, current_act, depth, path = queue.pop(0)
-            
+            nid, current_act, depth, path = queue.popleft()
+
             if depth >= max_depth:
                 continue
-                
+
             # Get neighboring nodes via edges
             neighbors = self.graph._adjacency.get(nid, set())
             if not neighbors:
                 continue
-                
+
             for neighbor_id in neighbors:
                 if neighbor_id in seen:
                     continue
-                    
+
                 # Compute edge strength
                 edge_key = self.graph._key(nid, neighbor_id)
                 edge = self.graph.edges.get(edge_key)
                 if edge is None:
                     continue
-                    
+
                 edge_strength = compute_edge_strength(edge, now)
                 # Even decayed edges can propagate if the parent activation is strong enough
                 if edge_strength < activation_threshold and current_act < 0.5:
                     continue  # only strong activation can cross weak edges
-                
+
                 # Activation = parent_act × edge_strength × recency_boost
                 hours_since = (now - edge.last_activated_at) / 3600.0
                 recency_boost = math.exp(-hours_since / 720.0)  # 30-day half-life
-                
+
                 child_act = current_act * edge_strength * (0.5 + 0.5 * recency_boost)
-                
+
                 # Allow VERY weak activation (dormant memories can still be found)
                 if child_act < 0.001:
                     continue
-                
+
                 seen.add(neighbor_id)
                 new_path = path + [neighbor_id]
-                
+
                 if neighbor_id in activated:
                     activated[neighbor_id] = max(activated[neighbor_id], child_act)
                 else:
                     activated[neighbor_id] = child_act
-                
+                    depths[neighbor_id] = depth + 1
+                    paths[neighbor_id] = new_path
+
                 queue.append((neighbor_id, child_act, depth + 1, new_path))
-        
-        # Convert to sorted list
+
+        # Convert to sorted list — carry the real BFS path and depth so
+        # downstream consumers (observatory reinforcement, traces) see the
+        # actual activation route instead of a stub path of length 1.
         result = [
             ActivatedNode(
                 node_id=nid,
                 activation=act,
-                depth=0 if seeds and nid == seeds[0][0] else 1,
-                path=[nid],
-                source="seed" if any(nid == s[0] for s in seeds) else "spread"
+                depth=depths.get(nid, 0),
+                path=list(paths.get(nid, [nid])),
+                source="seed" if nid in seed_ids else "spread"
             )
             for nid, act in activated.items()
         ]

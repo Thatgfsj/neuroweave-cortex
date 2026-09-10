@@ -8,6 +8,7 @@ Usage:
     context = ctx.context("推荐一本书")
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -59,7 +60,7 @@ class Cortex:
         context(prompt) — get compressed cognitive context for LLM injection
         reflect() — generate long-term cognitive summary
         evolve() — run memory consolidation cycle
-        forget(anchor_id) — remove a memory with ghost trace
+        forget(anchor_id) — logical forgetting: lower weight, enter dormant state (never deleted)
         stats() — memory system statistics
         save(path) / load(path) — persist to disk
     """
@@ -88,9 +89,11 @@ class Cortex:
         storage_path = self.config.storage.path.replace("~", str(__import__("pathlib").Path.home()))
         self._manager = MemoryManager(storage_path=storage_path)
         try:
-            self._manager.load()
+            self._manager.load(storage_path)
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).warning(
+                "Cortex: failed to load persisted memory from %s", storage_path, exc_info=True)
         self._loaded = True
 
     def _ensure_cortex(self):
@@ -118,7 +121,9 @@ class Cortex:
                  importance: float = 0.5, emotional_valence: float = 0.0) -> str:
         """Store a memory. Returns anchor ID."""
         self._ensure_loaded()
-        anchor = self._manager.remember(text, tags=tags or [])
+        anchor = self._manager.remember(
+            text, tags=tags or [],
+            importance=importance, emotional_valence=emotional_valence)
         return getattr(anchor, 'id', '') if anchor else ''
 
     def remember_working(self, text: str, tags: list[str] | None = None) -> dict:
@@ -144,17 +149,20 @@ class Cortex:
         memories = []
         entities = set()
         relations = []
-        if hasattr(result, 'memories'):
-            for m in result.memories:
-                if getattr(m, 'anchor', None) is None:
+        # MemoryManager.recall returns a MemoryContext whose payload is `.items`
+        # (list of MemoryItem). Keep the list fallback for older callers.
+        if hasattr(result, 'items'):
+            for m in (result.items or []):
+                a = getattr(m, 'anchor', None)
+                if a is None:
                     continue
-                item = {"id": getattr(m, 'id', '') or getattr(m.anchor, 'id', ''),
-                        "content": getattr(m, 'content', '') or getattr(m.anchor, 'text', ''),
-                        "score": getattr(m, 'score', 0.0), "tags": getattr(m, 'tags', []) or getattr(m.anchor, 'tags', [])}
+                item = {"id": getattr(a, 'id', ''),
+                        "content": getattr(m, 'compressed_text', '') or getattr(a, 'text', ''),
+                        "score": getattr(m, 'relevance_score', 0.0),
+                        "tags": getattr(a, 'tags', []) or []}
                 memories.append(item)
-                if hasattr(m.anchor, 'tags'):
-                    for t in m.anchor.tags:
-                        entities.add(t)
+                for t in (item["tags"] or []):
+                    entities.add(t)
         elif isinstance(result, list):
             for m in result:
                 if getattr(m, 'content', None) is None and getattr(m, 'text', None) is None:
@@ -208,7 +216,11 @@ class Cortex:
         return str(report) if report else "Evolution complete."
 
     def forget(self, anchor_id: str) -> bool:
-        """Remove a memory, creating a ghost trace for potential revival."""
+        """Logically forget a memory: lower weight, enter dormant state.
+
+        Never-Delete: the memory is never removed and can be reactivated;
+        a ghost trace is recorded for potential fuzzy recall.
+        """
         self._ensure_loaded()
         return self._manager.forget(anchor_id)
 
@@ -248,8 +260,12 @@ class Cortex:
     def _ensure_identity(self):
         if self._identity_manager is None:
             from star_graph.cognitive_identity import CognitiveIdentityManager
-            storage = self.config.storage.path.replace("~", str(__import__("pathlib").Path.home()))
-            self._identity_manager = CognitiveIdentityManager(storage_dir=f"{storage}/identity")
+            Path = __import__("pathlib").Path
+            storage = self.config.storage.path.replace("~", str(Path.home()))
+            # storage.path points at the database FILE (e.g. ~/.nwc/memory.db);
+            # identity state belongs in a sibling directory, not inside it.
+            identity_dir = str(Path(storage).parent / "identity")
+            self._identity_manager = CognitiveIdentityManager(storage_dir=identity_dir)
             # Auto-load existing identity
             self._identity_manager.record_interaction()  # bootstrap if new
 
@@ -278,11 +294,12 @@ class Cortex:
             "decay_rate": result.decay_rate,
             "consolidation_priority": result.consolidation_priority,
             "signal": {
-                "emotion": result.signal.emotion_weight,
-                "repetition": result.signal.repetition_weight,
+                "emotion": result.signal.emotion_signal,
+                "repetition": result.signal.repetition_signal,
                 "goal_relation": result.signal.goal_relation,
-                "novelty": result.signal.novelty,
-                "future_probability": result.signal.future_probability,
+                "retrieval_feedback": result.signal.retrieval_feedback,
+                "richness": result.signal.content_richness,
+                "future_probability": result.signal.future_recall_likelihood,
             },
         }
 
@@ -576,11 +593,15 @@ class Cortex:
 
     # ── Async API ───────────────────────────────────────────
 
-    async def aremember(self, text: str, tags: list[str] | None = None) -> str:
-        return self.remember(text, tags)
+    async def aremember(self, text: str, tags: list[str] | None = None,
+                        importance: float = 0.5,
+                        emotional_valence: float = 0.0) -> str:
+        return await asyncio.to_thread(
+            self.remember, text, tags=tags,
+            importance=importance, emotional_valence=emotional_valence)
 
     async def arecall(self, query: str, max_items: int | None = None) -> RecallResult:
-        return self.recall(query, max_items)
+        return await asyncio.to_thread(self.recall, query, max_items=max_items)
 
     async def acontext(self, prompt: str = "") -> ContextFrame:
-        return self.context(prompt)
+        return await asyncio.to_thread(self.context, prompt)

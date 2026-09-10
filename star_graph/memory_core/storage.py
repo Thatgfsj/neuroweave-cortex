@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator
-from .graph import StarGraph, Edge, Schema
+from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator, MemoryState
+from .graph import StarGraph, Edge, RichEdge, Schema
 from .storage_backend import StorageBackend
 
 
@@ -58,6 +58,14 @@ class JSONStorage(StorageBackend):
                     "replay_count": a.replay_count,
                     "source_attribution": a.source_attribution,
                     "source_trust": a.source_trust,
+                    "state": a.state.value if isinstance(a.state, MemoryState) else str(a.state),
+                    "activation_level": a.activation_level,
+                    "salience": a.salience,
+                    "exact_match_keys": a.exact_match_keys,
+                    "cortex_path": a.cortex_path,
+                    "community_id": a.community_id,
+                    "invalid_at": a.invalid_at,
+                    "conflict_candidate": a.conflict_candidate,
                 }
                 for a in graph.anchors.values()
             ],
@@ -70,6 +78,16 @@ class JSONStorage(StorageBackend):
                     "co_activation_count": e.co_activation_count,
                     "created_at": e.created_at,
                     "last_activated_at": e.last_activated_at,
+                    "decay_rate": e.decay_rate,
+                    **({
+                        "relation": e.relation,
+                        "confidence": e.confidence,
+                        "source_type": e.source_type,
+                        "reinforcement_count": e.reinforcement_count,
+                        "temporal_order": e.temporal_order,
+                        "causal_strength": e.causal_strength,
+                        "is_stale": e.is_stale,
+                    } if isinstance(e, RichEdge) else {}),
                 }
                 for e in graph.edges.values()
             ],
@@ -116,6 +134,11 @@ class JSONStorage(StorageBackend):
                     expected_duration=a_data["prediction"].get("expected_duration", 10.0),
                     confidence=a_data["prediction"].get("confidence", 0.5),
                 )
+            # State (legacy "ghost" maps to DORMANT via MemoryState._missing_)
+            try:
+                state = MemoryState(a_data.get("state", "active"))
+            except ValueError:
+                state = MemoryState.ACTIVE
             anchor = Anchor(
                 id=a_data["id"],
                 text=a_data["text"],
@@ -129,19 +152,52 @@ class JSONStorage(StorageBackend):
                 tags=a_data.get("tags", []),
                 schema_ref=a_data.get("schema_ref"),
                 replay_count=a_data.get("replay_count", 0),
+                state=state,
+                activation_level=a_data.get("activation_level", 1.0),
+                salience=a_data.get("salience", 0.0),
+                exact_match_keys=a_data.get("exact_match_keys", []),
+                cortex_path=a_data.get("cortex_path", ""),
+                community_id=a_data.get("community_id", ""),
+                invalid_at=a_data.get("invalid_at"),
+                conflict_candidate=a_data.get("conflict_candidate", False),
+                source_attribution=a_data.get("source_attribution", "observation"),
+                source_trust=a_data.get("source_trust", 0.6),
             )
             graph.add_anchor(anchor)
 
         for e_data in data.get("edges", []):
-            edge = Edge(
-                source=e_data["source"],
-                target=e_data["target"],
-                weight=e_data["weight"],
-                edge_type=e_data.get("edge_type", "topical"),
-                co_activation_count=e_data.get("co_activation_count", 0),
-                created_at=e_data.get("created_at", time.time()),
-                last_activated_at=e_data.get("last_activated_at", time.time()),
-            )
+            rich_markers = ("confidence", "relation", "source_type",
+                            "reinforcement_count", "temporal_order",
+                            "causal_strength", "is_stale")
+            if any(k in e_data for k in rich_markers):
+                edge = RichEdge(
+                    source=e_data["source"],
+                    target=e_data["target"],
+                    weight=e_data.get("weight", 0.5),
+                    edge_type=e_data.get("edge_type", "topical"),
+                    co_activation_count=e_data.get("co_activation_count", 0),
+                    created_at=e_data.get("created_at", time.time()),
+                    last_activated_at=e_data.get("last_activated_at", time.time()),
+                    confidence=e_data.get("confidence", 0.5),
+                    relation=e_data.get("relation", ""),
+                    source_type=e_data.get("source_type", "implicit"),
+                    reinforcement_count=e_data.get("reinforcement_count", 0),
+                    temporal_order=e_data.get("temporal_order", ""),
+                    causal_strength=e_data.get("causal_strength", 0.0),
+                    is_stale=e_data.get("is_stale", False),
+                    decay_rate=e_data.get("decay_rate", 0.01),
+                )
+            else:
+                edge = Edge(
+                    source=e_data["source"],
+                    target=e_data["target"],
+                    weight=e_data.get("weight", 0.5),
+                    edge_type=e_data.get("edge_type", "topical"),
+                    co_activation_count=e_data.get("co_activation_count", 0),
+                    created_at=e_data.get("created_at", time.time()),
+                    last_activated_at=e_data.get("last_activated_at", time.time()),
+                    decay_rate=e_data.get("decay_rate", 0.001),
+                )
             key = graph._key(edge.source, edge.target)
             graph.edges[key] = edge
             graph._adjacency[edge.source].add(edge.target)

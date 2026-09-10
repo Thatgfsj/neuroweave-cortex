@@ -39,9 +39,12 @@ Memory accessibility follows a thermal metaphor:
 |-------|---------|---------------|-------------|
 | ACTIVE | HOT | Instant | Recently accessed, fully available |
 | CONSOLIDATING | WARM | Low | Being strengthened during sleep |
-| INACTIVE | COLD | Medium | Not recently used but still accessible |
-| DORMANT | FROZEN | High | Very low activation, requires strong cue |
-| (evicted) | DEAD | N/A | Only compressed residual trace (Ghost) remains |
+| INACTIVE | WARM/COLD | Low-Medium | Not recently used but still accessible |
+| DORMANT | COLD/FROZEN | High | Very low activation, requires strong cue |
+
+**Never-Delete**: there is no DEAD tier and no eviction. FROZEN is the floor —
+accessibility decreases, existence never does. Even a deep-dormant memory
+remains retrievable via activation propagation from a connected cue.
 
 ---
 
@@ -67,14 +70,18 @@ Where:
 The composite importance score is a weighted linear combination:
 
 ```
-score = W_emo · e + W_rep · r + W_goal · g + W_rich · c + W_fb · f
+score = W_emo · e + W_rep · r + W_goal · g + W_rich · c + W_fb · f + W_nov · n
 ```
 
-Default weights (tunable per application):
-- W_emo = 0.18, W_rep = 0.22, W_goal = 0.28, W_rich = 0.12, W_fb = 0.12
+Default weights (W-code+nov, adopted after A/B benchmarking — sums to 1.000;
+tunable per application via `importance_engine.weights` in defaults.yaml):
+- W_emo = 0.162, W_rep = 0.198, W_goal = 0.252, W_rich = 0.108, W_fb = 0.108,
+  W_future = 0.072, W_nov = 0.100
 
 Goal relevance carries the highest weight, reflecting NWC's focus on
-**task-relevant memory**.
+**task-relevant memory**. The novelty signal (n = 1 − topic overlap with
+known knowledge) implements "new topics score higher", per the human-like
+memory design goal.
 
 ### 2.3 Retrieval Feedback Loop
 
@@ -131,9 +138,11 @@ Different memory states have different half-lives:
 | State | Half-Life Multiplier | Effect |
 |-------|---------------------|--------|
 | ACTIVE | 1.0× | Baseline decay |
-| DORMANT | 3.0× | Decay slows significantly |
-| GHOST | 0.5× | Decay accelerates (residual only) |
-| REACTIVATED | 2.0× | Moderate protection |
+| DORMANT | 1.5× | Decay slows (dormant memories are protected) |
+| REACTIVATED | 0.7× | Decay transiently faster until re-consolidated |
+
+(Values follow the code defaults `decay.dormant_half_life_factor = 1.5` and
+`decay.reactivated_half_life_factor = 0.7`.)
 
 ---
 
@@ -186,12 +195,15 @@ NWC's sleep consolidation mirrors human sleep architecture:
 | N2c | Memory Revision | Revise low-confidence / high-surprise memories |
 | N3 | Schema Formation | Extract abstract patterns from concrete episodes |
 | REM | Emotional Consolidation | Integrate emotional valence, strengthen salient memories |
-| N4 | Ghost Pruning | Compress low-importance memories to residual traces |
+| N4 | Dim / Prune | Reduce accessibility of low-importance memories toward DORMANT (v1.3.2: `prune` is an alias of `dim` — nothing is deleted) |
 | Phase 8 | Index Rebuild | Rebuild ANN index and cognitive caches |
 
-### 5.2 Ghost Creation (Compressed Residuals)
+### 5.2 Residual Traces (Compressed Ghosts)
 
-When a memory transitions to DORMANT or is pruned, a **Ghost** is created:
+When a memory transitions to DORMANT, a compressed **residual trace**
+("ghost") may be retained so that partial recall and re-learning remain
+possible. Under the Never-Delete axiom the memory itself is never destroyed —
+only its accessibility has dropped:
 
 ```
 Ghost(m) = ⟨e_compressed, s_semantic, e_trace, i_residual⟩
@@ -203,8 +215,9 @@ Where:
 - e_trace = emotional trace (valence, arousal)
 - i_residual = residual importance score
 
-Ghosts enable **partial recall** without full memory restoration,
-and support the **savings effect** for re-learning.
+Residual traces enable **partial recall** without full memory restoration,
+and support the **savings effect** for re-learning. A DORMANT memory hit by
+retrieval transfers to REACTIVATED (revival via activation propagation).
 
 ---
 
@@ -223,15 +236,15 @@ A positive savings value indicates that the revived memory regains
 strength faster than an entirely new memory. This mirrors the
 Ebbinghaus savings effect in human memory.
 
-### 6.2 Implementation via Ghost Traces
+### 6.2 Implementation via Residual Traces
 
-When a memory is revived from its ghost trace:
+When a dormant memory is revived via its residual trace:
 
-1. The ghost's compressed embedding provides a head start in
+1. The compressed embedding provides a head start in
    similarity matching
 2. The semantic shadow primes the re-encoding process
 3. The revival takes fewer repetitions to reach full strength
-4. The savings effect is tracked per ghost and aggregated globally
+4. The savings effect is tracked per revived memory and aggregated globally
 
 ---
 

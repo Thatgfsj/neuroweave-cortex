@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> 最后更新: 2026-05-22 | **v1.1.0** | 6-layer cognitive memory architecture
+> 最后更新: 2026-09-11 | **v1.4.2** | 6-layer cognitive memory architecture
 
 ---
 
@@ -97,30 +97,31 @@ Capture → Parse → Evaluate → Link → Reflect → Compress → Decay → R
 
 ### 核心公式
 
-```
-importance = emotion_weight × w1
-           + repetition_weight × w2
-           + goal_relation × w3
-           + novelty × w4
-           + future_probability × w5
-```
+> 权威实现：`star_graph/importance_engine.py`（v2.1 认知门卫）。
+> 下表为 **W-code+nov** 最终权重——经 A/B 实测（3 seeds，三组配置质量打平，
+> 按设计要求保留 novelty；数据见 `benchmarks/AB_README.md`），合计 = 1.000：
 
-| 输入 | 权重 | 示例 |
+| 输入 | 权重 | 说明 |
 |------|------|------|
-| emotion_weight | 0.25 | 高情绪 ≠ 高价值，但愤怒/兴奋表示"用户在乎" |
-| repetition_weight | 0.30 | 用户连续5次讨论同一主题 → 这是核心关注点 |
-| goal_relation | 0.20 | 与当前活跃目标相关 → 优先存储 |
-| novelty | 0.15 | 新话题 vs 已存储知识的重叠度 |
-| future_probability | 0.10 | 预测未来被召回的概率 |
+| emotion | 0.162 | 高情绪 ≠ 高价值，但愤怒/兴奋表示"用户在乎" |
+| repetition | 0.198 | 用户连续讨论同一主题 → 这是核心关注点（带时间衰减） |
+| goal_relation | 0.252 | 与当前活跃目标相关 → 优先存储 |
+| retrieval_feedback | 0.108 | 召回次数 × 召回成功率的 EMA 反馈回路 |
+| richness | 0.108 | 实体密度/具体性/可执行性/信息密度 |
+| future | 0.072 | 预测未来被召回的概率 |
+| novelty | 0.100 | 新话题 vs 已存储知识的重叠度（重叠越低越新颖） |
 
 ### 分级结果
 
+> 阈值可配置：`star_graph/defaults.yaml` → `importance_engine` 段
+> （`discard_threshold: 0.15`、`low_threshold: 0.35`、`normal_threshold: 0.60`）。
+
 | 范围 | 层级 | 处理 |
 |------|------|------|
-| 0.0–0.2 | 噪声 | 直接丢弃，不进入任何存储 |
-| 0.2–0.5 | 低价值 | 进入 Episodic，快速衰减，30天内可 ghost |
-| 0.5–0.8 | 有价值 | 正常存储，参与 consolidation |
-| 0.8–1.0 | 核心 | 强制提升至 Semantic/Pattern，低衰减率 |
+| 0.0–0.15 | 噪声 DISCARD | 直接丢弃，不进入任何存储 |
+| 0.15–0.35 | 低价值 LOW | 进入 Episodic，快速衰减（decay 0.25），30天内可转入 Dormant（永不删除） |
+| 0.35–0.60 | 有价值 NORMAL | 正常存储，参与 consolidation |
+| 0.60–1.0 | 核心 CORE | 强制提升至 Semantic/Pattern，低衰减率（decay 0.015） |
 
 ---
 
@@ -247,7 +248,21 @@ Persistent Cognitive Identity
 
 ## 检索公式
 
-不是纯 cosine，而是:
+> **现状（A/B 实测后）**：上式为早期设计草案，未单独实现。生产检索是
+> **HybridFusion 五通道融合**（`star_graph/retrieval_engine/retriever.py`），
+> 即 LoCoMo-10 44.2% 成绩的实测管线：
+>
+> ```
+> final_score = α·semantic_sim + β·temporal + γ·ppr(图结构)
+>             + δ·confidence + ε·lexical
+>             (α=0.50, β=0.12, γ=0.18, δ=0.08, ε=0.12)
+> ```
+>
+> A/B 对比（合成语料 × 3 seeds）：两者 hit@k / has_answer 打平，HybridFusion
+> 均值 MRR 更高（0.0153 vs 0.0110），维持 HybridFusion 为生产路径；
+> 数据见 `benchmarks/AB_README.md`。
+
+历史设计草案（未单独实现，多信号融合思想由 HybridFusion 承接）：
 
 ```
 final_score =
@@ -266,7 +281,7 @@ final_score =
 
 ### 务实的前提
 
-以上定位和架构是 NWC 的长期愿景。但在追求这个愿景之前，必须正视当前工程基础的差距。下文基于外部代码审查和基准数据分析，是当前版本（v1.1.0）的真实状态评估和重建计划。
+以上定位和架构是 NWC 的长期愿景。但在追求这个愿景之前，必须正视当前工程基础的差距。下文基于外部代码审查和基准数据分析，是 v1.1.0 时点的真实状态评估和重建计划（工程现状已推进至 v1.4.1，见第六节版本历史）。
 
 ### 1.0 当前代码库状态
 
@@ -307,19 +322,19 @@ final_score =
 - **JSON 存储**: 保留为兼容选项，`export_json()` 方法可用
 - **StorageBackend 接口**: ✅ 已完成抽象层（`batch_save`/`transaction`/`search`/`detect_and_create`）
 - **并发安全**: ✅ StarGraph 已加 `threading.RLock`，`add_anchor`/`add_edge`/`remove_anchor` 线程安全
-- **未完成**: 无 Qdrant/Milvus 等专用向量数据库后端；无水平扩展方案
+- **未完成**: QdrantStorage 已实现（完整 save/load/search 接口）但 round-trip 一致性修复中；无 Milvus 等其他专用向量数据库后端；无水平扩展方案
 
 ### 1.3 架构：认知复杂度与工程价值的倒挂
 
 ```
 112+ 模块
 4 层架构
-9 阶段生命周期（PERCEPTION → WORKING → ... → GHOST → DEAD）
+9 阶段生命周期（PERCEPTION → WORKING → ... → GHOST → DEAD；v1.3.2 起已收敛为 6 状态机 + 8 阶段睡眠，GHOST/DEAD 并入 DORMANT / FROZEN 地板）
 8 阶段睡眠（N1-N3, REM, N4-N6）
 300+ 配置参数
 ```
 
-大量"生物学启发"功能（Ghost Revival、REM Emotion、Hebbian Learning、Oscillation Resonance）**缺乏消融实验证明其实际增益**。
+大量"生物学启发"功能（Ghost Revival、REM Emotion、Hebbian Learning、Oscillation Resonance）**缺乏消融实验证明其实际增益**。（注：v1.3.5 起消融实验+统计验证已补齐，见第六节版本历史。）
 
 ### 1.4 生态隔离
 
@@ -471,7 +486,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 
 | 项目 | 说明 | 状态 |
 |------|------|------|
-| LoCoMo-10 | 1,986 QA pairs | ✅ 44.1% has_answer |
+| LoCoMo-10 | 1,986 QA pairs | ✅ 44.2% has_answer |
 | LongBench / RULER | longbench_adapter.py — 6 任务类型 + RULER 风格检索测试 | ✅ 完成 |
 | 基线对比 | run_baseline_comparison.py — Mem0/MemGPT/HippoRAG/Vanilla RAG 框架 | ✅ 完成 |
 | 完整指标 | Recall@K, MRR, NDCG, Latency, Compression Ratio | ✅ 在 formalism.md 中定义 |
@@ -490,7 +505,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 \*\*发表前检查清单:\*\*
 - [x] 认知记忆理论框架
 - [x] 数学形式化定义（formalism.md）
-- [x] LoCoMo 基准（44.1%）
+- [x] LoCoMo 基准（44.2%）
 - [x] LongBench / RULER 多基准框架
 - [x] 基线对比框架（Mem0/MemGPT/HippoRAG/Vanilla RAG）
 - [x] 消融实验
@@ -508,7 +523,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 |------|------|
 | 存储后端接口抽象 + SQLite 默认 | ✅ |
 | 并发锁 (RLock) | ✅ |
-| LoCoMo 全量跑分（44.1%） | ✅ |
+| LoCoMo 全量跑分（44.2%） | ✅ |
 | 消融实验 + 统计验证 | ✅ |
 | Activation Graph 检索 | ✅ |
 | Memory Lifecycle Engine | ✅ |
@@ -519,7 +534,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 
 | 版本 | 重点 | 预期指标 |
 |------|------|----------|
-| **v1.3.x** | Lifecycle + Activation + Benchmark | LoCoMo 44.1% |
+| **v1.3.x** | Lifecycle + Activation + Benchmark | LoCoMo 44.2% |
 | **v1.4.x** | Schema + Compression + Multi-Benchmark | LongBench CI |
 | **v1.5.x** | Formalism + Theory + Baselines | 对比实验完成 |
 | **v2.0.0** | Research Ready | 所有检查项通过 |

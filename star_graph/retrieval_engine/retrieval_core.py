@@ -26,6 +26,8 @@ import math
 import re
 import time
 
+import numpy as np
+
 
 # ── Temporal query detection ──────────────────────────────
 # Identifies queries containing time/date references for
@@ -208,7 +210,15 @@ class RetrievalCore:
             if emb is not None:
                 act_results = ag.find_seeds(emb, top_k=max_items, min_similarity=0.15)
                 if act_results:
-                    act_spread = ag.spread(act_results, max_depth=2, max_nodes=max_items * 2)
+                    # Spread caps come from retrieval_budget config (single
+                    # source); nodes stay ≤ the diffusion ceiling (50) and
+                    # default behaviour is unchanged (depth 2, nodes 20).
+                    rb_cfg = getattr(self._rt.cfg, "retrieval_budget", None)
+                    _spread_depth = getattr(rb_cfg, "spread_max_depth", 2) if rb_cfg else 2
+                    _spread_nodes = min(
+                        getattr(rb_cfg, "spread_max_nodes", 50) if rb_cfg else 50,
+                        max_items * 2)
+                    act_spread = ag.spread(act_results, max_depth=_spread_depth, max_nodes=_spread_nodes)
                     seen_aids = set()
                     for node in act_spread:
                         if node.node_id in seen_aids:
@@ -314,20 +324,15 @@ class RetrievalCore:
         # ── Full semantic scan (auxiliary path) ──
         # Scores ALL anchors by embedding cosine to catch items missed by
         # BM25 pre-filtering. Low weight: provides breadth, not precision.
+        # Vectorized: one matrix-vector product instead of a per-anchor
+        # Python cosine loop.
         t_sem = time.time()
         sem_ids: list[tuple[str, float]] = []
         if query_emb is not None and len(self._rt.graph.anchors) > 0:
             try:
-                sem_scored: list[tuple[str, float]] = []
-                for anchor in self._rt.graph.anchors.values():
-                    if not anchor.is_retrievable or not anchor.embedding:
-                        continue
-                    sim = _cosine_sim(query_emb, anchor.embedding)
-                    sem_scored.append((anchor.id, sim))
-                sem_scored.sort(key=lambda x: -x[1])
-                sem_ids = sem_scored[:max_items * 10]  # large: up to 100 candidates
+                sem_ids = self._semantic_scan(query_emb, max_items * 10)
             except Exception:
-                pass
+                sem_ids = []
         if sem_ids:
             ranked_lists.append(sem_ids)
             path_weights.append(1.0)  # semantic breadth, lower than BM25/exact to avoid diluting keyword precision
@@ -618,6 +623,52 @@ class RetrievalCore:
                 retrieved_memories=rrf_trace_entries,
             ).to_dict(),
         )
+
+    # ── Vectorized full-graph semantic scan ───────────────────
+
+    def _semantic_scan(self, query_emb: list[float],
+                       limit: int) -> list[tuple[str, float]]:
+        """Score ALL retrievable anchors by embedding cosine similarity.
+
+        Single [n, d] · [d] matmul replaces the per-anchor Python loop.
+        Mirrors math_utils.cosine_sim semantics (0.0 for near-zero norms).
+        Returns up to `limit` (anchor_id, similarity) pairs sorted descending;
+        ties keep anchor insertion order (stable), matching the previous
+        sort-based implementation.
+        """
+        if limit <= 0 or not query_emb:
+            return []
+        ids: list[str] = []
+        embs: list[list[float]] = []
+        for anchor in self._rt.graph.anchors.values():
+            if not anchor.is_retrievable or not anchor.embedding:
+                continue
+            ids.append(anchor.id)
+            embs.append(anchor.embedding)
+        if not ids:
+            return []
+
+        d = len(query_emb)
+        if d > 0 and all(len(e) == d for e in embs):
+            mat = np.asarray(embs, dtype=np.float64)
+            q = np.asarray(query_emb, dtype=np.float64)
+            dots = mat @ q
+            denom = np.linalg.norm(mat, axis=1) * np.linalg.norm(q)
+            sims = np.zeros(dots.shape[0], dtype=np.float64)
+            valid = denom >= 1e-12
+            sims[valid] = dots[valid] / denom[valid]
+            if limit < sims.shape[0]:
+                top = np.argpartition(-sims, limit - 1)[:limit]
+            else:
+                top = np.arange(sims.shape[0])
+            top = top[np.argsort(-sims[top], kind="stable")]
+            return [(ids[int(i)], float(sims[i])) for i in top]
+
+        # Ragged embedding dims — fall back to the per-pair computation.
+        scored = [(aid, _cosine_sim(query_emb, emb))
+                  for aid, emb in zip(ids, embs)]
+        scored.sort(key=lambda x: -x[1])
+        return scored[:limit]
 
     # ── Phase 3: Context Compression ──────────────────────────
     # Compresses a large result set (100+) into a compact useful set (~10)

@@ -1,17 +1,34 @@
 """Retrieval Budget — prevent spreading activation and recall from exploding.
 
-Enforces three hard limits during retrieval:
-  - MAX_HOPS = 3   — max BFS depth from seed nodes
-  - MAX_NODES = 24 — max activated nodes per query
-  - MAX_TOKENS = 6000 — max token budget for retrieved content
+This module is the SINGLE source of truth for per-query retrieval budget
+values (S-5). The authoritative numbers live in ``defaults.yaml`` under the
+``retrieval_budget:`` section; the module constants below are only the
+hard-coded fallback used when no config is available. Build instances via
+:meth:`RetrievalBudget.from_config` rather than hand-rolling getattr chains.
 
-Wired into spreading.activate() and retrieval_pipeline.recall().
+Enforced caps (post-fusion, wired into RetrievalCore.recall):
+  - MAX_HOPS = 3   — max BFS depth from seed nodes (advisory: callers run
+                     their own BFS with hardcoded depths; see allow_hop)
+  - MAX_NODES = 24 — max items kept after RRF fusion per query
+  - MAX_TOKENS = 6000 — max token budget for retrieved content (char/4 est.)
+
+Layering note: the activation-spread layer has its own ceiling,
+``activation_graph.MAX_ACTIVATED_NODES = 50`` (this is the ``C`` in the
+O(C·b) bound of docs/complexity_analysis.md, Theorem 2). That ceiling sits
+*below* this budget: recall() currently spreads with ``max_nodes=max_items*2``
+which is <= 50 for max_items <= 25, so the two layers never multiply into
+runaway growth. Keep spread ceilings >= retrieval_budget.max_nodes.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Default fallbacks — mirrors defaults.yaml `retrieval_budget:` section.
+MAX_HOPS = 3
+MAX_NODES = 24
+MAX_TOKENS = 6000
 
 
 @dataclass
@@ -28,7 +45,7 @@ class RetrievalBudget:
     """Hard budget limits for retrieval operations.
 
     Usage:
-        budget = RetrievalBudget(max_hops=3, max_nodes=24, max_tokens=6000)
+        budget = RetrievalBudget.from_config()   # reads defaults.yaml
         state = budget.begin()
 
         # During BFS:
@@ -43,12 +60,36 @@ class RetrievalBudget:
     """
 
     def __init__(self,
-                 max_hops: int = 3,
-                 max_nodes: int = 24,
-                 max_tokens: int = 6000):
+                 max_hops: int = MAX_HOPS,
+                 max_nodes: int = MAX_NODES,
+                 max_tokens: int = MAX_TOKENS):
         self.max_hops = max_hops
         self.max_nodes = max_nodes
         self.max_tokens = max_tokens
+
+    @classmethod
+    def from_config(cls, cfg=None) -> "RetrievalBudget":
+        """Build a budget from the ``retrieval_budget`` config section.
+
+        This is the single construction entry point — the authoritative
+        values live in defaults.yaml under ``retrieval_budget:``; the
+        module constants (MAX_HOPS/MAX_NODES/MAX_TOKENS) are only the
+        fallback when the section or a key is missing.
+
+        Args:
+            cfg: a :class:`star_graph.config.Config` instance. ``None``
+                falls back to the global singleton (``Config.get()``),
+                which loads defaults.yaml on first use.
+        """
+        if cfg is None:
+            from ..config import Config
+            cfg = Config.get()
+        section = getattr(cfg, "retrieval_budget", None)
+        return cls(
+            max_hops=getattr(section, "max_hops", MAX_HOPS) if section else MAX_HOPS,
+            max_nodes=getattr(section, "max_nodes", MAX_NODES) if section else MAX_NODES,
+            max_tokens=getattr(section, "max_tokens", MAX_TOKENS) if section else MAX_TOKENS,
+        )
 
     def begin(self) -> BudgetState:
         """Start a new budget tracking session."""

@@ -171,13 +171,19 @@ class TestMemoryState:
         assert MemoryState.ACTIVE in states
         assert MemoryState.REHEARSING in states
         assert MemoryState.CONSOLIDATING in states
+        assert MemoryState.INACTIVE in states
         assert MemoryState.DORMANT in states
-        assert MemoryState.GHOST in states
         assert MemoryState.REACTIVATED in states
+
+    def test_never_delete_no_ghost_member(self):
+        """v1.3.2 Never-Delete: GHOST was merged into DORMANT."""
+        assert not hasattr(MemoryState, "GHOST")
+        # Legacy persisted "ghost" values deserialize as DORMANT
+        assert MemoryState("ghost") == MemoryState.DORMANT
 
     def test_state_values(self):
         assert MemoryState.ACTIVE.value == "active"
-        assert MemoryState.GHOST.value == "ghost"
+        assert MemoryState.DORMANT.value == "dormant"
 
 
 # ── ThermalState ──────────────────────────────────────────
@@ -189,11 +195,14 @@ class TestThermalState:
         assert ThermalState.WARM in states
         assert ThermalState.COLD in states
         assert ThermalState.FROZEN in states
-        assert ThermalState.DEAD in states
+
+    def test_never_delete_no_dead_member(self):
+        """v1.3.2 Never-Delete: memories never die — no DEAD thermal state."""
+        assert not hasattr(ThermalState, "DEAD")
 
     def test_state_values(self):
         assert ThermalState.HOT.value == "hot"
-        assert ThermalState.DEAD.value == "dead"
+        assert ThermalState.FROZEN.value == "frozen"
 
 
 # ── Anchor ────────────────────────────────────────────────
@@ -225,10 +234,11 @@ class TestAnchorBasic:
         a = Anchor(id="a1", text="test")
         assert a.is_retrievable
 
-    def test_anchor_ghost_not_retrievable(self):
+    def test_anchor_dormant_still_retrievable(self):
+        """Never-Delete: dormant memories stay retrievable via propagation."""
         a = Anchor(id="a1", text="test")
-        a.state = MemoryState.GHOST
-        assert not a.is_retrievable
+        a.state = MemoryState.DORMANT
+        assert a.is_retrievable
 
     def test_anchor_is_plastic_default(self):
         a = Anchor(id="a1", text="test")
@@ -341,24 +351,41 @@ class TestAnchorStateMachine:
         assert new_state == MemoryState.CONSOLIDATING
 
     def test_transition_prune(self):
+        """v1.3.2: prune is an alias of dim — ACTIVE → INACTIVE."""
         a = Anchor(id="a1", text="test")
         new_state = a.transition("prune")
-        assert new_state == MemoryState.GHOST
+        assert new_state == MemoryState.INACTIVE
+
+    def test_transition_prune_inactive_goes_dormant(self):
+        """v1.3.2: prune on INACTIVE → DORMANT (demote, never delete)."""
+        a = Anchor(id="a1", text="test")
+        a.transition("prune")   # ACTIVE → INACTIVE
+        new_state = a.transition("prune")
+        assert new_state == MemoryState.DORMANT
 
     def test_transition_invalid_event(self):
         a = Anchor(id="a1", text="test")
         a.state = MemoryState.DORMANT
         new_state = a.transition("prune")
-        assert new_state == MemoryState.GHOST
+        assert new_state == MemoryState.DORMANT  # no-op, stays
+
+    def test_dormant_retrieve_reactivates(self):
+        """Never-Delete revival: retrieval reaching a DORMANT memory revives it."""
+        a = Anchor(id="a1", text="test")
+        a.state = MemoryState.DORMANT
+        new_state = a.transition("retrieve")
+        assert new_state == MemoryState.REACTIVATED
 
     def test_full_lifecycle(self):
         a = Anchor(id="a1", text="test")
         a.transition("consolidate")  # ACTIVE → CONSOLIDATING
         assert a.state == MemoryState.CONSOLIDATING
-        a.transition("stabilize")   # CONSOLIDATING → DORMANT
+        a.transition("stabilize")   # CONSOLIDATING → INACTIVE
+        assert a.state == MemoryState.INACTIVE
+        a.transition("dim")         # INACTIVE → DORMANT
         assert a.state == MemoryState.DORMANT
-        a.transition("retrieve")    # DORMANT → ACTIVE
-        assert a.state == MemoryState.ACTIVE
+        a.transition("retrieve")    # DORMANT → REACTIVATED (revival)
+        assert a.state == MemoryState.REACTIVATED
 
 
 class TestAnchorThermal:
@@ -369,17 +396,22 @@ class TestAnchorThermal:
         a.last_activated_at = time.time()
         assert a.thermal_state == ThermalState.HOT
 
-    def test_ghost_is_cold(self):
+    def test_dormant_thermal_state(self):
+        """DORMANT memories sync to COLD via the state machine; the
+        retention-based fallback (sync lost) derives from scores instead."""
         a = Anchor(id="a1", text="test")
-        a.state = MemoryState.GHOST
-        a._ghost_reactivation_prob = 0.1
+        a.transition("dim")  # ACTIVE → INACTIVE
+        a.transition("dim")  # INACTIVE → DORMANT (syncs _thermal_state=COLD)
         assert a.thermal_state == ThermalState.COLD
 
-    def test_ghost_dead_at_low_prob(self):
+    def test_thermal_floor_is_frozen_never_dead(self):
+        """Never-Delete: heavily decayed memories bottom out at FROZEN."""
         a = Anchor(id="a1", text="test")
-        a.state = MemoryState.GHOST
-        a._ghost_reactivation_prob = 0.01
-        assert a.thermal_state == ThermalState.DEAD
+        a._thermal_state = None
+        a.vector.recency = 0.01
+        a.vector.frequency = 0.0
+        a.last_activated_at = time.time() - (365 * 24 * 3600)
+        assert a.thermal_state == ThermalState.FROZEN
 
     def test_thermal_priority(self):
         a = Anchor(id="a1", text="test")
@@ -397,17 +429,17 @@ class TestAnchorThermal:
         a._thermal_state = ThermalState.HOT
         assert a.storage_tier == "memory"
 
-    def test_thaw_dead_returns_false(self):
+    def test_thaw_frozen_succeeds(self):
+        """Never-Delete: even FROZEN (archive) memories can be thawed."""
         a = Anchor(id="a1", text="test")
-        a._thermal_state = ThermalState.DEAD
-        assert not a.thaw()
+        a._thermal_state = ThermalState.FROZEN
+        assert a.thaw()
 
-    def test_thaw_cold_ghost_transitions(self):
+    def test_thaw_cold_dormant_transitions(self):
         a = Anchor(id="a1", text="test")
-        a.state = MemoryState.GHOST
-        a._ghost_reactivation_prob = 0.1
-        a._thermal_state = None
-        # thaw should transition ghost to REACTIVATED
+        a.state = MemoryState.DORMANT
+        a._thermal_state = ThermalState.COLD
+        # thaw should revive dormant to REACTIVATED
         assert a.thaw()
         assert a.state == MemoryState.REACTIVATED
 
@@ -416,10 +448,11 @@ class TestAnchorThermal:
         a._thermal_state = ThermalState.HOT
         assert a.is_thermally_retrievable
 
-    def test_dead_not_thermally_retrievable(self):
+    def test_frozen_still_thermally_retrievable(self):
+        """Never-Delete: every thermal state is retrievable — FROZEN too."""
         a = Anchor(id="a1", text="test")
-        a._thermal_state = ThermalState.DEAD
-        assert not a.is_thermally_retrievable
+        a._thermal_state = ThermalState.FROZEN
+        assert a.is_thermally_retrievable
 
     def test_thermal_summary(self):
         a = Anchor(id="a1", text="test")

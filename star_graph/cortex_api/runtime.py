@@ -552,14 +552,14 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
 
     @property
     def retrieval_budget(self) -> RetrievalBudget:
-        """Lazy-init retrieval budget for hop/node/token limits."""
+        """Lazy-init retrieval budget for hop/node/token limits.
+
+        Delegates to RetrievalBudget.from_config — the single budget
+        construction entry point (values from defaults.yaml
+        `retrieval_budget:` section, constants as fallback).
+        """
         if self._retrieval_budget is None:
-            rb_cfg = getattr(self.cfg, 'retrieval_budget', None)
-            max_hops = getattr(rb_cfg, 'max_hops', 3) if rb_cfg else 3
-            max_nodes = getattr(rb_cfg, 'max_nodes', 24) if rb_cfg else 24
-            max_tokens = getattr(rb_cfg, 'max_tokens', 6000) if rb_cfg else 6000
-            self._retrieval_budget = RetrievalBudget(
-                max_hops=max_hops, max_nodes=max_nodes, max_tokens=max_tokens)
+            self._retrieval_budget = RetrievalBudget.from_config(self.cfg)
         return self._retrieval_budget
 
     @property
@@ -623,7 +623,10 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
         self.storage_path = path
 
         # Try to load ghosts
-        ghost_path = Path(path).with_suffix("_ghosts.json")
+        # NOTE: with_suffix() raises ValueError for non-dot suffixes
+        # (e.g. "memory.db" -> "_ghosts.json"), so derive the name from stem.
+        _p = Path(path)
+        ghost_path = _p.with_name(_p.stem + "_ghosts.json")
         if ghost_path.exists():
             with open(ghost_path, "r", encoding="utf-8") as f:
                 ghost_data = json.load(f)
@@ -645,11 +648,22 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
                 )
                 self._ghosts.ghosts[gid] = ghost
 
-        # Reset subsystems that cache graph references
+        # Reset subsystems that cache graph references (or stale derived state)
         self._scheduler = None
         self._evolution = None
         self._metrics = None
         self._community_detection = None
+        self._timespine = None
+        self._dual_channel = None
+        self._cascade = None
+        self._spreading = None
+        self._bm25 = None
+        self._exact_cache = None
+        self._hublayer = None
+        # _batch_vectorizer holds self.graph; _reflection_loop holds a stale
+        # GhostSubsystem when the ghost file above replaced self._ghosts.
+        self._batch_vectorizer = None
+        self._reflection_loop = None
 
         # Re-set survival function (class vars don't survive process restart)
         Anchor.set_survival_function(self.survival_function)
@@ -778,18 +792,18 @@ class MemoryRuntime(RuntimeCore, RuntimeLifecycle):
             return None
 
         from ..anchor import Anchor
-        anchor = Anchor(
-            id=anchor_id,
+        anchor = Anchor.create(
             text=data.get("text", ""),
             embedding=data.get("embedding"),
             tags=data.get("tags", []),
             source_session=data.get("source_session", ""),
-            created_at=data.get("created_at", time.time()),
-            last_activated_at=data.get("last_activated_at", time.time()),
-            community_id=data.get("community_id", ""),
             importance=data.get("importance", 0.5),
             emotional_valence=data.get("emotional_valence", 0.0),
         )
+        anchor.id = anchor_id
+        anchor.created_at = data.get("created_at", anchor.created_at)
+        anchor.last_activated_at = data.get("last_activated_at", anchor.last_activated_at)
+        anchor.community_id = data.get("community_id", "")
         self.graph.anchors[anchor_id] = anchor
         return anchor
 

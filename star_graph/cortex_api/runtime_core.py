@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from ..anchor import Anchor
+from ..anchor import Anchor, MemoryState
 from ..math_utils import cosine_sim as _cosine_sim
 from .working_memory import WorkingMemoryEntry
 from ..cortex import MemoryCortex
@@ -196,11 +196,46 @@ class RuntimeCore:
 
         return anchor
 
-    def forget(self, anchor_id: str, create_ghost: bool = True) -> Anchor | None:
-        """Remove a memory. If create_ghost=True, preserves a latent trace."""
+    # Events that walk an anchor down the state machine toward DORMANT.
+    # Never-Delete (v1.3.2): forgetting is logical, never physical.
+    # ACTIVE →(prune)→ INACTIVE →(prune)→ DORMANT; the intermediate states
+    # (REHEARSING/CONSOLIDATING/REACTIVATED) are routed via their own
+    # consolidation events so any state can reach DORMANT.
+    _FORGET_TRANSITIONS = {
+        "ACTIVE": "prune",           # ACTIVE → INACTIVE
+        "REHEARSING": "consolidate", # REHEARSING → CONSOLIDATING
+        "CONSOLIDATING": "stabilize",# CONSOLIDATING → INACTIVE
+        "REACTIVATED": "consolidate",# REACTIVATED → CONSOLIDATING
+        "INACTIVE": "prune",         # INACTIVE → DORMANT
+    }
+
+    def forget(self, anchor_id: str, create_ghost: bool = True,
+               invalid: bool = False) -> Anchor | None:
+        """Logically forget a memory — Never-Delete: the anchor is NEVER removed.
+
+        Instead of physical deletion, forgetting:
+          1. Walks the anchor down the state machine to DORMANT
+             (transition('prune') chain; DORMANT is the lowest state).
+          2. Lowers its weight: activation_level → 0.01 (the code hard floor,
+             "deep dormant"), importance × 0.3 (floored at 0.01).
+          3. Optionally records a compressed residual trace (ghost) so fuzzy
+             recall — "I seem to remember..." — still works.
+          4. With invalid=True, stamps invalid_at (user-repudiated content) —
+             the only mechanism that excludes a memory from retrieval results.
+
+        The anchor stays in graph.anchors with its edges, so activation
+        propagation (spread_activation / retrieval) can still reach and
+        reactivate it (DORMANT →(revive/retrieve)→ REACTIVATED).
+
+        Returns the anchor (backward compatible), or None if not found.
+        """
         anchor = self.graph.anchors.get(anchor_id)
         if anchor is None:
             return None
+
+        # Already forgotten → idempotent no-op (never compound the discount).
+        if anchor.state is MemoryState.DORMANT:
+            return anchor
 
         if create_ghost:
             residual = {}
@@ -211,10 +246,25 @@ class RuntimeCore:
                     residual[neighbor_id] = edge.weight * 0.3
             self.ghosts.create(anchor, residual)
 
-        self.graph.remove_anchor(anchor_id)
-        self.timespine.remove_anchor(anchor_id)
-        if self._bm25 is not None:
-            self._bm25.remove(anchor_id)
+        # Logical forgetting: demote to DORMANT via the state machine.
+        for _ in range(len(self._FORGET_TRANSITIONS) + 1):
+            event = self._FORGET_TRANSITIONS.get(anchor.state.name)
+            if event is None:
+                break  # DORMANT (or unknown state) — done
+            before = anchor.state
+            anchor.transition(event)
+            if anchor.state is before:
+                break  # transition invalid/no-op — avoid spinning
+
+        # Lower weight to the deep-dormant floor; importance takes a discount.
+        anchor.activation_level = 0.01
+        anchor.vector.importance = max(0.01, anchor.vector.importance * 0.3)
+
+        # Optional user-repudiation: invalid_at is the sole retrieval blocker.
+        if invalid and anchor.invalid_at is None:
+            import time as _time
+            anchor.invalid_at = _time.time()
+
         return anchor
 
     # ── Working Memory (short-term buffer) ───────────────────

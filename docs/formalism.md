@@ -35,9 +35,15 @@ where `T` is a deterministic state machine with allowed transitions:
 | DORMANT | REACTIVATED | Similarity with new input > θ_react |
 | REACTIVATED | ACTIVE | Retrieval/use |
 
+Never-Delete (v1.3.2): there is no deletion transition. `prune` is an alias
+of `dim` (lower accessibility toward DORMANT), and a DORMANT memory hit by
+retrieval transfers to REACTIVATED — revival via activation propagation.
+
 ### Thermal Correspondence
 
-Each state maps to a thermal tier `τ(m) ∈ {HOT, WARM, COLD, FROZEN, DEAD}`:
+Each state maps to a thermal tier `τ(m) ∈ {HOT, WARM, COLD, FROZEN}`.
+FROZEN is the floor: **Never-Delete — accessibility decreases, existence
+never does.** There is no DEAD tier.
 
 ```
 τ(m) = φ(σ(m))
@@ -46,10 +52,12 @@ Each state maps to a thermal tier `τ(m) ∈ {HOT, WARM, COLD, FROZEN, DEAD}`:
 | σ(m) | τ(m) |
 |------|------|
 | ACTIVE | HOT |
+| REHEARSING | HOT |
 | CONSOLIDATING | WARM |
-| INACTIVE | COLD |
-| DORMANT | FROZEN |
-| GHOST | DEAD |
+| INACTIVE | WARM |
+| DORMANT | COLD |
+| DORMANT (very low retention) | FROZEN |
+| REACTIVATED | HOT |
 
 Retrieval cost `c(m)` scales inversely with thermal tier:
 
@@ -91,7 +99,14 @@ Memories with `I(m) < θ_discard` are filtered at write time:
 store(m) = I(m) ≥ θ_discard
 ```
 
-where `θ_discard = 0.08` (determined by content richness analysis).
+where `θ_discard = 0.15`. Thresholds are configurable — see the
+`importance_engine` section in `star_graph/defaults.yaml`
+(`discard_threshold`, `low_threshold`, `normal_threshold`).
+
+Note: an independent richness fast gate also force-discards inputs whose
+content richness composite `c(m) < 0.08` with zero entities and zero
+technical terms (forced score 0.05). This is a structural pre-filter,
+distinct from `θ_discard`.
 
 ---
 
@@ -122,8 +137,13 @@ a(t) = a_base + (a₀ - a_base) · e^(-λ_a · t)
 
 where:
 - `a₀` = activation at t=0
-- `a_base = 0.1` = residual activation floor
+- `a_base = 0.1` = decay target baseline (activation decays toward this
+  asymptote; each retrieval bumps it back up)
 - `λ_a` = activation decay rate
+
+After decay, a hard floor `a = max(a, 0.01)` is applied: 0.01 is the
+deep-dormant floor below which accessibility never falls (the memory stays
+reachable via activation propagation — Never-Delete).
 
 ### Utility Decay
 
@@ -204,11 +224,11 @@ w'(i,j) = w(i,j) · 0.3   (marked stale)
 
 ---
 
-## 6. Sparticipation Gate (Write)
+## 6. Participation Gate (Write)
 
 ### Deciding When to Store
 
-A memory `m` passes the sparticipation gate if:
+A memory `m` passes the participation gate if:
 
 ```
 I(m) > θ_write OR
@@ -221,11 +241,13 @@ preserving all substantive interactions.
 
 ---
 
-## 7. Ghost Trace
+## 7. Ghost Trace (Residual of a DORMANT Memory)
 
 ### Ghost Creation
 
-For a pruned memory `m`, a ghost `g` is created:
+When a memory `m` transitions to DORMANT (Never-Delete: the memory is not
+deleted — only its accessibility drops), a compressed residual trace
+`g` may be retained:
 
 ```
 g = ⟨e_compressed(m), s_semantic(m), e_trace(m), i_residual(m)⟩

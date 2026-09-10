@@ -5,7 +5,27 @@
 
 ---
 
-## 当前状态 (v1.1.0 — 2026-05)
+## 现状（v1.4.2 — 2026-09）
+
+**当前版本 v1.4.2**（代码 `star_graph.__version__ = "1.4.2"`）。权威版本历史见 [plan.md](plan.md) 第六节；本文件下方正文为 v1.1.0 时点的状态快照与历史规划，**部分条目已被实际版本以不同内容交付**。
+
+实际已交付（对照 plan.md 版本历史）：
+
+- **v1.3.x** — Lifecycle Engine（6 状态机，Never-Delete：无 GHOST/DEAD 状态，`prune` = `dim` 别名，DORMANT 可复活为 REACTIVATED）、Activation Graph 检索、L1→L2→L3 迁移、Unified Graph Layer + MemoryNode 别名 + QdrantStorage、LoCoMo-10 44.2%（HybridFusion+BM25）、消融实验 + 统计验证 + 复杂度分析
+- **v1.4.0** — 3D 衰减引擎、Goal-Aware 检索、Context Compression、Schema 增强、Savings Effect、`docs/theory.md` + `docs/formalism.md`、LongBench + Baseline 框架、可扩展性测试
+- **v1.4.1** — Memory Revision 实验（revision experiments）
+
+**版本撞号说明**：本文件下方"路线图"里的 v1.2.0 / v1.3.0 / v1.4.0 / v1.5.0 是 v1.1.0 时的**计划编号**，与实际发布版本号撞号但内容不同。例如：
+
+- 本文件 v1.2.0 计划项中的 RLock 并发安全、StorageBackend 抽象、SQLite 默认后端、QdrantStorage、BM25 融合检索 → 已在 v1.2.x–v1.3.6 陆续交付
+- 本文件 v1.3.0 计划的消融实验自动化 → 已在 v1.3.5 交付；LangChain/LlamaIndex 等生态适配器 → **仍未交付**
+- 本文件 v1.4.0 计划的"模块化 + 可观测性"（core/cognitive 拆分、配置精简、JWT 等）→ **大部分未交付**；实际 v1.4.0 交付的是研究功能（Schema/Compression/理论文档等）
+
+---
+
+## 历史状态快照 (v1.1.0 — 2026-05)
+
+> **历史规划，部分已被 v1.3.x / v1.4.x 以不同方式交付**（见上方"现状"）。正文按原样保留。
 
 112 模块、4 层架构、8 阶段睡眠、300+ 配置参数。
 
@@ -30,6 +50,7 @@
 - [x] 跨编码器重排序
 - [x] 原始缓冲区 (Raw Buffer)
 - [x] 检索预算控制 (MAX_HOPS=3, MAX_NODES=24, MAX_TOKENS=6000)
+  - 注：以上为融合后预算层现行值，唯一配置来源 `star_graph/defaults.yaml` 的 `retrieval_budget:` 段（经 `RetrievalBudget.from_config` 读取）；激活扩散层另有节点顶棚 50（`activation_graph.MAX_ACTIVATED_NODES`，即 complexity_analysis.md 定理 2 的 C=50），recall 实际按 `max_items*2 ≤ 50` 扩散，两层不冲突。
 
 #### 睡眠与整合
 - [x] 8 阶段睡眠 (N1-N3, REM, N4-N6)
@@ -53,7 +74,7 @@
 - [x] 人格模型 (PersonalityModel)
 - [x] 信念系统 (BeliefSystem)
 - [x] 认知身份 (CognitiveIdentity)
-- [x] 9 阶段生命周期 (Perception → ... → Ghost → Dead)
+- [x] 9 阶段生命周期 (Perception → ... → Ghost → Dead；v1.3.2 起为 6 状态机 + 8 阶段睡眠，Ghost/Dead 已并入 DORMANT / FROZEN 地板)
 - [x] Ghost 子系统
 - [x] Hebbian 学习
 - [x] 认知编译器 (世界观涌现)
@@ -89,6 +110,8 @@
 ---
 
 ## 路线图
+
+> **历史规划（v1.1.0 时点）**：以下版本号为当时的计划编号，与实际发布版本撞号；部分条目已在 v1.2.x–v1.4.x 以不同内容交付，未交付项仍是有效差距（如生态集成、可观测性）。
 
 ### v1.2.0 — 检索重建 + 存储工程化 (当前重点工作)
 

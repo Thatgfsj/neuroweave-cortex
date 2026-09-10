@@ -134,8 +134,6 @@ class MemoryEvolutionEngine:
             # State-dependent decay rate
             if anchor.state == MemoryState.DORMANT:
                 effective_lam = lam / c.dormant_half_life_factor
-            elif anchor.state == MemoryState.GHOST:
-                effective_lam = lam / c.ghost_half_life_factor
             elif anchor.state == MemoryState.REACTIVATED:
                 effective_lam = lam / c.reactivated_half_life_factor
             else:
@@ -483,47 +481,41 @@ class MemoryEvolutionEngine:
         """Apply thermal lifecycle transitions based on retention scores.
 
         Monitors all anchors and applies storage tiering:
-        - COLD anchors with retention < 0.05 → finalize to DEAD (hash only)
+        - COLD anchors with retention < 0.05 → demote to DORMANT (archive floor)
         - Stale COLD anchors → ensure they remain in index-only mode
-        - GHOST anchors with decaying reactivation → finalize to DEAD
+        - DORMANT anchors that warmed up → count as revival
 
-        This is NOT deletion. It's a graduated offload:
-        HOT (memory) → WARM (disk) → COLD (index) → DEAD (audit)
+        Never-Delete (v1.3.2): this is NOT deletion. It's a graduated
+        accessibility offload — HOT (memory) → WARM (disk) → COLD (index)
+        → FROZEN (archive). Every memory stays reachable via activation
+        propagation; there is no DEAD state.
         """
         from ..anchor import ThermalState, MemoryState
-        stats = {"hot": 0, "warm": 0, "cold": 0, "dead": 0,
-                 "finalized": 0, "thawed": 0}
+        stats = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0,
+                 "archived": 0, "thawed": 0}
 
         for anchor in self.graph.anchors.values():
             ts = anchor.thermal_state
             stats[ts.value] = stats.get(ts.value, 0) + 1
 
-            if ts == ThermalState.DEAD:
-                # Already dead — ensure it's marked as ghost
-                if anchor.state != MemoryState.GHOST:
-                    anchor.state = MemoryState.GHOST
-                    anchor.state_history.append((MemoryState.GHOST, time.time()))
-                continue
-
             if ts == ThermalState.COLD:
                 r = anchor.retention_score
-                # Check if COLD → DEAD: retention has dropped below 0.05
-                if r < 0.05 and anchor.state != MemoryState.GHOST:
-                    # Offload to ghost with metadata preservation
-                    anchor.state = MemoryState.GHOST
-                    anchor.state_history.append((MemoryState.GHOST, time.time()))
-                    anchor._ghost_reactivation_prob = max(0.01, r * 0.2)
-                    stats["finalized"] += 1
-                    stats["dead"] += 1
-                    stats["cold"] -= 1
-                elif r < 0.05 and anchor.state == MemoryState.GHOST:
-                    # Ghost with near-zero retention → fully dead
-                    anchor._ghost_reactivation_prob = 0.0
-                    stats["dead"] += 1
+                # COLD → FROZEN floor: retention dropped below 0.05.
+                # Demote state to DORMANT (deep sleep) through the state
+                # machine — revivable via propagation; nothing is removed.
+                if r < 0.05 and anchor.state in (
+                    MemoryState.ACTIVE,
+                    MemoryState.REHEARSING,
+                    MemoryState.INACTIVE,
+                ):
+                    anchor.transition('prune')   # ACTIVE/REHEARSING/INACTIVE → INACTIVE
+                    if anchor.state != MemoryState.DORMANT:
+                        anchor.transition('prune')  # INACTIVE → DORMANT
+                    stats["archived"] += 1
                     stats["cold"] -= 1
 
-            elif ts == ThermalState.WARM and anchor.state == MemoryState.GHOST:
-                # Ghost that warmed up somehow — verify revival
+            elif ts == ThermalState.WARM and anchor.state == MemoryState.DORMANT:
+                # Dormant memory that warmed up — revival via propagation
                 stats["thawed"] += 1
 
         return stats

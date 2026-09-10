@@ -90,7 +90,7 @@ class McpServer:
                 {"name": "evolve", "description": "Memory evolution cycle (decay, boost, conflict resolution)", "inputSchema": {
                     "type": "object", "properties": {},
                 }},
-                {"name": "forget", "description": "Remove a memory, creating a ghost trace", "inputSchema": {
+                {"name": "forget", "description": "Logical forgetting: demotes a memory to dormant (lowered weight) — never deleted, still reactivatable", "inputSchema": {
                     "type": "object", "properties": {
                         "anchor_id": {"type": "string"},
                     }, "required": ["anchor_id"],
@@ -268,7 +268,7 @@ class McpServer:
                 {"name": "context", "description": "Get compressed cognitive context for LLM injection"},
                 {"name": "reflect", "description": "Run sleep consolidation"},
                 {"name": "evolve", "description": "Memory evolution cycle"},
-                {"name": "forget", "description": "Remove a memory with ghost trace"},
+                {"name": "forget", "description": "Logical forgetting: demotes a memory to dormant (lowered weight) — never deleted, still reactivatable"},
                 {"name": "fuzzy_recall", "description": "Low-confidence recall from ghost traces"},
                 {"name": "stats", "description": "Memory system statistics"},
                 {"name": "get_profile", "description": "Inferred user profile"},

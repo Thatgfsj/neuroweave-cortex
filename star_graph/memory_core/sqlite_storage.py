@@ -5,7 +5,9 @@ Schema:
            created_at, last_activated_at, source_session, tags_json, schema_ref,
            replay_count, state, state_history_json
   edges: source, target, weight, edge_type, co_activation_count, created_at, last_activated_at
-  ghosts: id, residue_blob, original_tags_json, pruned_at, revival_count, original_importance
+  ghosts: id, residue_blob, original_tags_json, pruned_at, revival_count, original_importance,
+          semantic_shadow, emotion_trace, residual_edges_json, reactivation_probability,
+          partial_recall_count, last_resonated_at
   schemas: id, template, slots_json, instance_ids_json, confidence, created_at, tags_json
   meta: key, value (for version, saved_at, etc.)
 
@@ -78,7 +80,13 @@ CREATE TABLE IF NOT EXISTS ghosts (
     original_tags_json TEXT NOT NULL DEFAULT '[]',
     pruned_at REAL NOT NULL,
     revival_count INTEGER NOT NULL DEFAULT 0,
-    original_importance REAL NOT NULL DEFAULT 0.5
+    original_importance REAL NOT NULL DEFAULT 0.5,
+    semantic_shadow TEXT NOT NULL DEFAULT '',
+    emotion_trace REAL NOT NULL DEFAULT 0.0,
+    residual_edges_json TEXT NOT NULL DEFAULT '{}',
+    reactivation_probability REAL NOT NULL DEFAULT 0.5,
+    partial_recall_count INTEGER NOT NULL DEFAULT 0,
+    last_resonated_at REAL NOT NULL DEFAULT 0.0
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -118,19 +126,25 @@ class SQLiteStorage(StorageBackend):
     @property
     def conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self.path))
+            self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(SCHEMA_SQL)
-            # Migrate old databases: add source_attribution columns if missing
-            try:
-                self._conn.execute("ALTER TABLE anchors ADD COLUMN source_attribution TEXT NOT NULL DEFAULT 'observation'")
-            except sqlite3.OperationalError:
-                pass  # column already exists
-            try:
-                self._conn.execute("ALTER TABLE anchors ADD COLUMN source_trust REAL NOT NULL DEFAULT 0.6")
-            except sqlite3.OperationalError:
-                pass  # column already exists
+            # Migrate old databases: add missing columns if needed (idempotent)
+            for stmt in (
+                "ALTER TABLE anchors ADD COLUMN source_attribution TEXT NOT NULL DEFAULT 'observation'",
+                "ALTER TABLE anchors ADD COLUMN source_trust REAL NOT NULL DEFAULT 0.6",
+                "ALTER TABLE ghosts ADD COLUMN semantic_shadow TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE ghosts ADD COLUMN emotion_trace REAL NOT NULL DEFAULT 0.0",
+                "ALTER TABLE ghosts ADD COLUMN residual_edges_json TEXT NOT NULL DEFAULT '{}'",
+                "ALTER TABLE ghosts ADD COLUMN reactivation_probability REAL NOT NULL DEFAULT 0.5",
+                "ALTER TABLE ghosts ADD COLUMN partial_recall_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE ghosts ADD COLUMN last_resonated_at REAL NOT NULL DEFAULT 0.0",
+            ):
+                try:
+                    self._conn.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
         return self._conn
 
     # ── Full save/load ──────────────────────────────────
@@ -143,14 +157,14 @@ class SQLiteStorage(StorageBackend):
             c.execute("DELETE FROM ghosts")
             c.execute("DELETE FROM schemas")
 
-            for a in graph.anchors.values():
-                c.execute(
-                    """INSERT INTO anchors (id, text, vector_json, embedding_blob,
-                       prediction_json, oscillator_json, created_at, last_activated_at,
-                       source_session, tags_json, schema_ref, replay_count,
-                       source_attribution, source_trust, state,
-                       state_history_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            c.executemany(
+                """INSERT INTO anchors (id, text, vector_json, embedding_blob,
+                   prediction_json, oscillator_json, created_at, last_activated_at,
+                   source_session, tags_json, schema_ref, replay_count,
+                   source_attribution, source_trust, state,
+                   state_history_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
                     (
                         a.id, a.text,
                         json.dumps(a.vector.to_list()),
@@ -169,27 +183,60 @@ class SQLiteStorage(StorageBackend):
                         a.state.value if isinstance(a.state, MemoryState) else str(a.state),
                         json.dumps([(s.value if isinstance(s, MemoryState) else str(s), ts)
                                      for s, ts in a.state_history]),
-                    ),
-                )
+                    )
+                    for a in graph.anchors.values()
+                ],
+            )
 
-            for e in graph.edges.values():
-                c.execute(
-                    """INSERT INTO edges (source, target, weight, edge_type,
-                       co_activation_count, created_at, last_activated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            c.executemany(
+                """INSERT INTO edges (source, target, weight, edge_type,
+                   co_activation_count, created_at, last_activated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [
                     (e.source, e.target, e.weight, e.edge_type,
-                     e.co_activation_count, e.created_at, e.last_activated_at),
-                )
+                     e.co_activation_count, e.created_at, e.last_activated_at)
+                    for e in graph.edges.values()
+                ],
+            )
 
-            for s in graph.schemas.values():
-                c.execute(
-                    """INSERT INTO schemas (id, template, slots_json, instance_ids_json,
-                       confidence, created_at, tags_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            c.executemany(
+                """INSERT INTO schemas (id, template, slots_json, instance_ids_json,
+                   confidence, created_at, tags_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [
                     (s.id, s.template, json.dumps(s.slots),
                      json.dumps(s.instance_ids), s.confidence,
-                     s.created_at, json.dumps(s.tags)),
-                )
+                     s.created_at, json.dumps(s.tags))
+                    for s in graph.schemas.values()
+                ],
+            )
+
+            # Persist ghost traces — previously deleted but never re-written,
+            # which silently dropped all ghosts on every save.
+            c.executemany(
+                """INSERT INTO ghosts (id, residue_blob, original_tags_json, pruned_at,
+                   revival_count, original_importance, semantic_shadow, emotion_trace,
+                   residual_edges_json, reactivation_probability,
+                   partial_recall_count, last_resonated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        g.id,
+                        _embedding_to_blob(g.compressed_embedding),
+                        json.dumps(list(g.original_tags)),
+                        g.pruned_at,
+                        g.revival_count,
+                        g.original_importance,
+                        g.semantic_shadow,
+                        g.emotion_trace,
+                        json.dumps(dict(g.residual_edges)),
+                        g.reactivation_probability,
+                        g.partial_recall_count,
+                        g.last_resonated_at,
+                    )
+                    for g in graph._ghost_subsystem.ghosts.values()
+                ],
+            )
 
             c.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
@@ -212,22 +259,37 @@ class SQLiteStorage(StorageBackend):
             return graph
 
         # Detect available columns for backward compat
-        columns = [col[1] for col in c.execute("PRAGMA table_info(anchors)").fetchall()]
-        has_attribution = 'source_attribution' in columns
+        anchor_cols = [col[1] for col in c.execute("PRAGMA table_info(anchors)").fetchall()]
+        has_attribution = 'source_attribution' in anchor_cols
 
-        for row in c.execute("SELECT * FROM anchors"):
-            (
-                aid, text, vector_json, embedding_blob, prediction_json,
-                oscillator_json, created_at, last_activated_at, source_session,
-                tags_json, schema_ref, replay_count,
-                *extra,
-            ) = row
+        # Select named columns in a known order — positional SELECT * breaks
+        # whenever the physical column order differs between schema versions.
+        wanted_cols = ["id", "text", "vector_json", "embedding_blob", "prediction_json",
+                       "oscillator_json", "created_at", "last_activated_at",
+                       "source_session", "tags_json", "schema_ref", "replay_count",
+                       "source_attribution", "source_trust", "state",
+                       "state_history_json"]
+        select_cols = [col for col in wanted_cols if col in anchor_cols]
 
-            # Handle variable-length rows (old vs new schema)
-            state_str = extra[0] if len(extra) > 0 else 'active'
-            state_history_json = extra[1] if len(extra) > 1 else '[]'
-            source_attribution = extra[2] if len(extra) > 2 else 'observation'
-            source_trust = float(extra[3]) if len(extra) > 3 else 0.6
+        for row in c.execute(f"SELECT {', '.join(select_cols)} FROM anchors"):
+            r = dict(zip(select_cols, row))
+
+            aid = r["id"]
+            text = r["text"]
+            vector_json = r.get("vector_json", "[]")
+            embedding_blob = r.get("embedding_blob")
+            prediction_json = r.get("prediction_json")
+            oscillator_json = r.get("oscillator_json", "{}")
+            created_at = r.get("created_at", 0.0)
+            last_activated_at = r.get("last_activated_at", 0.0)
+            source_session = r.get("source_session", "")
+            tags_json = r.get("tags_json", "[]")
+            schema_ref = r.get("schema_ref")
+            replay_count = r.get("replay_count", 0)
+            state_str = r.get("state", "active")
+            state_history_json = r.get("state_history_json", "[]")
+            source_attribution = r.get("source_attribution", "observation")
+            source_trust = float(r.get("source_trust", 0.6))
 
             osc = json.loads(oscillator_json)
             oscillator = Oscillator(
@@ -297,6 +359,35 @@ class SQLiteStorage(StorageBackend):
             )
             graph.schemas[sid] = schema
 
+        # Restore ghost traces (older DBs may lack the extended columns)
+        ghost_cols = [col[1] for col in c.execute("PRAGMA table_info(ghosts)").fetchall()]
+        if ghost_cols:
+            from ..ghost import GhostNode
+
+            base_cols = ["id", "residue_blob", "original_tags_json", "pruned_at",
+                         "revival_count", "original_importance"]
+            extra_cols = ["semantic_shadow", "emotion_trace", "residual_edges_json",
+                          "reactivation_probability", "partial_recall_count",
+                          "last_resonated_at"]
+            select_cols = [col for col in base_cols + extra_cols if col in ghost_cols]
+            for row in c.execute(f"SELECT {', '.join(select_cols)} FROM ghosts"):
+                g = dict(zip(select_cols, row))
+                ghost = GhostNode(
+                    id=g["id"],
+                    compressed_embedding=_blob_to_embedding(g.get("residue_blob")) or [],
+                    residual_edges=json.loads(g.get("residual_edges_json", "{}")),
+                    emotion_trace=float(g.get("emotion_trace", 0.0)),
+                    pruned_at=float(g.get("pruned_at", 0.0)),
+                    original_tags=json.loads(g.get("original_tags_json", "[]")),
+                    original_importance=float(g.get("original_importance", 0.5)),
+                    semantic_shadow=g.get("semantic_shadow", ""),
+                    reactivation_probability=float(g.get("reactivation_probability", 0.5)),
+                    revival_count=int(g.get("revival_count", 0)),
+                    partial_recall_count=int(g.get("partial_recall_count", 0)),
+                    last_resonated_at=float(g.get("last_resonated_at", 0.0)),
+                )
+                graph._ghost_subsystem.ghosts[ghost.id] = ghost
+
         self._rebuild_cortical_index(graph)
         return graph
 
@@ -309,14 +400,19 @@ class SQLiteStorage(StorageBackend):
 
     @property
     def exists(self) -> bool:
+        # Read-only check — must not create the file, connection cache, or
+        # tables as a side effect (self.conn would do all three).
         if not self.path.exists():
             return False
         try:
-            c = self.conn
-            tables = c.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
-            ).fetchall()
-            return len(tables) > 0
+            ro = sqlite3.connect(str(self.path))
+            try:
+                tables = ro.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
+                ).fetchall()
+                return len(tables) > 0
+            finally:
+                ro.close()
         except Exception:
             return False
 

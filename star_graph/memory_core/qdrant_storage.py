@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -50,12 +51,16 @@ def _embedding_to_list(embedding: Any) -> list[float]:
 
 def _anchor_to_point(anchor: Anchor) -> dict:
     """Serialize an Anchor into a Qdrant-compatible payload dict."""
+    # AnchorPrediction / Oscillator are plain dataclasses without to_dict —
+    # serialize their fields via dataclasses.asdict.
+    pred_dict = asdict(anchor.prediction) if anchor.prediction else {}
+    osc_dict = asdict(anchor.oscillator) if anchor.oscillator else {}
     return {
         "id": anchor.id,
         "text": anchor.text,
         "vector_json": json.dumps(anchor.vector.to_list()),
-        "prediction_json": json.dumps(anchor.prediction.to_dict()) if anchor.prediction else "{}",
-        "oscillator_json": json.dumps(anchor.oscillator.to_dict()) if anchor.oscillator else "{}",
+        "prediction_json": json.dumps(pred_dict),
+        "oscillator_json": json.dumps(osc_dict),
         "created_at": anchor.created_at,
         "last_activated_at": anchor.last_activated_at,
         "source_session": anchor.source_session,
@@ -90,7 +95,7 @@ def _point_to_anchor(point) -> Anchor:
         created_at=p.get("created_at", 0.0),
         last_activated_at=p.get("last_activated_at", 0.0),
         source_session=p.get("source_session", ""),
-        tags=set(json.loads(p.get("tags_json", "[]"))),
+        tags=list(json.loads(p.get("tags_json", "[]"))),  # tags is a list on Anchor
         state=MemoryState(p.get("state", "active")),
     )
     anchor.source_attribution = p.get("source_attribution", "observation")
@@ -118,6 +123,7 @@ def _edge_to_payload(edge: Edge, src: str, tgt: str) -> dict:
             "confidence": edge.confidence,
             "relation": edge.relation,
             "causal_strength": edge.causal_strength,
+            "temporal_order": edge.temporal_order,
             "source_type": edge.source_type,
             "reinforcement_count": edge.reinforcement_count,
             "is_stale": edge.is_stale,
@@ -158,15 +164,32 @@ def _graph_to_payloads(graph: StarGraph) -> tuple[list[dict], list[dict], list[d
         })
 
     ghost_points: list[dict] = []
-    for g in getattr(graph, "ghosts", []) or []:
+    # Ghosts live in the ghost subsystem, not on graph.ghosts
+    ghost_subsystem = getattr(graph, "_ghost_subsystem", None)
+    ghosts: list[Any] = list(ghost_subsystem.ghosts.values()) if ghost_subsystem else []
+    for g in ghosts:
+        payload = {
+            "id": g.id,
+            "original_tags": list(getattr(g, "original_tags", [])),
+            "revival_count": getattr(g, "revival_count", 0),
+            "original_importance": getattr(g, "original_importance", 0.0),
+        }
+        # Persist the full latent trace so load() can reconstruct the GhostNode
+        for field in ("compressed_embedding", "residual_edges", "emotion_trace",
+                      "pruned_at", "semantic_shadow", "reactivation_probability",
+                      "partial_recall_count", "last_resonated_at"):
+            if hasattr(g, field):
+                value = getattr(g, field)
+                if field == "compressed_embedding":
+                    payload["compressed_embedding_json"] = json.dumps(list(value or []))
+                elif field == "residual_edges":
+                    payload["residual_edges_json"] = json.dumps(dict(value or {}))
+                else:
+                    payload[field] = value
         ghost_points.append({
             "id": f"g:{getattr(g, 'id', str(time.time_ns()))}",
             "vector": [0.0],
-            "payload": {
-                "original_tags": list(getattr(g, "original_tags", [])),
-                "revival_count": getattr(g, "revival_count", 0),
-                "original_importance": getattr(g, "original_importance", 0.0),
-            },
+            "payload": payload,
         })
 
     return anchor_points, edge_points, schema_points, ghost_points
@@ -366,26 +389,95 @@ class QdrantStorage(StorageBackend):
                 )
                 points, next_offset = results
                 for pt in points:
-                    p = pt.payload
+                    p = pt.payload or {}
                     src, tgt = p.get("source", ""), p.get("target", "")
-                    edge = Edge(
-                        source=src,
-                        target=tgt,
-                        weight=p.get("weight", 0.5),
-                        edge_type=p.get("edge_type", "topical"),
-                        co_activation_count=p.get("co_activation_count", 0),
-                        created_at=p.get("created_at", 0.0),
-                        last_activated_at=p.get("last_activated_at", 0.0),
-                    )
+                    rich_markers = ("confidence", "relation", "source_type",
+                                    "reinforcement_count", "is_stale",
+                                    "temporal_order", "causal_strength")
+                    if any(k in p for k in rich_markers):
+                        edge = RichEdge(
+                            source=src,
+                            target=tgt,
+                            weight=p.get("weight", 0.5),
+                            edge_type=p.get("edge_type", "topical"),
+                            co_activation_count=p.get("co_activation_count", 0),
+                            created_at=p.get("created_at", 0.0),
+                            last_activated_at=p.get("last_activated_at", 0.0),
+                            confidence=p.get("confidence", 0.5),
+                            relation=p.get("relation", ""),
+                            source_type=p.get("source_type", "implicit"),
+                            reinforcement_count=p.get("reinforcement_count", 0),
+                            is_stale=p.get("is_stale", False),
+                            decay_rate=p.get("decay_rate", 0.01),
+                            temporal_order=p.get("temporal_order", ""),
+                            causal_strength=p.get("causal_strength", 0.0),
+                        )
+                    else:
+                        edge = Edge(
+                            source=src,
+                            target=tgt,
+                            weight=p.get("weight", 0.5),
+                            edge_type=p.get("edge_type", "topical"),
+                            co_activation_count=p.get("co_activation_count", 0),
+                            created_at=p.get("created_at", 0.0),
+                            last_activated_at=p.get("last_activated_at", 0.0),
+                        )
                     graph.edges[graph._key(src, tgt)] = edge
+                    # Restore adjacency alongside the edge
+                    graph._adjacency[src].add(tgt)
+                    graph._adjacency[tgt].add(src)
                 if next_offset is None:
                     break
                 offset = str(next_offset) if next_offset else None
 
-        # Rebuild adjacency
-        graph._rebuild_cortical_index()
+        # Restore ghosts
+        ghost_count = self._client.count(COLLECTION_GHOSTS).count
+        if ghost_count > 0:
+            from ..ghost import GhostNode
+
+            offset = None
+            while True:
+                results = self._client.scroll(
+                    collection_name=COLLECTION_GHOSTS,
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                )
+                points, next_offset = results
+                for pt in points:
+                    p = pt.payload or {}
+                    pt_id = str(pt.id)
+                    gid = p.get("id") or (pt_id[2:] if pt_id.startswith("g:") else pt_id)
+                    ghost = GhostNode(
+                        id=gid,
+                        compressed_embedding=json.loads(p.get("compressed_embedding_json", "[]")),
+                        residual_edges=json.loads(p.get("residual_edges_json", "{}")),
+                        emotion_trace=p.get("emotion_trace", 0.0),
+                        pruned_at=p.get("pruned_at", 0.0),
+                        original_tags=list(p.get("original_tags", [])),
+                        original_importance=p.get("original_importance", 0.5),
+                        semantic_shadow=p.get("semantic_shadow", ""),
+                        reactivation_probability=p.get("reactivation_probability", 0.5),
+                        revival_count=p.get("revival_count", 0),
+                        partial_recall_count=p.get("partial_recall_count", 0),
+                        last_resonated_at=p.get("last_resonated_at", 0.0),
+                    )
+                    graph._ghost_subsystem.ghosts[ghost.id] = ghost
+                if next_offset is None:
+                    break
+                offset = str(next_offset) if next_offset else None
+
+        # Rebuild cortical index (same recovery as the other storage backends)
+        self._rebuild_cortical_index(graph)
 
         return graph
+
+    def _rebuild_cortical_index(self, graph: StarGraph) -> None:
+        graph.cortical_index = [
+            (a.embedding, a.id)
+            for a in graph.anchors.values()
+            if a.embedding and a.is_cortical
+        ]
 
     # ── Search ────────────────────────────────────────────────────────
 

@@ -1,5 +1,7 @@
 # NeuroWeave Cortex (NWC) — Repository Overview & Improvement Plan
 
+> **历史文档**：内容停留在 v1.0.x 时期（112 模块、GHOST/DEAD 等旧术语），数值与术语以 README / plan.md 为准；现行架构为 6 状态生命周期 + 8 阶段睡眠（Never-Delete）。
+
 > Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing | 64 commits
 
 ---

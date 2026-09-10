@@ -255,3 +255,88 @@ class TestSQLiteStorageFineGrained:
             loaded = store2.load()
             assert len(loaded.edges) == 0
             store2.close()
+
+
+class TestSQLiteStorageGhosts:
+    def test_ghost_roundtrip(self):
+        from star_graph.ghost import GhostNode
+
+        g = StarGraph()
+        ghost = GhostNode(
+            id="gh1",
+            compressed_embedding=[0.1, 0.2, 0.3],
+            residual_edges={"a1": 0.4},
+            emotion_trace=-0.5,
+            pruned_at=1234.5,
+            original_tags=["t1", "t2"],
+            original_importance=0.8,
+            semantic_shadow="...faint gist...",
+            revival_count=2,
+        )
+        g._ghost_subsystem.ghosts[ghost.id] = ghost
+
+        with temp_store_dir() as td:
+            tmp_path = td / "test.db"
+            store = SQLiteStorage(tmp_path)
+            store.save(g)
+            store.close()
+
+            store2 = SQLiteStorage(tmp_path)
+            loaded = store2.load()
+            assert "gh1" in loaded._ghost_subsystem.ghosts
+            lg = loaded._ghost_subsystem.ghosts["gh1"]
+            assert lg.id == "gh1"
+            assert lg.compressed_embedding == pytest.approx([0.1, 0.2, 0.3])
+            assert lg.residual_edges == {"a1": 0.4}
+            assert lg.emotion_trace == pytest.approx(-0.5)
+            assert lg.pruned_at == pytest.approx(1234.5)
+            assert lg.original_tags == ["t1", "t2"]
+            assert lg.original_importance == pytest.approx(0.8)
+            assert lg.semantic_shadow == "...faint gist..."
+            assert lg.revival_count == 2
+            store2.close()
+
+    def test_ghosts_table_cleared_on_save(self):
+        from star_graph.ghost import GhostNode
+
+        g = StarGraph()
+        ghost = GhostNode(id="gh1", compressed_embedding=[0.1],
+                          residual_edges={}, emotion_trace=0.0,
+                          pruned_at=1.0, original_tags=[],
+                          original_importance=0.5, semantic_shadow="")
+        g._ghost_subsystem.ghosts[ghost.id] = ghost
+
+        with temp_store_dir() as td:
+            tmp_path = td / "test.db"
+            store = SQLiteStorage(tmp_path)
+            store.save(g)
+            n = store.conn.execute("SELECT COUNT(*) FROM ghosts").fetchone()[0]
+            assert n == 1
+
+            # Removing the ghost and re-saving must clear the table
+            g._ghost_subsystem.ghosts.clear()
+            store.save(g)
+            n = store.conn.execute("SELECT COUNT(*) FROM ghosts").fetchone()[0]
+            assert n == 0
+            store.close()
+
+
+class TestSQLiteStorageExistsSideEffects:
+    def test_exists_does_not_create_file_or_tables(self):
+        with temp_store_dir() as td:
+            path = td / "missing.db"
+            store = SQLiteStorage(path)
+            assert not store.exists
+            # Read-only check must not create the database file
+            assert not path.exists()
+            store.close()
+
+    def test_exists_false_for_db_without_tables(self):
+        with temp_store_dir() as td:
+            path = td / "blank.db"
+            # Create an empty (table-less) database file
+            raw = sqlite3.connect(str(path))
+            raw.close()
+            store = SQLiteStorage(path)
+            assert not store.exists
+            store.close()
