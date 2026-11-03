@@ -5,9 +5,10 @@
 ## 1. 版本与变更
 
 - [ ] 发布 Issue 已建（`chore` / `governance` 标签），写明本迭代范围与不包含项
-- [ ] 版本号已 +0.0.1（本次 `1.4.2` → `1.4.3`），且 `star_graph/_version.py` 为唯一事实源
-- [ ] 所有副本已同步（`pyproject.toml`、`star_graph/__init__.py`、`star_graph/defaults.yaml`、`star_graph/contrib/mcp_server.py`、README 徽章）
-- [ ] `python scripts/check_version.py` 通过
+- [ ] 版本号已 +0.0.1；**当前事实基准是 `pyproject.toml` 的 `[project].version`**（`star_graph/_version.py` 是 #5 的目标态，尚未落地，见 [VERSIONING.md](VERSIONING.md) §2）
+- [ ] 受校验的 4 处副本已同步：`pyproject.toml`、`star_graph/__init__.py`、`nwc/__init__.py`、README 徽章
+- [ ] 未受校验的漂移副本已人工同步：`star_graph/defaults.yaml`、`nwc/api/server.py`、`star_graph/contrib/mcp_server.py`（由 #14 收敛，勿假定脚本已覆盖）
+- [ ] `python scripts/check_version.py` 通过（只覆盖上述 4 处；通过 ≠ 所有副本一致）
 - [ ] 变更日志（Release Notes）已整理：按 `feat` / `fix` / `docs` / `ci` / `chore` 分组，且与 `git log` 对得上
 - [ ] 破坏性变更已显式标注（若有，说明迁移方式）
 
@@ -42,11 +43,11 @@ python -m venv /tmp/nwc-smoke && /tmp/nwc-smoke/bin/pip install dist/*.whl
 
 ## 5. 发布动作
 
-- [ ] 发布 PR 已 review + squash 合并，`main` CI（最终验证）通过
-- [ ] 打 annotated tag 并推送：
+- [ ] 发布 PR 已 review + squash 合并；**打 tag 或手动触发**的 `verify` 工作流（构建 + smoke）通过——合并到 `main` 不会自动运行最终验证
+- [ ] 打 annotated tag 并推送（tag 必须与 `pyproject.toml` 版本一致，推送后触发 `verify`）：
 
 ```bash
-git tag -a v1.4.3 -m "v1.4.3"
+git tag -a v1.4.3 -m "v1.4.3"   # 示例：实际 tag 以 pyproject.toml 的 [project].version 为准
 git push origin v1.4.3
 ```
 
@@ -55,7 +56,7 @@ git push origin v1.4.3
 
 ## 6. 发布后
 
-- [ ] 检查 `main` 上 `verify` 工作流为绿色；24 小时内无回归 Issue（若有按 [WORKFLOW.md](WORKFLOW.md) 走 `bug` 流程）
+- [ ] 推送 tag 后 `verify` 工作流已触发且为绿色（未触发或失败时手动 `workflow_dispatch` 补跑并记录原因）；24 小时内无回归 Issue（若有按 [WORKFLOW.md](WORKFLOW.md) 走 `bug` 流程）
 - [ ] 更新下一迭代的 ROADMAP/plan 状态（另开 Issue），并记录本次发布卡点
 
 ## 发布禁止事项

@@ -21,14 +21,14 @@
 
 ### R3 PR 代码量 <1000 行
 
-- 口径：**代码文件**的 additions + deletions 合计 <1000 行；文档、数据文件不计入。
+- 口径：**代码文件**的 additions + deletions 合计 <1000 行；文档、数据文件不计入。计入的源码扩展名清单与 `scripts/ci/check_pr.py` 的 `CODE_EXTS` 完全一致（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md) §2）。
 - 超出必须由 Lead 审核并添加 `size/exception` 标签，且在 PR 描述中写明拆分计划与理由。
 - 单文件同样不得超过 1000 行；4 个存量超限文件在拆分完成前进入 ratchet allowlist，拆分后必须移除（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md)、[CI_POLICY.md](docs/engineering/CI_POLICY.md)）。
 
 ### R4 PR CI 只做静态检查
 
 - PR 阶段 CI **不构建、不安装依赖、不跑测试套件**；只做语法/版本/行数/PR 规范等静态检查（见 [CI_POLICY.md](docs/engineering/CI_POLICY.md)）。
-- 最终验证（构建 wheel + 简单 smoke 测试）由 `verify` 工作流或本地 `scripts/smoke_test.sh` 完成，结果作为 PR 的验证证据。
+- 最终验证（构建 wheel + 简单 smoke 测试）由 `verify` 工作流（手动 `workflow_dispatch` 或推送 `v*` tag 触发）或本地 `scripts/smoke_test.sh` 完成，结果作为 PR 的验证证据。
 
 ### R5 双评审
 
@@ -47,12 +47,13 @@
 
 ### R8 版本号每次迭代 +0.0.1
 
-- SemVer；本次发布 1.4.2 → **1.4.3**。单一版本源 `star_graph/_version.py`，由 `scripts/check_version.py` 校验副本一致。
-- 功能 PR 不得顺手改版本；发布单独走一个 Issue/PR。见 [VERSIONING.md](docs/engineering/VERSIONING.md)。
+- SemVer；每次迭代 PATCH +1（例如 `1.4.2` → `1.4.3`，当前值以 `pyproject.toml` 为准）。
+- **目标态（#5 落地中）**：单一版本源 `star_graph/_version.py`；**当前事实基准**：`pyproject.toml` 的 `[project].version`，由 `scripts/check_version.py` 校验 `star_graph/__init__.py`、`nwc/__init__.py`、README 徽章与之一致（`star_graph/_version.py` 尚不存在）。
+- `star_graph/defaults.yaml` 与 server 模块的版本漂移由 #14 收敛后才纳入校验；功能 PR 不得顺手改版本，发布单独走一个 Issue/PR。见 [VERSIONING.md](docs/engineering/VERSIONING.md)。
 
 ### R9 文档冲突以权威文档为准
 
-- 以 `README.md` 与 `docs/spec/user-center-memory-chain.md`（用户中心记忆链路规范）为权威；二者或其它文档冲突时**以 README 为准**。
+- 以 `README.md` 与 `docs/spec/user-center-memory-chain.md`（用户中心记忆链路规范）为权威；二者或其它文档冲突时**以 README 为准**。该 spec 尚未合入仓库，**合入前 README 是唯一权威**，其它文档不得引用不存在的 spec 章节。
 - 禁止硬编码易过期计数（模块数、测试数、行数）；必须给出统计口径与脚本/命令来源。
 - 见 [DOC_POLICY.md](docs/engineering/DOC_POLICY.md)。
 

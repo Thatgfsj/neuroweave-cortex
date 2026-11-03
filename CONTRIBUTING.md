@@ -29,7 +29,7 @@ python scripts/ci/check_pr.py
 | PR | 一个 PR 一件事；`Closes #N`；代码量 <1000 行 | [PR_POLICY.md](docs/engineering/PR_POLICY.md) |
 | 分支 | `type/short-slug`；活跃分支 ≤30；禁止直推 `main` | [BRANCH_POLICY.md](docs/engineering/BRANCH_POLICY.md) |
 | CI | PR 只做静态检查，不构建、不装依赖；最终验证另跑 | [CI_POLICY.md](docs/engineering/CI_POLICY.md) |
-| 版本 | SemVer，每次迭代 +0.0.1（当前 1.4.2 → 1.4.3） | [VERSIONING.md](docs/engineering/VERSIONING.md) |
+| 版本 | SemVer，每次迭代 PATCH +1；当前基准与版本源见 VERSIONING.md | [VERSIONING.md](docs/engineering/VERSIONING.md) |
 | 文档 | 冲突以 README 为准；不写易过期计数 | [DOC_POLICY.md](docs/engineering/DOC_POLICY.md) |
 | 评审 | 双评审 A（正确性）/ B（工程合规） | [REVIEW_CHECKLIST.md](docs/engineering/REVIEW_CHECKLIST.md) |
 | 发布 | 版本、构建、smoke、清理逐项确认 | [RELEASE_CHECKLIST.md](docs/engineering/RELEASE_CHECKLIST.md) |
