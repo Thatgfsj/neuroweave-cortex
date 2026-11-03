@@ -1,7 +1,7 @@
 """用户中心记忆链（四维接近度）测试 —— Issue #11。
 
-覆盖容量/淘汰、权重可配置、四维边界与单调性、链增长与三类停止条件、空中心
-回退、无 embedding 降级、确定性、配置读取与序列化。
+覆盖容量/淘汰、权重可配置、四维边界与单调性、第 4 维 85/15 融合与单分量归一、
+链增长与三类停止条件、空中心回退、无 embedding 降级、确定性、配置读取与序列化。
 """
 
 from __future__ import annotations
@@ -106,6 +106,16 @@ class TestConfig:
         assert config.chain_similarity_threshold == pytest.approx(0.70)
         assert config.stop_center_threshold == pytest.approx(0.35)
         assert config.max_chain_length == 12 and "python" in config.tech_keywords
+        assert raw.get_path("user_center.center_split.task_weight") == pytest.approx(0.85)
+        assert raw.get_path("user_center.center_split.tech_weight") == pytest.approx(0.15)
+        assert config.task_center_weight == pytest.approx(0.85)
+        assert config.tech_center_weight == pytest.approx(0.15)
+        assert config.as_dict()["center_split"] == {"task_weight": 0.85,
+                                                    "tech_weight": 0.15}
+        custom = UserCenterConfig.from_config(
+            {"user_center": {"center_split": {"task_weight": 0.7, "tech_weight": 0.3}}})
+        assert custom.task_center_weight == pytest.approx(0.7)
+        assert custom.tech_center_weight == pytest.approx(0.3)
         assert UserCenterConfig.from_config(capacity=4, w_center=0.5).capacity == 4
         raw.override("user_center.capacity", 7)
         raw.override("user_center.weights.text", 0.55)
@@ -181,6 +191,54 @@ class TestFourDimensions:
                                          query="python") <= 1.0
         assert combined_proximity(candidate, candidate) >= 0.0
 
+    def test_center_split_defaults_85_15(self) -> None:
+        config = UserCenterConfig()
+        assert config.task_center_weight == pytest.approx(0.85)
+        assert config.tech_center_weight == pytest.approx(0.15)
+        assert config.task_center_weight + config.tech_center_weight == pytest.approx(1.0)
+
+    def test_center_split_fuses_task_and_tech(self) -> None:
+        cfg = UserCenterConfig(capacity=4)
+        tech = UserCenter(cfg, clock=FakeClock())
+        tech.mount(make_anchor("py", "python", embedding=[1.0, 0.0], tags=("python",)))
+        candidate = make_anchor("c", "python", embedding=[1.0, 0.0], tags=("python",))
+        # 只有技术中心 → 归一为技术分（不乘 0.15）
+        assert user_center_proximity(candidate, center=tech) == pytest.approx(1.0)
+        # 只有本次任务中心 → 归一为任务分（不乘 0.85）
+        empty = UserCenter(UserCenterConfig(capacity=4), clock=FakeClock())
+        assert user_center_proximity(candidate, query=candidate,
+                                     center=empty) == pytest.approx(1.0)
+        # 两侧都可用：任务 0 / 技术 1 → 0.15
+        assert user_center_proximity(candidate, query="javascript", center=tech) == pytest.approx(0.15)
+        # 两侧都可用：任务 1 / 技术 0 → 0.85
+        unrelated = UserCenter(UserCenterConfig(capacity=4), clock=FakeClock())
+        unrelated.mount(make_anchor("js", "javascript", embedding=[0.0, 1.0],
+                                    tags=("javascript",)))
+        assert user_center_proximity(candidate, query=candidate,
+                                     center=unrelated) == pytest.approx(0.85)
+
+    def test_center_split_is_configurable_and_can_disable(self) -> None:
+        cfg = UserCenterConfig(capacity=4, task_center_weight=0.5, tech_center_weight=0.5)
+        tech = UserCenter(cfg, clock=FakeClock())
+        tech.mount(make_anchor("js", "javascript", embedding=[0.0, 1.0],
+                               tags=("javascript",)))
+        candidate = make_anchor("c", "python", embedding=[1.0, 0.0], tags=("python",))
+        assert user_center_proximity(candidate, query=candidate, center=tech,
+                                     config=cfg) == pytest.approx(0.5)
+        zero = UserCenterConfig(capacity=4, task_center_weight=0.0, tech_center_weight=0.0)
+        assert user_center_proximity(candidate, query="python", center=tech,
+                                     config=zero) == 0.0
+
+    def test_task_anchors_extend_current_task_center(self) -> None:
+        cfg = UserCenterConfig(capacity=4)
+        task_memory = make_anchor("task", "修复 pytest 用例", embedding=[1.0, 0.0],
+                                  tags=("pytest",))
+        candidate = make_anchor("c", "pytest 用例", embedding=[1.0, 0.0],
+                                tags=("pytest",))
+        # query 无关，但本次任务锚点命中 → 任务分量仍为 1.0
+        assert user_center_proximity(candidate, query="banana", task_anchors=[task_memory],
+                                     config=cfg) == pytest.approx(1.0)
+
 
 class TestMemoryChain:
     def test_chain_grows_until_similarity_drops(self) -> None:
@@ -208,6 +266,72 @@ class TestMemoryChain:
                                    query=[0.0, 1.0], config=config)
         assert chain.steps == [] and chain.node_ids() == ["seed"]
         assert chain.stop_reason == STOP_CENTER_BELOW_THRESHOLD
+
+    def test_chain_center_gate_uses_fused_85_15_score(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.20,
+                                  stop_center_threshold=0.35)
+        center = UserCenter(config, clock=FakeClock())
+        center.mount(make_anchor("rust", "rust 服务", embedding=[0.0, 1.0], tags=("rust",)))
+        seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        candidate = make_anchor("cand", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        # query 与 rust 技术中心一致 → 任务 0 / 技术 1 → 融合 0.15 < x → 停
+        chain = build_memory_chain(seed, [candidate], center=center,
+                                   query=[0.0, 1.0], config=config)
+        assert chain.stop_reason == STOP_CENTER_BELOW_THRESHOLD and chain.steps == []
+        # query 与候选一致 → 任务 1 / 技术 0 → 融合 0.85 >= x → 继续
+        chain2 = build_memory_chain(seed, [candidate], center=center,
+                                    query=[1.0, 0.0], config=config)
+        assert chain2.ids == ["cand"]
+
+    def test_chain_gates_on_task_anchors_only(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.10,
+                                  stop_center_threshold=0.5)
+        seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        candidate = make_anchor("cand", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        unrelated = make_anchor("task", "rust 服务", embedding=[0.0, 1.0],
+                                tags=("rust",))
+        chain = build_memory_chain(seed, [candidate], task_anchors=[unrelated],
+                                   config=config)
+        assert chain.steps == [] and chain.node_ids() == ["seed"]
+        assert chain.stop_reason == STOP_CENTER_BELOW_THRESHOLD
+        related = make_anchor("task2", "python 测试", embedding=[1.0, 0.0],
+                              tags=("python",))
+        chain2 = build_memory_chain(seed, [candidate], task_anchors=[related],
+                                    config=config)
+        assert chain2.ids == ["cand"]
+
+    def test_task_anchor_weights_are_relative(self) -> None:
+        cfg = UserCenterConfig(capacity=4)
+        unrelated = make_anchor("rust", "rust 服务", embedding=[0.0, 1.0],
+                                tags=("rust",))
+        candidate = make_anchor("c", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        plain = user_center_proximity(candidate, task_anchors=[unrelated], config=cfg)
+        heavy = user_center_proximity(candidate, task_anchors=[(unrelated, 3.0)],
+                                      config=cfg)
+        assert heavy == pytest.approx(plain)
+
+    def test_chain_accepts_generator_task_anchors(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.10,
+                                  stop_center_threshold=0.5)
+        seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        candidate = make_anchor("cand", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        task = make_anchor("task", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        as_list = build_memory_chain(seed, [candidate], task_anchors=[task],
+                                     config=config)
+        as_gen = build_memory_chain(seed, [candidate],
+                                    task_anchors=(t for t in [task]), config=config)
+        assert as_gen.node_ids() == as_list.node_ids() == ["seed", "cand"]
+
+    def test_build_memory_chain_positional_config_compat(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.3)
+        seed = make_anchor("seed", "alpha", embedding=[1.0, 0.0])
+        candidate = make_anchor("cand", "alpha", embedding=[1.0, 0.0])
+        chain = build_memory_chain(seed, [candidate], None, "alpha", config)
+        assert isinstance(chain, MemoryChain) and chain.ids == ["cand"]
 
     def test_chain_stops_at_max_length_and_text_gate(self) -> None:
         center = UserCenter(UserCenterConfig(capacity=8), clock=FakeClock())

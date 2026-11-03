@@ -1,7 +1,11 @@
 # 用户中心记忆链（User-Center Memory Chain）规范
 
-> **状态**：v1.4.3 参考实现（Issue #11）。本版只交付**规范 + 独立参考实现 + 测试**，
-> **不接入**现有 Activation / UM 默认检索路径；权重与阈值待用户确认后再接入。
+> **状态**：v1.4.3 参考实现（Issue #11）。本版交付**规范 + 独立参考实现 + 测试**，
+> **不接入**现有 Activation / UM 默认检索路径。
+>
+> **用户确认（2026-11-04）**：四维基础权重不变；记忆每次任务只调用一次，因此第 4 维
+> 内部按 **本次任务/回复中心 85% + 长期技术中心 15%** 融合（见 §2.4、§3.1）；本版仍不接入
+> 默认检索（见 §8 决策记录）。
 >
 > **权威顺序**：本 spec 属 [DOC_POLICY.md](../engineering/DOC_POLICY.md) 第 2 层权威，
 > 位于 [README.md](../../README.md) 之下。本 spec 与 README 冲突时**以 README 为准**，
@@ -96,25 +100,49 @@ $$
 - 任一方缺少 `created_at`（<=0）时时间项为 0，其余子项照常。
 - 分母为三个子权重之和，保证输出仍在 `[0, 1]`。
 
-### 2.4 第 4 维：与用户中心接近度 `user_center_proximity(a, query, center)`
+### 2.4 第 4 维：与用户中心接近度 `user_center_proximity(a, query, center, *, task_anchors)`
 
-用户中心非空时：
+用户中心是核心，但**记忆每次任务只调用一次**，所以第 4 维由两个分量融合（用户确认
+2026-11-04）：
 
 $$
-s_{center}(a)= \max_{m\in \text{mounts}}\ \Big(\underbrace{\frac{w_m}{\max_j w_j}}_{\text{相对权重}}\cdot
+s_{task}(a)=\max\Bigg(
+\text{text/tech similarity}(a,\ \text{query}),\;
+\max_{t\in task\_anchors}\Big(\underbrace{\frac{w_t}{\max_j w_j}}_{\text{相对权重}}\cdot
+\text{text/tech similarity}(a,t)\Big)
+\Bigg)
+$$
+
+$$
+s_{tech}(a)= \max_{m\in mounts}\ \Big(\underbrace{\frac{w_m}{\max_j w_j}}_{\text{相对权重}}\cdot
 \frac{w_{text}\,s_{text}(a,m)+w_{tech}\,s_{tech}(a,m)}{w_{text}+w_{tech}}\Big)
 $$
 
-- **只取最大值**：一条记忆只要贴近任一"高频核心记忆"就算贴近用户中心，符合"中心挂载最常用
-  记忆"的语义。
-- **相对权重**（`w_m / max w`）而非绝对权重：避免小权重挂载把分数整体压低；默认全部
-  `1.0` 时等价于纯相似度。
-- **事件维不参与**（与四维加权式不同）：常用记忆可能挂载数周，时间衰减会系统性惩罚它们，
-  与"长期偏好"语义冲突。
-- **中心为空时回退**到该记忆与 `query` 的文本 + 技术加权相似度（`query` 可以是字符串、
-  向量或锚点）；`query` 也为空 → `0.0`。
+$$
+s_{center}(a)=
+\begin{cases}
+\dfrac{w_{task}\,s_{task}+w_{tech\_c}\,s_{tech}}{w_{task}+w_{tech\_c}}, & \text{两个分量都可用}\\[4pt]
+s_{task}, & \text{只有本次任务中心可用}\\[2pt]
+s_{tech}, & \text{只有长期技术中心可用}\\[2pt]
+0, & \text{都不可用}
+\end{cases}
+\qquad w_{task}:w_{tech\_c}=0.85:0.15
+$$
 
-### 2.5 综合接近度 `combined_proximity(a, b, center, query)`
+- **本次任务中心为主（默认 85%）**：`query`（文本/向量/锚点）与可选的 `task_anchors`
+  （本次任务内一次性挂载的记忆）代表"用户现在要做的事"。
+- **长期技术中心为辅（默认 15%）**：`center` 挂载的常用记忆（如常用 Python）提供跨会话
+  偏好；事件维不参与，避免时间衰减系统性惩罚长期偏好。
+- **单分量归一**：只有一侧可用时直接用该侧分数，不乘 0.85/0.15；两侧都可用才按 85:15
+  融合；都不可用返回 `0.0`。比例可在 `user_center.center_split.*` 调整。
+- **只取分量内最大值**：任务分量取 query / task_anchors 的最大相似度，技术分量取挂载记忆
+  中"相对权重 × 相似度"的最大值——一条记忆只要贴近任一核心参照即算贴近。
+- **task_anchors 形式**：`task_anchors` 为 keyword-only；条目可以是锚点，或
+  `(anchor, weight)` 元组。元组权重按该分量内最大值**相对归一**（与长期技术中心一致），
+  权重 ≤0 跳过；入口会物化为 tuple，生成器只消费一次。
+- `center_split.task_weight + tech_weight` 为 0（两分量权重都被关闭）时，第 4 维返回 `0.0`。
+
+### 2.5 综合接近度 `combined_proximity(a, b, center, query, *, task_anchors)`
 
 $$
 s_{combined}=\frac{w_{text}s_{text}+w_{tech}s_{tech}+w_{event}s_{event}+w_{center}s_{center}}
@@ -137,9 +165,10 @@ $$
 1. 作为第 4 维的参照系——判断候选记忆是否仍与"用户要做的事"相关；
 2. 作为记忆链的起点/种子来源之一（§4 允许以 `center.top(1)` 起步）。
 
-**与"本次回复中心 / 技术中心"的关系**：本版把"技术中心、本次回复中心"视为**同一第 4 维的
-不同实例**——长期偏好用持久 `UserCenter` 表达，本次任务用 `query`（文本或向量）表达，
-二者都归一到 `[0, 1]` 的 `center` 分数。是否要拆成"长期中心 + 会话中心"两级，见 §8 开放问题。
+**与"本次回复中心 / 技术中心"的关系（已确认）**：第 4 维分两层并融合——**本次任务/回复
+中心 85%**（`query` + 可选的 `task_anchors`，不持久化，一次任务一次调用）与**长期技术中心
+15%**（持久 `UserCenter` 挂载的常用记忆）。这对应"记忆只调用一次、本次任务为主、技术为辅"
+的用户语义；实现见 §2.4。
 
 ### 3.2 挂载
 
@@ -185,7 +214,7 @@ loop:
         s_text  = text_proximity(c, current)
         s_tech  = tech_proximity(c, current)
         s_event = event_proximity(c, current)
-        s_center= user_center_proximity(c, query, center)
+        s_center= user_center_proximity(c, query, center, task_anchors=task_anchors)
         combined= Σ w_i·s_i / Σ w_i
     best ← (combined, text) 最大者；同分取先出现者
 
@@ -207,8 +236,10 @@ loop:
 
 - `chain_gate`：`"combined"`（默认，四维综合）或 `"text"`（仅文本接近度），用于无向量/
   短文本场景下调门槛语义。
-- "中心可用"= `w_center > 0` 且（中心非空 **或** 给了 `query`）。两者都没有时第 4 维恒为 0，
-  跳过该门槛，否则链会在第一步就停，与"空中心优雅降级"冲突。
+- "中心可用"= `w_center > 0` 且（中心非空 **或** 给了 `query`/`task_anchors`）。都没有时
+  第 4 维恒为 0，跳过该门槛，否则链会在第一步就停，与"空中心优雅降级"冲突。
+- 记忆链在**一次任务调用内**构建完成；第 4 维使用 §2.4 的 85/15 融合分，因此停止阈值 x
+  衡量的是"与本次任务中心的关联度"。
 - 每次只追加**一个**最佳候选，然后以它为新的 `current` 重新打分——即"文本接近度高就继续
   加下一个记忆"的链式扩展。
 
@@ -225,8 +256,9 @@ loop:
 | 无 embedding（一侧或两侧） | 第 1 维退化为 token Jaccard |
 | 无 tags / cortex_path / 关键词命中 | 第 2 维为 0 |
 | 无 `created_at` / 无 session / 无事件标签 | 对应子项为 0，第 3 维仍可计算 |
-| 中心为空、有 `query` | 第 4 维回退到 query 文本/技术相似度 |
-| 中心为空、无 `query` | 第 4 维为 0，跳过第 4 维门槛 |
+| 无 query 且无 `task_anchors`、中心有挂载 | 第 4 维只用长期技术中心分量（归一，不乘 0.15） |
+| 中心为空、有 `query` 或 `task_anchors` | 第 4 维只用本次任务中心分量（归一，不乘 0.85） |
+| 中心为空、无 `query`/`task_anchors` | 第 4 维为 0，跳过第 4 维门槛 |
 | 候选为空 / 种子为空 | 返回仅含种子的链并给出停止原因，不抛错 |
 
 ## 5. 配置
@@ -240,6 +272,7 @@ loop:
 | `capacity` | 32 | 用户中心挂载容量 |
 | `mount_weight_default` | 1.0 | 未显式给权重时的挂载权重 |
 | `weights.text / tech / event / center` | 0.40 / 0.25 / 0.15 / 0.20 | 四维权重（按和归一化） |
+| `center_split.task_weight / tech_weight` | 0.85 / 0.15 | 第 4 维内部：本次任务中心 / 长期技术中心 |
 | `thresholds.chain_similarity` | 0.70 | 继续成链的门槛 |
 | `thresholds.stop_center` | 0.35 | x：第 4 维低于此值停止 |
 | `max_chain_length` | 12 | 链最大节点数（含种子） |
@@ -259,6 +292,7 @@ loop:
 user_center:
   capacity: 64
   weights: {text: 0.50, tech: 0.20, event: 0.10, center: 0.20}
+  center_split: {task_weight: 0.85, tech_weight: 0.15}   # 本次任务中心 : 技术中心
   thresholds: {chain_similarity: 0.62, stop_center: 0.30}
   max_chain_length: 20
 ```
@@ -275,7 +309,9 @@ assert center.is_mounted(center.mounted_ids[0])
 print([a.text for a in center.top(2)])
 print(center.center_embedding())            # 无向量时为 None
 
-chain = build_memory_chain(seed, candidates, center=center, query="帮我改 pytest 用例")
+task_memory = Anchor.create("本次任务：修复 pytest 用例", tags=["pytest", "debug"])
+chain = build_memory_chain(seed, candidates, center=center,
+                           query="帮我改 pytest 用例", task_anchors=[task_memory])
 for step in chain.steps:
     print(step.anchor_id, step.scores())    # text/tech/event/center/combined
 print(chain.stop_reason, chain.node_ids())
@@ -285,7 +321,7 @@ print(chain.to_dict())                      # JSON 友好，便于日志/回放
 ## 6. 边界与不变量
 
 - **默认检索路径零改动**：`retrieval_core`、`runtime`、`Activation` 未引用本模块；星图
-  `defaults.yaml` 只新增 `user_center` 段（未删 `version:`，版本迁移见 Issue #5/#14）。
+  `defaults.yaml` 只新增 `user_center` 段（版本已由 Issue #5 收敛为 `_version.py` 单一源）。
 - **只读锚点**：不写回重要性/激活度，不增删边，不删除记忆。
 - **复杂度**：每步 `O(候选数 × 挂载数)`，受 `max_chain_length` 与 `capacity` 约束；
   纯 Python，无 ANN 依赖。
@@ -302,7 +338,9 @@ print(chain.to_dict())                      # JSON 友好，便于日志/回放
 - 按权重 + 最近使用淘汰、`top` 排序、`center_embedding` 加权平均与空/无向量；
 - 配置读取（`defaults.yaml`）、覆盖、`as_dict` 往返、越界夹紧、权重可配置；
 - 四维打分的边界（0 / 1）、单调性、Jaccard 回退、路径/关键词/会话/标签子项；
-- 链增长、三类停止条件、`chain_gate="text"`、空候选/空种子/无 embedding 降级、确定性；
+- 第 4 维 85/15 融合、单分量归一、可配置比例、`task_anchors` 扩展本次任务中心；
+- 链增长、三类停止条件、第 4 维使用融合分的停止判断、`chain_gate="text"`、空候选/空种子/
+  无 embedding 降级、确定性；
 - `MemoryChain.to_dict()` 的 JSON 兼容性；
 - 子进程验证 `import star_graph` 不会 eager 加载 `star_graph.user_center`。
 
@@ -311,20 +349,29 @@ python -m pytest tests/test_user_center.py -q
 python -m pytest tests/ -q
 ```
 
-## 8. 开放问题（待用户确认）
+## 8. 用户决策记录与开放问题
 
-1. **权重默认值**：`0.40 / 0.25 / 0.15 / 0.20` 为初始猜测。若用户认为"文本接近度"应更主导
-   或"事件"应更弱，直接改 `user_center.weights.*` 即可，无需改代码。
+### 8.1 用户决策（2026-11-04）
+
+| 问题 | 决策 |
+|---|---|
+| 四维基础权重是否调整 | **不调整**：维持 `0.40 / 0.25 / 0.15 / 0.20`。 |
+| 用户中心分层 | **本次任务中心 85% + 长期技术中心 15%**（记忆每次任务只调用一次，故本次任务为主）。 |
+| 是否接入默认检索 | **本版不接入**，保持参考实现；后续如需再开 Issue。 |
+| 版本号规则 | 确认"每次迭代 PATCH +0.0.1"（1.4.2 → 1.4.3）。 |
+
+### 8.2 仍开放的问题
+
+
+1. ~~权重默认值~~（已确认不动；如需调整改 `user_center.weights.*` 即可，无需改代码）。
 2. **x = 0.35 的语义**：当前是 `[0, 1]` 绝对分，且挂载权重做了相对归一。若希望 x 表示
    "相对本次任务中心的比例"，需要引入任务中心向量并改为相对阈值。
 3. **`chain_similarity_threshold = 0.70` 偏严**：无 embedding 时 token Jaccard 常低于该值，
    链会很快停止。可下调阈值，或改用 `chain_gate: "text"` 并配更低阈值；是否按"有无向量"
    分档默认值待确认。
-4. **中心分层**：是否拆成"长期用户中心（偏好/常用技术）+ 会话中心（本次回复/技术中心）"，
-   两者各出一个第 4 维分数再融合。
+4. ~~中心分层~~（已确认：拆为本次任务中心 85% + 长期技术中心 15%，见 §2.4）。
 5. **淘汰策略**：是否把访问频率（激活次数）纳入 `rank`，而不只是权重 + 最近使用。
 6. **多模态/维度不一致**：`center_embedding` 目前跳过维度不一致的向量；是否需要投影或
    分维度聚合。
-7. **接入方式**：确认后以"预过滤（先按用户中心裁剪候选）"还是"重排（并入现有
-   Activation 分数）"接入 `retrieval_core`，以及是否进入 `MemoryRuntime` 默认流程。
+7. ~~接入方式~~（用户确认本版不接入默认检索；若后续接入，再决定预过滤/重排与 Runtime 流程）。
 8. **持久化**：`UserCenter` 的存储格式、快照位置与迁移策略。
