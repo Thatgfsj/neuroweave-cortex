@@ -1,0 +1,65 @@
+name: 🧰 工程任务
+description: 文档、CI、重构、治理、规范等非功能型任务
+title: "[task] "
+labels: ["chore"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        用于工程/维护类工作；若类型不同，请把标签改为 `docs` / `ci` / `refactor` / `governance` / `spec` 之一。
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 任务类型
+      options:
+        - docs（文档）
+        - ci（CI / 工具链）
+        - refactor（重构，不改行为）
+        - chore（杂项 / 依赖 / 发布）
+        - governance（治理 / 流程）
+        - spec（规范 / 设计文档）
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: 现状有什么问题？有证据（日志、命令输出、链接）更好。
+    validations:
+      required: true
+
+  - type: textarea
+    id: goals
+    attributes:
+      label: 目标与验收标准
+      description: 逐条可验证；PR 评审将按此对照。
+      placeholder: |
+        - [ ] 新增 xxx 文档，且内部链接有效
+        - [ ] CI 中新增 xxx 检查，失败时 PR 变红
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 涉及范围
+      description: 预计改动的目录/文件；明确**不做什么**同样重要。
+      value: |
+        会改动：
+        - 
+        不会改动（边界）：
+        - 
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 该任务不与现有 Issue 重复
+          required: true
+        - label: 我理解实现时必须单独建分支并走 PR（禁止直推 main）
+          required: true
