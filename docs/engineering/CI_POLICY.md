@@ -76,8 +76,8 @@ bash scripts/smoke_test.sh
 
 ## 5. 行数预算与 ratchet allowlist
 
-- 硬上限：每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（`scripts/check_line_budget.py`）。
-- allowlist（`scripts/ci/line_budget_allowlist.txt`）当前为**空**（**Issue #24** 已清零）：**全部代码文件 ≤ 1000 行，不存在例外**。
+- 硬上限：每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（`scripts/check_line_budget.py`）；`.ts/.js/.sh` 等其它代码文件按同一规范人工保证。
+- allowlist（`scripts/ci/line_budget_allowlist.txt`）当前为**空**（**Issue #24** 已清零）：**全部被跟踪的 `.py` 文件 ≤ 1000 行，不存在例外**（其它代码文件同样应遵守，脚本当前只校验 `.py`）。
 - allowlist 规则：**只减不增**，现为 0 例外。**新增超限必须先拆分**才能合并，不得往 allowlist 里加条目；拆分 PR 必须在同一个 PR 内保证文件 ≤ 1000 行，不能靠条目过渡。
 - 历史：拆分 PR（#20/#21/#25/#26）合入后，`star_graph/retrieval_engine/retrieval_core.py`（#7）、`star_graph/memory_core/graph.py`（#8）、`star_graph/cortex_api/runtime.py`（#9）、`examples/memory_benchmark.py`（#10）四个文件均 ≤ 1000 行；#24 已移除这 4 条 stale 条目，allowlist 文件只保留头部说明。
 

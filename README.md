@@ -179,7 +179,7 @@ pip install pytest pytest-cov
 pytest tests/ -v
 ```
 
-The suite holds **2000+ tests** in **77+ test files**. Every count quoted in the
+The suite holds **2000+ tests** in **70+ test files**. Every count quoted in the
 docs (modules, test files, test functions, lines) comes from
 `python scripts/repo_stats.py`, the single source of truth for statistics.
 

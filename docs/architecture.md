@@ -4,7 +4,7 @@
 
 > **统计口径**：本页除下方 `Repository Snapshot` 表外，模块数、测试数、行数均为 v1.0.x 历史快照，**不得作为现状引用**。现行计数一律以 `python scripts/repo_stats.py` 为准（README 已改用 "200+ modules / 2000+ tests" 等稳定表述）；本页与 [README.md](../README.md) 冲突时以 README 为准。
 
-> Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing | 64 commits
+> 历史页脚（v1.0.0，2026-05-16）：其中 `1,989 tests` 为当时数据；现行计数见 `python scripts/repo_stats.py`，版本见 `star_graph/_version.py`。
 
 ---
 
@@ -17,7 +17,7 @@
 | **Version** | 1.4.3（`star_graph/_version.py`，单一版本源） |
 | **Production modules** | 200+ Python files in `star_graph/` + `nwc/` |
 | **Production code** | ~52,000 lines |
-| **Test files** | 77+ files in `tests/` |
+| **Test files** | 70+ files in `tests/` |
 | **Test code** | ~20,000 lines |
 | **Total tests** | **2000+** |
 | **Total commits** | `git rev-list --count HEAD`（不硬编码） |

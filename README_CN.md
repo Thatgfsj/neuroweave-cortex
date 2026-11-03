@@ -101,7 +101,7 @@ pip install pytest pytest-cov
 pytest tests/ -v
 ```
 
-当前测试套件为 **2000+ 测试**、**77+ 测试文件**。文档中引用的所有计数（模块数、测试文件数、测试函数数、代码行数）统一以 `python scripts/repo_stats.py` 为统计口径，不再硬编码。
+当前测试套件为 **2000+ 测试**、**70+ 测试文件**。文档中引用的所有计数（模块数、测试文件数、测试函数数、代码行数）统一以 `python scripts/repo_stats.py` 为统计口径，不再硬编码。
 
 ---
 

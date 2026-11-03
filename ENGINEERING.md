@@ -21,7 +21,7 @@
 
 ### R3 PR 代码量 <1000 行
 
-- 口径：**代码文件**的 additions + deletions 合计 <1000 行；文档、数据文件不计入。计入的源码扩展名清单与 `scripts/ci/check_pr.py` 的 `CODE_EXTS` 完全一致（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md) §2）。
+- 口径：**代码文件**的 additions + deletions 合计 <1000 行；文档、数据文件不计入。计入的源码扩展名清单与 `scripts/ci/check_pr.py` 的 `CODE_EXTS` 完全一致（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md)、[DOC_CONFLICTS.md](docs/engineering/DOC_CONFLICTS.md) §2）。
 - 超出必须由 Lead 审核并添加 `size/exception` 标签，且在 PR 描述中写明拆分计划与理由。
 - 单文件同样不得超过 1000 行；4 个存量超限文件在拆分完成前进入 ratchet allowlist，拆分完成后由 #24 统一清理条目（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md)、[CI_POLICY.md](docs/engineering/CI_POLICY.md)）。
 

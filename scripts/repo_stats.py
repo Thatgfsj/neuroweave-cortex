@@ -27,6 +27,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 from pathlib import Path
 
 PACKAGES = ("star_graph", "nwc")
@@ -35,11 +36,27 @@ VERSION_FILE = "star_graph/_version.py"
 TEST_DEF = re.compile(r"\bdef\s+test_")
 
 
-def _py_files(root: Path, relative: str) -> list[Path]:
+def _tracked_py_files(root: Path, relative: str) -> list[Path]:
+    """Return git-tracked ``.py`` files under *relative* (same scope as CI)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", relative],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        tracked = [line for line in out.split("\0") if line.endswith(".py")]
+        if tracked:
+            return sorted(root / line for line in tracked)
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    # Fallback for non-git checkouts / tarballs.
     base = root / relative
     if not base.is_dir():
         return []
     return sorted(p for p in base.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+def _py_files(root: Path, relative: str) -> list[Path]:
+    return _tracked_py_files(root, relative)
 
 
 def _count_lines(paths: list[Path]) -> int:
