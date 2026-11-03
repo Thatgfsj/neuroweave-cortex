@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔐 安全漏洞
+    url: https://github.com/Thatgfsj/neuroweave-cortex/blob/main/SECURITY.md
+    about: 请勿用公开 Issue 报告安全漏洞，按 SECURITY.md 私下联系维护者。
+  - name: 💬 使用问题与讨论
+    url: https://github.com/Thatgfsj/neuroweave-cortex/discussions
+    about: 安装、用法、设计讨论请走 Discussions；Issue 只用于可执行的缺陷、需求与工程任务。
+  - name: 📘 工程规则
+    url: https://github.com/Thatgfsj/neuroweave-cortex/blob/main/ENGINEERING.md
+    about: 提交前请阅读工程宪法（Issue-first、PR 规范、CI 与评审流程）。

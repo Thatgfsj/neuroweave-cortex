@@ -1,0 +1,53 @@
+# 分支规范（BRANCH_POLICY.md）
+
+## 1. 命名
+
+格式：`type/short-slug`
+
+- `type` 取 Issue 类型标签：`feat` / `docs` / `ci` / `refactor` / `chore` / `governance` / `spec`；缺陷修复用 `fix/`（对应 `bug` 标签）。
+- `short-slug`：小写英文与数字，单词间用 `-`，2–5 个词，整体分支名 ≤ 40 字符；不要用中文、空格、大写、下划线、日期后缀。
+- 一个分支只服务一个 Issue；分支名里的 slug 应能让人猜到 Issue 内容。
+
+| 示例 | 说明 |
+|------|------|
+| `docs/governance` | 工程治理文档（#3） |
+| `fix/retrieval-deadlock` | 缺陷修复 |
+| `ci/static-pr-check` | PR CI 静态检查（#4） |
+| `feat/memory-decay-curve` | 新功能 |
+| `chore/bump-1.4.3` | 版本发布 |
+
+反例：`patch-1`、`test2`、`feat/new-feature-final`、`docs/2026-11-04`、`ZhangSan-fix`。
+
+## 2. 上限与统计口径
+
+- **活跃分支（本地 + 远程）总数 ≤ 30**，同名分支只算 1 个，不含 `main`。
+- 统计命令：
+
+```bash
+{ git branch --format='%(refname:short)'; git branch -r --format='%(refname:short)' | sed 's#^origin/##'; } \
+  | grep -v -E '^(main|HEAD)$' | sort -u | wc -l
+```
+
+- 超过 30 时先删已合并分支、再关停无进展 PR；仍超限则暂停新分支，由 Lead 取舍。长期分支（存活 > 2 周）视为流程异常。
+
+## 3. 删除与清理
+
+- **合并后自动删除**：`gh pr merge <N> --squash --delete-branch`；本地 `git branch -d <name>`，随后 `git fetch --prune`。
+- **周度清理**（建议每周一次，由维护者执行）：
+  1. 删除已合并分支（远程 + 本地）；
+  2. 关闭 14 天无活动的 PR/分支，或催办；
+  3. `git worktree remove` 回收临时 worktree，`git worktree prune` 清理失效登记；
+  4. 用 `scripts/cleanup_branches.sh` 辅助（由 Issue #12 提供，参数以 `--help` 为准），执行前确认输出，不要盲删。
+- 清理只删"已合并 / 已关闭 PR / 明确废弃"的分支；不确定的先问作者。
+
+## 4. 禁止事项
+
+- 禁止直接向 `main` 推送（含 `git push -f origin main`）。
+- 禁止在 `main` 上直接提交后"再开分支补 PR"。
+- 禁止一个分支跨多个 Issue、禁止多人共用同一分支。
+- 禁止删除他人分支或他人 worktree。
+- 禁止把 `main` 的更新用 merge 提交带进分支；统一 `git rebase origin/main`（冲突较多时先与 Lead 确认）。
+
+## 5. 与 worktree 的关系
+
+并行任务使用独立 worktree 隔离（`git worktree add <path> -b <branch> origin/main`），任务结束即移除；worktree 路径不属于仓库内容，不提交、不引用绝对路径。
