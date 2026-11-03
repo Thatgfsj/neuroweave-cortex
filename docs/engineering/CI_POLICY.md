@@ -39,7 +39,7 @@ on:
 |--------|------|------|--------|
 | PR 规范与代码量 | `scripts/ci/check_pr.py` | body 有 `Closes #N` 且 Issue 存在、早于 PR、有类型标签；代码量 < 1000 行，超限须 `size/exception` | 改 PR 描述/Issue 关联或拆 PR，见 [PR_POLICY.md](PR_POLICY.md) |
 | 版本号一致性 | `scripts/check_version.py` | 单一源 `star_graph/_version.py` 与其余 15 项（pyproject dynamic、两个 `__init__.py`、5 处文档镜像、defaults、4 个 server、verify.yml tag 读取）一致，共 16 项（见 [VERSIONING.md](VERSIONING.md)） | 同步镜像/导入，不改唯一源 |
-| 单文件行数预算 | `scripts/check_line_budget.py` | 每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（allowlist 例外） | 拆分文件 |
+| 单文件行数预算 | `scripts/check_line_budget.py` | 每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（allowlist 现为空，见 §5） | 拆分文件 |
 | Python 语法（不 import 第三方依赖） | `scripts/ci/check_syntax.py` | 全部 `.py` 可 `ast.parse`；改动的 `*.toml` / `*.json` 可解析 | 修语法错误 |
 
 **代码量口径**（与 `scripts/ci/check_pr.py` 的 `CODE_EXTS` 完全一致，完整清单也见 [PR_POLICY.md](PR_POLICY.md) §2）：
@@ -77,13 +77,9 @@ bash scripts/smoke_test.sh
 ## 5. 行数预算与 ratchet allowlist
 
 - 硬上限：每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（`scripts/check_line_budget.py`）。
-- 存量超限文件在拆分完成前进入 allowlist（`scripts/ci/line_budget_allowlist.txt`），当前保留 4 条，各自绑定跟踪 Issue：
-  - `star_graph/retrieval_engine/retrieval_core.py`（#7）
-  - `star_graph/memory_core/graph.py`（#8）
-  - `star_graph/cortex_api/runtime.py`（#9）
-  - `examples/memory_benchmark.py`（#10）
-- 上述拆分 PR（#20/#21/#25/#26）已合入，四个文件现在均 ≤ 1000 行，allowlist 条目处于 **stale（待清理）** 状态；清理由 **Issue #24** 统一完成。
-- allowlist 规则：**只减不增**。新增超限文件一律不允许；拆分 PR **不要求**在同一个 PR 删除对应条目（由 #24 统一移除），期间允许 stale 条目存在，但**不得新增**超限文件。若拆分 PR 顺手删除自己的条目也不违规，只是不作为合并前置条件。
+- allowlist（`scripts/ci/line_budget_allowlist.txt`）当前为**空**（**Issue #24** 已清零）：**全部代码文件 ≤ 1000 行，不存在例外**。
+- allowlist 规则：**只减不增**，现为 0 例外。**新增超限必须先拆分**才能合并，不得往 allowlist 里加条目；拆分 PR 必须在同一个 PR 内保证文件 ≤ 1000 行，不能靠条目过渡。
+- 历史：拆分 PR（#20/#21/#25/#26）合入后，`star_graph/retrieval_engine/retrieval_core.py`（#7）、`star_graph/memory_core/graph.py`（#8）、`star_graph/cortex_api/runtime.py`（#9）、`examples/memory_benchmark.py`（#10）四个文件均 ≤ 1000 行；#24 已移除这 4 条 stale 条目，allowlist 文件只保留头部说明。
 
 ## 6. 迁移状态、清理与禁止事项
 
