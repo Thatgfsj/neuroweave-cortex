@@ -1,0 +1,6 @@
+# Line-budget ratchet: files already over 1000 lines that must be split.
+# Format: <path>  # <tracking issue>.  Remove an entry once the file fits.
+star_graph/retrieval_engine/retrieval_core.py  # issue #7
+star_graph/memory_core/graph.py                # issue #8
+star_graph/cortex_api/runtime.py               # issue #9
+examples/memory_benchmark.py                   # issue #10
