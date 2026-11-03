@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "NWcortex"
-version = "1.4.2"
+dynamic = ["version"]
 description = "NeuroWeave Cortex (NWC) — Graph-first cognitive memory runtime for AI agents. Hippocampal-inspired architecture with domain routing, spreading activation, edge budget management, 4-layer compression, thermal storage, personality modeling, and 8-phase sleep consolidation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,6 +53,9 @@ nwc-server = "star_graph.server:entry"
 nwc-export = "star_graph.cli:export_cmd"
 nwc-forget = "star_graph.cli:forget_cmd"
 nwc-verify = "star_graph.cli:verify_cmd"
+
+[tool.setuptools.dynamic]
+version = {attr = "star_graph._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]

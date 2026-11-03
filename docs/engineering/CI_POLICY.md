@@ -28,7 +28,7 @@ on:
 ```
 
 - 因此"合并到 `main` 后自动验证"不成立：发布者必须在打 tag 或手动 Run workflow 后确认 `verify` 为绿色。
-- tag 触发时先校验 tag 名与 `pyproject.toml` 的 `[project].version` 一致（`v1.4.2` ↔ `1.4.2`），不一致直接失败。
+- tag 触发时先校验 tag 名与 `star_graph/_version.py` 的 `__version__` 一致（`v1.4.3` ↔ `1.4.3`），不一致直接失败；该版本从 `_version.py` 用 `ast` 静态读取，**不读** `pyproject.toml`（版本已改为 dynamic，没有 `[project].version`）。
 - 分支保护的必需检查是 `PR checks / PR checks (no build)`（即 `pr-check.yml` 的 job），不是 `verify`；配置见 [BRANCH_POLICY.md](BRANCH_POLICY.md)。
 
 ## 3. PR CI 检查项与脚本对应关系
@@ -38,7 +38,7 @@ on:
 | 检查项 | 脚本 | 判定 | 失败时 |
 |--------|------|------|--------|
 | PR 规范与代码量 | `scripts/ci/check_pr.py` | body 有 `Closes #N` 且 Issue 存在、早于 PR、有类型标签；代码量 < 1000 行，超限须 `size/exception` | 改 PR 描述/Issue 关联或拆 PR，见 [PR_POLICY.md](PR_POLICY.md) |
-| 版本号一致性 | `scripts/check_version.py` | 4 处版本源与 `pyproject.toml [project]` 一致（见 [VERSIONING.md](VERSIONING.md)） | 同步副本，不改基准 |
+| 版本号一致性 | `scripts/check_version.py` | 单一源 `star_graph/_version.py` 与其余 15 项（pyproject dynamic、两个 `__init__.py`、5 处文档镜像、defaults、4 个 server、verify.yml tag 读取）一致，共 16 项（见 [VERSIONING.md](VERSIONING.md)） | 同步镜像/导入，不改唯一源 |
 | 单文件行数预算 | `scripts/check_line_budget.py` | 每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（allowlist 例外） | 拆分文件 |
 | Python 语法（不 import 第三方依赖） | `scripts/ci/check_syntax.py` | 全部 `.py` 可 `ast.parse`；改动的 `*.toml` / `*.json` 可解析 | 修语法错误 |
 
@@ -77,12 +77,13 @@ bash scripts/smoke_test.sh
 ## 5. 行数预算与 ratchet allowlist
 
 - 硬上限：每个被 git 跟踪的 `.py` 文件 ≤ 1000 行（`scripts/check_line_budget.py`）。
-- 存量超限文件在拆分完成前进入 allowlist（`scripts/ci/line_budget_allowlist.txt`），当前 4 个，各自绑定跟踪 Issue：
+- 存量超限文件在拆分完成前进入 allowlist（`scripts/ci/line_budget_allowlist.txt`），当前保留 4 条，各自绑定跟踪 Issue：
   - `star_graph/retrieval_engine/retrieval_core.py`（#7）
   - `star_graph/memory_core/graph.py`（#8）
   - `star_graph/cortex_api/runtime.py`（#9）
   - `examples/memory_benchmark.py`（#10）
-- allowlist 规则：**只减不增**。新增超限文件一律不允许；拆分任一文件后必须在同一个 PR 中把它从 allowlist 移除，否则评审 B 拒绝。
+- 上述拆分 PR（#20/#21/#25/#26）已合入，四个文件现在均 ≤ 1000 行，allowlist 条目处于 **stale（待清理）** 状态；清理由 **Issue #24** 统一完成。
+- allowlist 规则：**只减不增**。新增超限文件一律不允许；拆分 PR **不要求**在同一个 PR 删除对应条目（由 #24 统一移除），期间允许 stale 条目存在，但**不得新增**超限文件。若拆分 PR 顺手删除自己的条目也不违规，只是不作为合并前置条件。
 
 ## 6. 迁移状态、清理与禁止事项
 

@@ -5,15 +5,17 @@
 
 ---
 
-## 现状（v1.4.2 — 2026-09）
+## 现状（v1.4.3 — 2026-11）
 
-**当前版本 v1.4.2**（代码 `star_graph.__version__ = "1.4.2"`）。权威版本历史见 [plan.md](plan.md) 第六节；本文件下方正文为 v1.1.0 时点的状态快照与历史规划，**部分条目已被实际版本以不同内容交付**。
+**当前版本 v1.4.3**（代码 `star_graph.__version__ = "1.4.3"`，唯一事实源 `star_graph/_version.py`）。权威版本历史见 [plan.md](plan.md) 第六节；本文件下方正文为 v1.1.0 时点的状态快照与历史规划，**部分条目已被实际版本以不同内容交付**。
 
 实际已交付（对照 plan.md 版本历史）：
 
 - **v1.3.x** — Lifecycle Engine（6 状态机，Never-Delete：无 GHOST/DEAD 状态，`prune` = `dim` 别名，DORMANT 可复活为 REACTIVATED）、Activation Graph 检索、L1→L2→L3 迁移、Unified Graph Layer + MemoryNode 别名 + QdrantStorage、LoCoMo-10 44.2%（HybridFusion+BM25）、消融实验 + 统计验证 + 复杂度分析
 - **v1.4.0** — 3D 衰减引擎、Goal-Aware 检索、Context Compression、Schema 增强、Savings Effect、`docs/theory.md` + `docs/formalism.md`、LongBench + Baseline 框架、可扩展性测试
 - **v1.4.1** — Memory Revision 实验（revision experiments）
+- **v1.4.2** — Never-Delete 一致性、稳定性与性能大修
+- **v1.4.3** — 工程化治理：可复用 PR CI、工程文档、分支保护、版本单一源、超限文件拆分
 
 **版本撞号说明**：本文件下方"路线图"里的 v1.2.0 / v1.3.0 / v1.4.0 / v1.5.0 是 v1.1.0 时的**计划编号**，与实际发布版本号撞号但内容不同。例如：
 

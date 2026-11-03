@@ -21,9 +21,9 @@ command -v "$PY" >/dev/null 2>&1 || {
 say() { printf '\n== %s ==\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-VERSION="$("$PY" -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')" \
-  || fail "cannot read [project].version from pyproject.toml"
-[ -n "$VERSION" ] || fail "empty [project].version in pyproject.toml"
+VERSION="$("$PY" -c 'import ast, pathlib; tree = ast.parse(pathlib.Path("star_graph/_version.py").read_text(encoding="utf-8")); print(next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign) and any(getattr(target, "id", "") == "__version__" for target in node.targets)))')" \
+  || fail "cannot read __version__ from star_graph/_version.py"
+[ -n "$VERSION" ] || fail "empty __version__ in star_graph/_version.py"
 
 say "1/4 build wheel (old wheels removed, version $VERSION)"
 rm -f dist/*.whl

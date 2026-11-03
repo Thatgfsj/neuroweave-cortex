@@ -24,26 +24,57 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Tag matches pyproject version
-        if: startsWith(github.ref, 'refs/tags/v')
+      # The version lives in star_graph/_version.py; pyproject.toml only wires
+      # [tool.setuptools.dynamic], so it has no [project].version to read.
+      # Parse it with ast instead of importing star_graph: this check must never
+      # import the runtime it is verifying.
+      - name: Version source + tag match
         env:
           TAG_NAME: ${{ github.ref_name }}
+          REF: ${{ github.ref }}
         run: |
           python3 - <<'PY'
+          import ast
           import os
+          import pathlib
+          import re
           import sys
-          import tomllib
 
-          tag = os.environ["TAG_NAME"]
-          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
-          if tag != f"v{version}":
+          VERSION_FILE = "star_graph/_version.py"
+
+          def source_version(path=VERSION_FILE):
+              tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"), filename=path)
+              for node in tree.body:
+                  if isinstance(node, ast.Assign) and any(
+                      isinstance(target, ast.Name) and target.id == "__version__"
+                      for target in node.targets
+                  ):
+                      if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                          return node.value.value
+              print(f"::error::{path} has no module-level string-literal __version__", file=sys.stderr)
+              raise SystemExit(1)
+
+          version = source_version()
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              print(f"::error::{VERSION_FILE} has malformed version {version!r}", file=sys.stderr)
+              raise SystemExit(1)
+          print(f"source version: {VERSION_FILE} -> {version}")
+
+          ref = os.environ.get("REF", "")
+          tag = os.environ.get("TAG_NAME", "")
+          if not ref.startswith("refs/tags/"):
+              print(f"PASS: not a tag ref ({ref or 'unknown'}); skipping tag comparison, version {version}")
+              raise SystemExit(0)
+
+          expected = f"v{version}"
+          if tag != expected:
               print(
-                  f"::error::tag {tag!r} does not match pyproject version {version!r} "
-                  f"(expected 'v{version}')",
+                  f"::error::tag {tag!r} does not match {VERSION_FILE} version {version!r} "
+                  f"(expected {expected!r})",
                   file=sys.stderr,
               )
-              sys.exit(1)
-          print(f"PASS: tag {tag} matches pyproject version {version}")
+              raise SystemExit(1)
+          print(f"PASS: tag {tag} matches {VERSION_FILE} version {version}")
           PY
 
       # Single build: smoke_test.sh builds the wheel, installs it into a

@@ -14,6 +14,7 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
+from .._version import __version__
 from .manager import MemoryManager
 
 # Global references set on startup
@@ -48,7 +49,7 @@ class MemoryHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "status": "healthy",
                 "uptime_seconds": time.time() - _start_time,
-                "version": "1.4.0",
+                "version": __version__,
                 "anchors": len(mgr.graph.anchors),
                 "edges": len(mgr.graph.edges),
             })

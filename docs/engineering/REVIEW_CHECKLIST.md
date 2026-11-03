@@ -19,10 +19,10 @@
 - [ ] 存在**为此 PR 新建**的 Issue，类型标签正确（`bug`/`feat`/`docs`/`ci`/`refactor`/`chore`/`governance`/`spec`）
 - [ ] PR body 首行含 `Closes #N`（缺陷为 `Fixes #N`），模板字段全部填写
 - [ ] 代码量口径正确：代码文件 additions+deletions < 1000；超出时有 Lead 添加的 `size/exception` 且写明理由
-- [ ] 单文件 ≤ 1000 行；新增文件未进 allowlist；拆分完成时已从 allowlist 移除
+- [ ] 单文件 ≤ 1000 行；新增文件未进 allowlist；存量条目由 #24 统一清理，拆分 PR 不强制在同一 PR 移除（见 [CI_POLICY.md](CI_POLICY.md) §5）
 - [ ] 分支命名符合 `type/short-slug`，从 `origin/main` 新建，一个分支只对应一个 Issue
 - [ ] 未直推 `main`；未强推已评审的提交（若已强推，历史被重写，需重新评审）
-- [ ] 版本号：功能/修复 PR 未改版本；发布 PR 为 +0.0.1 且所有副本一致（[VERSIONING.md](VERSIONING.md)）
+- [ ] 版本号：功能/修复 PR 未改版本；发布 PR 为 +0.0.1 且 `scripts/check_version.py` 16 项全绿（唯一源 `star_graph/_version.py`，[VERSIONING.md](VERSIONING.md)）
 - [ ] PR CI 仅含静态检查，未新增构建、依赖安装或全量测试
 - [ ] 文档同步：行为/API/配置变更已更新 README 或对应文档；新增脚本/工作流已更新 [CI_POLICY.md](CI_POLICY.md) 表格
 - [ ] 文档链接为相对路径且目标存在；无硬编码易过期计数（[DOC_POLICY.md](DOC_POLICY.md)）

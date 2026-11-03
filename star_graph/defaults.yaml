@@ -1,8 +1,6 @@
 # NeuroWeave Cortex (NWC) — default hyperparameters
 # v1.2.0 config system — every neuroscience mechanism is tunable
 
-version: "1.3.5"
-
 # ── Storage paths ──
 # Default save location is ~/.star_graph/memory.json (JSON)
 # or ~/.star_graph/memory.db (SQLite). Snapshots go to
