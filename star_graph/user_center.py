@@ -367,19 +367,31 @@ def event_proximity(a: Any, b: Any, *, config: UserCenterConfig | None = None) -
 
 def _task_center_similarity(a: Any, query: Any, cfg: UserCenterConfig,
                             task_anchors: Iterable[Any] | None = None) -> float | None:
-    """本次任务中心相似度；无 query 且无任务锚点时返回 None。"""
+    """本次任务中心相似度；无 query 且无任务锚点时返回 None。
+
+    ``task_anchors`` 支持锚点或 ``(anchor, weight)`` 元组；权重按该分量的最大值
+    相对归一（与长期技术中心一致），权重 ≤0 的条目跳过。入口先物化为 tuple，
+    避免生成器被多次消费后耗尽。
+    """
     scores: list[float] = []
     query_view = _query_view(query)
     if query_view is not None:
         scores.append(_text_tech_similarity(a, query_view, cfg))
-    for item in task_anchors or ():
+    anchors = tuple(task_anchors or ())
+    weights: list[float] = []
+    for item in anchors:
         if isinstance(item, tuple) and len(item) == 2:
-            anchor, weight = item
-            relative = max(0.0, float(weight))
-            if relative > 0:
-                scores.append(relative * _text_tech_similarity(a, anchor, cfg))
+            weights.append(max(0.0, float(item[1])))
         else:
-            scores.append(_text_tech_similarity(a, item, cfg))
+            weights.append(1.0)
+    max_weight = max(weights) if weights else 0.0
+    if max_weight > 0:
+        for item, weight in zip(anchors, weights):
+            if weight <= 0:
+                continue
+            anchor = item[0] if isinstance(item, tuple) and len(item) == 2 else item
+            relative = weight / max_weight
+            scores.append(relative * _text_tech_similarity(a, anchor, cfg))
     return max(scores) if scores else None
 
 
@@ -407,7 +419,8 @@ def user_center_proximity(a: Any, query: Any = None, center: Any = None, *,
     用户中心分两层并融合（用户确认 2026-11-04）：
 
     * **本次任务中心（默认 85%）** —— 与 ``query``（文本/向量/锚点）以及可选的
-      ``task_anchors``（本次任务内一次性挂载的记忆）的文本+技术相似度；
+      ``task_anchors``（keyword-only；本次任务内一次性挂载的记忆，支持
+      ``(anchor, weight)`` 且权重按分量内最大值相对归一）的文本+技术相似度；
     * **长期技术中心（默认 15%）** —— 与 ``center`` 挂载记忆的相对权重相似度，
       事件维不参与，避免时间衰减惩罚长期偏好。
 
@@ -508,8 +521,8 @@ class MemoryChain:
 
 
 def build_memory_chain(seed: Any = None, candidates: Iterable[Any] = (), center: Any = None,
-                       query: Any = None, task_anchors: Iterable[Any] | None = None,
-                       config: UserCenterConfig | None = None) -> MemoryChain:
+                       query: Any = None, config: UserCenterConfig | None = None, *,
+                       task_anchors: Iterable[Any] | None = None) -> MemoryChain:
     """以 seed（或用户中心 / query）起步，逐步扩展记忆链直到停止。
 
     停止条件（按检查优先级）：
@@ -521,15 +534,18 @@ def build_memory_chain(seed: Any = None, candidates: Iterable[Any] = (), center:
 
     第 4 维使用"本次任务中心 85% + 长期技术中心 15%"的融合分（用户确认
     2026-11-04）：每次任务只调用一次记忆，因此本次任务为主；``task_anchors``
-    可传入本次任务内的一次性记忆。完全确定：候选按传入顺序遍历，同分取前者；
+    （keyword-only）可传入本次任务内的一次性记忆，支持 ``(anchor, weight)`` 元组，
+    权重按分量内最大值相对归一。完全确定：候选按传入顺序遍历，同分取前者；
     不使用随机数与时钟。空候选、空中心、无 embedding 均能运行（逐维降级）。
     """
     cfg = _resolve_config(config, center)
+    task_anchors = tuple(task_anchors or ())
     chain = MemoryChain(seed=seed, stop_reason=STOP_CANDIDATES_EXHAUSTED, config=cfg)
     previous_id = _safe_id(seed) or ""
     remaining = _dedupe_candidates(candidates, exclude=previous_id)
     current = seed if seed is not None else _query_view(query)
-    center_gate = cfg.w_center > 0 and (bool(_center_items(center)) or _query_view(query) is not None)
+    center_gate = cfg.w_center > 0 and (
+        bool(_center_items(center)) or _query_view(query) is not None or bool(task_anchors))
 
     while True:
         if len(chain.steps) + (1 if seed is not None else 0) >= cfg.max_chain_length:

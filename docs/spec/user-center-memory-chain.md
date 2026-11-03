@@ -100,14 +100,17 @@ $$
 - 任一方缺少 `created_at`（<=0）时时间项为 0，其余子项照常。
 - 分母为三个子权重之和，保证输出仍在 `[0, 1]`。
 
-### 2.4 第 4 维：与用户中心接近度 `user_center_proximity(a, query, center, task_anchors)`
+### 2.4 第 4 维：与用户中心接近度 `user_center_proximity(a, query, center, *, task_anchors)`
 
 用户中心是核心，但**记忆每次任务只调用一次**，所以第 4 维由两个分量融合（用户确认
 2026-11-04）：
 
 $$
-s_{task}(a)=\max\Big(\text{text/tech similarity}(a,\ \text{query}),\
-\max_{t\in task\_anchors}\text{text/tech similarity}(a,t)\Big)
+s_{task}(a)=\max\Bigg(
+\text{text/tech similarity}(a,\ \text{query}),\;
+\max_{t\in task\_anchors}\Big(\underbrace{\frac{w_t}{\max_j w_j}}_{\text{相对权重}}\cdot
+\text{text/tech similarity}(a,t)\Big)
+\Bigg)
 $$
 
 $$
@@ -134,8 +137,12 @@ $$
   融合；都不可用返回 `0.0`。比例可在 `user_center.center_split.*` 调整。
 - **只取分量内最大值**：任务分量取 query / task_anchors 的最大相似度，技术分量取挂载记忆
   中"相对权重 × 相似度"的最大值——一条记忆只要贴近任一核心参照即算贴近。
+- **task_anchors 形式**：`task_anchors` 为 keyword-only；条目可以是锚点，或
+  `(anchor, weight)` 元组。元组权重按该分量内最大值**相对归一**（与长期技术中心一致），
+  权重 ≤0 跳过；入口会物化为 tuple，生成器只消费一次。
+- `center_split.task_weight + tech_weight` 为 0（两分量权重都被关闭）时，第 4 维返回 `0.0`。
 
-### 2.5 综合接近度 `combined_proximity(a, b, center, query)`
+### 2.5 综合接近度 `combined_proximity(a, b, center, query, *, task_anchors)`
 
 $$
 s_{combined}=\frac{w_{text}s_{text}+w_{tech}s_{tech}+w_{event}s_{event}+w_{center}s_{center}}
@@ -207,7 +214,7 @@ loop:
         s_text  = text_proximity(c, current)
         s_tech  = tech_proximity(c, current)
         s_event = event_proximity(c, current)
-        s_center= user_center_proximity(c, query, center, task_anchors)
+        s_center= user_center_proximity(c, query, center, task_anchors=task_anchors)
         combined= Σ w_i·s_i / Σ w_i
     best ← (combined, text) 最大者；同分取先出现者
 

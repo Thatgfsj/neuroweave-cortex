@@ -284,6 +284,55 @@ class TestMemoryChain:
                                     query=[1.0, 0.0], config=config)
         assert chain2.ids == ["cand"]
 
+    def test_chain_gates_on_task_anchors_only(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.10,
+                                  stop_center_threshold=0.5)
+        seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        candidate = make_anchor("cand", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        unrelated = make_anchor("task", "rust 服务", embedding=[0.0, 1.0],
+                                tags=("rust",))
+        chain = build_memory_chain(seed, [candidate], task_anchors=[unrelated],
+                                   config=config)
+        assert chain.steps == [] and chain.node_ids() == ["seed"]
+        assert chain.stop_reason == STOP_CENTER_BELOW_THRESHOLD
+        related = make_anchor("task2", "python 测试", embedding=[1.0, 0.0],
+                              tags=("python",))
+        chain2 = build_memory_chain(seed, [candidate], task_anchors=[related],
+                                    config=config)
+        assert chain2.ids == ["cand"]
+
+    def test_task_anchor_weights_are_relative(self) -> None:
+        cfg = UserCenterConfig(capacity=4)
+        unrelated = make_anchor("rust", "rust 服务", embedding=[0.0, 1.0],
+                                tags=("rust",))
+        candidate = make_anchor("c", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        plain = user_center_proximity(candidate, task_anchors=[unrelated], config=cfg)
+        heavy = user_center_proximity(candidate, task_anchors=[(unrelated, 3.0)],
+                                      config=cfg)
+        assert heavy == pytest.approx(plain)
+
+    def test_chain_accepts_generator_task_anchors(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.10,
+                                  stop_center_threshold=0.5)
+        seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        candidate = make_anchor("cand", "python 测试", embedding=[1.0, 0.0],
+                                tags=("python",))
+        task = make_anchor("task", "python 测试", embedding=[1.0, 0.0], tags=("python",))
+        as_list = build_memory_chain(seed, [candidate], task_anchors=[task],
+                                     config=config)
+        as_gen = build_memory_chain(seed, [candidate],
+                                    task_anchors=(t for t in [task]), config=config)
+        assert as_gen.node_ids() == as_list.node_ids() == ["seed", "cand"]
+
+    def test_build_memory_chain_positional_config_compat(self) -> None:
+        config = UserCenterConfig(chain_similarity_threshold=0.3)
+        seed = make_anchor("seed", "alpha", embedding=[1.0, 0.0])
+        candidate = make_anchor("cand", "alpha", embedding=[1.0, 0.0])
+        chain = build_memory_chain(seed, [candidate], None, "alpha", config)
+        assert isinstance(chain, MemoryChain) and chain.ids == ["cand"]
+
     def test_chain_stops_at_max_length_and_text_gate(self) -> None:
         center = UserCenter(UserCenterConfig(capacity=8), clock=FakeClock())
         seed = make_anchor("seed", "python 测试", embedding=[1.0, 0.0], tags=("python",))
