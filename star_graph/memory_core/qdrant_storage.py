@@ -18,6 +18,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterator, Optional
 
 from .anchor import Anchor, AnchorVector, AnchorPrediction, Oscillator, MemoryState
@@ -205,6 +206,32 @@ COLLECTION_GHOSTS = "ghosts"
 ANCHOR_VECTOR_SIZE = 768  # common default; overridden on first save
 
 
+# The builders below proxy to qdrant_client when it is installed.  Without the
+# optional dependency ``qmodels`` is None, yet the storage class can still be
+# exercised through a fake/alternative client (see tests); the lightweight
+# stand-ins keep those code paths callable without changing real behaviour.
+
+def _vector_params(size: int) -> Any:
+    """Build a Qdrant ``VectorParams`` (or a lightweight stand-in)."""
+    if qmodels is not None:
+        return qmodels.VectorParams(size=size, distance=qmodels.Distance.COSINE)
+    return SimpleNamespace(size=size, distance="Cosine")
+
+
+def _point_struct(point_id: Any, vector: Any, payload: Any) -> Any:
+    """Build a Qdrant ``PointStruct`` (or a lightweight stand-in)."""
+    if qmodels is not None:
+        return qmodels.PointStruct(id=point_id, vector=vector, payload=payload)
+    return SimpleNamespace(id=point_id, vector=vector, payload=payload)
+
+
+def _point_ids_list(points: list[Any]) -> Any:
+    """Build a Qdrant ``PointIdsList`` (or a lightweight stand-in)."""
+    if qmodels is not None:
+        return qmodels.PointIdsList(points=points)
+    return SimpleNamespace(points=points)
+
+
 def _ensure_collection(client: QdrantClient, name: str, vector_size: int | None = None) -> None:
     """Create a Qdrant collection if it doesn't already exist."""
     collections = [c.name for c in client.get_collections().collections]
@@ -214,16 +241,13 @@ def _ensure_collection(client: QdrantClient, name: str, vector_size: int | None 
     if name == COLLECTION_ANCHORS and vector_size and vector_size > 0:
         client.create_collection(
             collection_name=name,
-            vectors_config=qmodels.VectorParams(
-                size=vector_size,
-                distance=qmodels.Distance.COSINE,
-            ),
+            vectors_config=_vector_params(vector_size),
         )
     else:
         # Non-vector collections use a small dummy vector
         client.create_collection(
             collection_name=name,
-            vectors_config=qmodels.VectorParams(size=1, distance=qmodels.Distance.COSINE),
+            vectors_config=_vector_params(1),
         )
 
 
@@ -308,10 +332,10 @@ class QdrantStorage(StorageBackend):
                 self._client.upsert(
                     collection_name=COLLECTION_ANCHORS,
                     points=[
-                        qmodels.PointStruct(
-                            id=p["id"],
-                            vector=p["vector"] if p["vector"] else [0.0] * vsize,
-                            payload=p["payload"],
+                        _point_struct(
+                            p["id"],
+                            p["vector"] if p["vector"] else [0.0] * vsize,
+                            p["payload"],
                         )
                         for p in batch
                     ],
@@ -323,7 +347,7 @@ class QdrantStorage(StorageBackend):
                 self._client.upsert(
                     collection_name=COLLECTION_EDGES,
                     points=[
-                        qmodels.PointStruct(id=p["id"], vector=[0.0], payload=p["payload"])
+                        _point_struct(p["id"], [0.0], p["payload"])
                         for p in batch
                     ],
                 )
@@ -334,7 +358,7 @@ class QdrantStorage(StorageBackend):
                 self._client.upsert(
                     collection_name=COLLECTION_SCHEMAS,
                     points=[
-                        qmodels.PointStruct(id=p["id"], vector=[0.0], payload=p["payload"])
+                        _point_struct(p["id"], [0.0], p["payload"])
                         for p in batch
                     ],
                 )
@@ -345,7 +369,7 @@ class QdrantStorage(StorageBackend):
                 self._client.upsert(
                     collection_name=COLLECTION_GHOSTS,
                     points=[
-                        qmodels.PointStruct(id=p["id"], vector=[0.0], payload=p["payload"])
+                        _point_struct(p["id"], [0.0], p["payload"])
                         for p in batch
                     ],
                 )
@@ -544,25 +568,25 @@ class QdrantStorage(StorageBackend):
                 payload = {k: v for k, v in data.items() if k != "embedding"}
                 self._client.upsert(
                     collection_name=COLLECTION_ANCHORS,
-                    points=[qmodels.PointStruct(id=aid, vector=vec or [0.0], payload=payload)],
+                    points=[_point_struct(aid, vec or [0.0], payload)],
                 )
             elif item_type == "edge":
                 eid = f"e:{data.get('source', '')}:{data.get('target', '')}"
                 self._client.upsert(
                     collection_name=COLLECTION_EDGES,
-                    points=[qmodels.PointStruct(id=eid, vector=[0.0], payload=data)],
+                    points=[_point_struct(eid, [0.0], data)],
                 )
             elif item_type == "ghost":
                 gid = data.get("id", str(time.time_ns()))
                 self._client.upsert(
                     collection_name=COLLECTION_GHOSTS,
-                    points=[qmodels.PointStruct(id=gid, vector=[0.0], payload=data)],
+                    points=[_point_struct(gid, [0.0], data)],
                 )
             elif item_type == "schema":
                 sid = data.get("id", "")
                 self._client.upsert(
                     collection_name=COLLECTION_SCHEMAS,
-                    points=[qmodels.PointStruct(id=sid, vector=[0.0], payload=data)],
+                    points=[_point_struct(sid, [0.0], data)],
                 )
 
     def save_anchor(self, anchor_id: str, data: dict) -> None:
@@ -572,7 +596,7 @@ class QdrantStorage(StorageBackend):
         try:
             self._client.delete(
                 collection_name=COLLECTION_ANCHORS,
-                points_selector=qmodels.PointIdsList(points=[anchor_id]),
+                points_selector=_point_ids_list([anchor_id]),
             )
         except Exception:
             pass
@@ -585,7 +609,7 @@ class QdrantStorage(StorageBackend):
         try:
             self._client.delete(
                 collection_name=COLLECTION_EDGES,
-                points_selector=qmodels.PointIdsList(points=[eid]),
+                points_selector=_point_ids_list([eid]),
             )
         except Exception:
             pass
