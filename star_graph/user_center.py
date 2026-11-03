@@ -55,6 +55,8 @@ _CONFIG_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("w_tech", "weights.tech", "float"),
     ("w_event", "weights.event", "float"),
     ("w_center", "weights.center", "float"),
+    ("task_center_weight", "center_split.task_weight", "float"),
+    ("tech_center_weight", "center_split.tech_weight", "float"),
     ("chain_similarity_threshold", "thresholds.chain_similarity", "float"),
     ("stop_center_threshold", "thresholds.stop_center", "float"),
     ("max_chain_length", "max_chain_length", "int"),
@@ -85,6 +87,10 @@ class UserCenterConfig:
     w_tech: float = 0.25
     w_event: float = 0.15
     w_center: float = 0.20
+    # 第 4 维内部分层（用户确认 2026-11-04）：本次任务中心为主，长期技术中心为辅。
+    # 记忆每次任务只调用一次，因此"本次任务/回复中心"占 85%，"技术中心"占 15%。
+    task_center_weight: float = 0.85
+    tech_center_weight: float = 0.15
     chain_similarity_threshold: float = 0.70
     stop_center_threshold: float = 0.35
     max_chain_length: int = 12
@@ -103,7 +109,8 @@ class UserCenterConfig:
         self.capacity = max(0, int(self.capacity))
         self.max_chain_length = max(0, int(self.max_chain_length))
         self.mount_weight_default = max(0.0, float(self.mount_weight_default))
-        for name in ("w_text", "w_tech", "w_event", "w_center"):
+        for name in ("w_text", "w_tech", "w_event", "w_center",
+                     "task_center_weight", "tech_center_weight"):
             setattr(self, name, max(0.0, float(getattr(self, name))))
         self.chain_similarity_threshold = clamp(float(self.chain_similarity_threshold))
         self.stop_center_threshold = clamp(float(self.stop_center_threshold))
@@ -149,6 +156,8 @@ class UserCenterConfig:
             "capacity": self.capacity, "mount_weight_default": self.mount_weight_default,
             "weights": {"text": self.w_text, "tech": self.w_tech,
                         "event": self.w_event, "center": self.w_center},
+            "center_split": {"task_weight": self.task_center_weight,
+                             "tech_weight": self.tech_center_weight},
             "thresholds": {"chain_similarity": self.chain_similarity_threshold,
                            "stop_center": self.stop_center_threshold},
             "max_chain_length": self.max_chain_length,
@@ -356,33 +365,75 @@ def event_proximity(a: Any, b: Any, *, config: UserCenterConfig | None = None) -
     return clamp(score / denominator)
 
 
+def _task_center_similarity(a: Any, query: Any, cfg: UserCenterConfig,
+                            task_anchors: Iterable[Any] | None = None) -> float | None:
+    """本次任务中心相似度；无 query 且无任务锚点时返回 None。"""
+    scores: list[float] = []
+    query_view = _query_view(query)
+    if query_view is not None:
+        scores.append(_text_tech_similarity(a, query_view, cfg))
+    for item in task_anchors or ():
+        if isinstance(item, tuple) and len(item) == 2:
+            anchor, weight = item
+            relative = max(0.0, float(weight))
+            if relative > 0:
+                scores.append(relative * _text_tech_similarity(a, anchor, cfg))
+        else:
+            scores.append(_text_tech_similarity(a, item, cfg))
+    return max(scores) if scores else None
+
+
+def _tech_center_similarity(a: Any, center: Any, cfg: UserCenterConfig) -> float | None:
+    """长期技术中心相似度；无挂载或权重全 0 时返回 None。"""
+    mounts = _center_items(center)
+    if not mounts:
+        return None
+    max_weight = max((weight for _, weight in mounts), default=0.0)
+    if max_weight <= 0:
+        return None
+    best = 0.0
+    for anchor, weight in mounts:
+        relative = max(0.0, weight) / max_weight
+        if relative > 0:
+            best = max(best, relative * _text_tech_similarity(a, anchor, cfg))
+    return clamp(best)
+
+
 def user_center_proximity(a: Any, query: Any = None, center: Any = None, *,
+                          task_anchors: Iterable[Any] | None = None,
                           config: UserCenterConfig | None = None) -> float:
     """第 4 维：与用户中心的接近度 ∈ [0, 1]。
 
-    有挂载记忆时取 ``max(相对权重 × 文本/技术加权相似度)``；事件维不参与，避免
-    时间衰减惩罚长期挂载的常用记忆。中心为空时回退到该记忆与 query 的文本/
-    技术相似度；query 也为空则返回 0.0。
+    用户中心分两层并融合（用户确认 2026-11-04）：
+
+    * **本次任务中心（默认 85%）** —— 与 ``query``（文本/向量/锚点）以及可选的
+      ``task_anchors``（本次任务内一次性挂载的记忆）的文本+技术相似度；
+    * **长期技术中心（默认 15%）** —— 与 ``center`` 挂载记忆的相对权重相似度，
+      事件维不参与，避免时间衰减惩罚长期偏好。
+
+    融合公式为 ``(0.85·task + 0.15·tech) / (0.85 + 0.15)``。任一分量不可用时
+    按剩余分量归一（不乘 0.85/0.15）；两者都不可用返回 0.0。记忆每次任务只调用
+    一次，因此任务中心为主、技术中心为辅。
     """
     cfg = _resolve_config(config, center)
-    mounts = _center_items(center)
-    if mounts:
-        max_weight = max((weight for _, weight in mounts), default=0.0)
-        if max_weight <= 0:
-            return 0.0
-        best = 0.0
-        for anchor, weight in mounts:
-            relative = max(0.0, weight) / max_weight
-            if relative > 0:
-                best = max(best, relative * _text_tech_similarity(a, anchor, cfg))
-        return clamp(best)
-    query_view = _query_view(query)
-    if query_view is None:
+    task_score = _task_center_similarity(a, query, cfg, task_anchors)
+    tech_score = _tech_center_similarity(a, center, cfg)
+    if task_score is None and tech_score is None:
         return 0.0
-    return clamp(_text_tech_similarity(a, query_view, cfg))
+    if task_score is None:
+        return clamp(tech_score)
+    if tech_score is None:
+        return clamp(task_score)
+    total = cfg.task_center_weight + cfg.tech_center_weight
+    if total <= 0:
+        return 0.0
+    fused = (cfg.task_center_weight * task_score
+             + cfg.tech_center_weight * tech_score) / total
+    return clamp(fused)
 
 
 def combined_proximity(a: Any, b: Any, center: Any = None, query: Any = None, *,
+                       task_anchors: Iterable[Any] | None = None,
                        config: UserCenterConfig | None = None) -> float:
     """四维加权接近度 ∈ [0, 1]（按权重和归一化；权重全 0 返回 0.0）。"""
     cfg = _resolve_config(config, center)
@@ -392,7 +443,9 @@ def combined_proximity(a: Any, b: Any, center: Any = None, query: Any = None, *,
     score = (cfg.w_text * text_proximity(a, b, config=cfg)
              + cfg.w_tech * tech_proximity(a, b, config=cfg)
              + cfg.w_event * event_proximity(a, b, config=cfg)
-             + cfg.w_center * user_center_proximity(a, query=query, center=center, config=cfg))
+             + cfg.w_center * user_center_proximity(
+                 a, query=query, center=center,
+                 task_anchors=task_anchors, config=cfg))
     return clamp(score / sum(weights))
 
 
@@ -455,7 +508,8 @@ class MemoryChain:
 
 
 def build_memory_chain(seed: Any = None, candidates: Iterable[Any] = (), center: Any = None,
-                       query: Any = None, config: UserCenterConfig | None = None) -> MemoryChain:
+                       query: Any = None, task_anchors: Iterable[Any] | None = None,
+                       config: UserCenterConfig | None = None) -> MemoryChain:
     """以 seed（或用户中心 / query）起步，逐步扩展记忆链直到停止。
 
     停止条件（按检查优先级）：
@@ -465,8 +519,10 @@ def build_memory_chain(seed: Any = None, candidates: Iterable[Any] = (), center:
     3. 节点数（含种子）达到 ``max_chain_length``；
     4. 候选耗尽（正常收敛）。
 
-    完全确定：候选按传入顺序遍历，同分取前者；不使用随机数与时钟。空候选、
-    空中心、无 embedding 均能运行（逐维降级）。
+    第 4 维使用"本次任务中心 85% + 长期技术中心 15%"的融合分（用户确认
+    2026-11-04）：每次任务只调用一次记忆，因此本次任务为主；``task_anchors``
+    可传入本次任务内的一次性记忆。完全确定：候选按传入顺序遍历，同分取前者；
+    不使用随机数与时钟。空候选、空中心、无 embedding 均能运行（逐维降级）。
     """
     cfg = _resolve_config(config, center)
     chain = MemoryChain(seed=seed, stop_reason=STOP_CANDIDATES_EXHAUSTED, config=cfg)
@@ -482,7 +538,7 @@ def build_memory_chain(seed: Any = None, candidates: Iterable[Any] = (), center:
         if not remaining:
             chain.stop_reason = STOP_CANDIDATES_EXHAUSTED
             break
-        index, best = _pick_candidate(remaining, current, center, query, cfg)
+        index, best = _pick_candidate(remaining, current, center, query, task_anchors, cfg)
         link_score = best["text"] if cfg.chain_gate == "text" else best["combined"]
         if link_score < cfg.chain_similarity_threshold:
             chain.stop_reason = STOP_SIMILARITY_BELOW_THRESHOLD
@@ -690,6 +746,7 @@ def _dedupe_candidates(candidates: Iterable[Any], exclude: str = "") -> list[Any
 
 
 def _score_link(anchor: Any, current: Any, center: Any, query: Any,
+                task_anchors: Iterable[Any] | None,
                 cfg: UserCenterConfig) -> dict[str, float]:
     if current is None:
         text = tech = event = 0.0
@@ -697,7 +754,8 @@ def _score_link(anchor: Any, current: Any, center: Any, query: Any,
         text = text_proximity(anchor, current, config=cfg)
         tech = tech_proximity(anchor, current, config=cfg)
         event = event_proximity(anchor, current, config=cfg)
-    center_score = user_center_proximity(anchor, query=query, center=center, config=cfg)
+    center_score = user_center_proximity(
+        anchor, query=query, center=center, task_anchors=task_anchors, config=cfg)
     denominator = cfg.w_text + cfg.w_tech + cfg.w_event + cfg.w_center
     combined = clamp((cfg.w_text * text + cfg.w_tech * tech
                       + cfg.w_event * event + cfg.w_center * center_score) / denominator
@@ -707,11 +765,12 @@ def _score_link(anchor: Any, current: Any, center: Any, query: Any,
 
 
 def _pick_candidate(remaining: list[Any], current: Any, center: Any, query: Any,
+                    task_anchors: Iterable[Any] | None,
                     cfg: UserCenterConfig) -> tuple[int, dict[str, float]]:
     best_index = 0
-    best_scores = _score_link(remaining[0], current, center, query, cfg)
+    best_scores = _score_link(remaining[0], current, center, query, task_anchors, cfg)
     for index in range(1, len(remaining)):
-        scores = _score_link(remaining[index], current, center, query, cfg)
+        scores = _score_link(remaining[index], current, center, query, task_anchors, cfg)
         if (scores["combined"], scores["text"]) > (best_scores["combined"], best_scores["text"]):
             best_index, best_scores = index, scores
     return best_index, best_scores

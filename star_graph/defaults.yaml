@@ -1032,6 +1032,9 @@ user_center:
     tech: 0.25                     # 2. 相关技术接近度
     event: 0.15                    # 3. 相关事件接近度
     center: 0.20                   # 4. 与用户中心接近度（技术中心 / 本次回复中心）
+  center_split:                     # 第 4 维内部：本次任务中心 vs 长期技术中心（用户确认 2026-11-04）
+    task_weight: 0.85               # 本次任务/回复中心：记忆每次任务只调用一次，故为主
+    tech_weight: 0.15               # 长期技术中心：常用技术/偏好，为辅
   thresholds:
     chain_similarity: 0.70         # 相邻记忆继续成链的门槛（综合分或文本分，见 chain_gate）
     stop_center: 0.35              # x：与用户当前任务（第 4 维）关联度低于该值即停止扩展
