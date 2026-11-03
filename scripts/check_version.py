@@ -2,7 +2,8 @@
 """Version consistency check for the four authoritative version sources.
 
 All must match pyproject.toml [project].version:
-pyproject.toml, star_graph/__init__.py, nwc/__init__.py, README.md badge.
+pyproject.toml ([project] section only), star_graph/__init__.py,
+nwc/__init__.py, README.md version badge.
 
 TODO(#14): star_graph/defaults.yaml (1.3.5) and the server modules
 (nwc/api/server.py, star_graph/contrib/mcp_server.py, both 1.4.0) are known
@@ -18,26 +19,69 @@ import re
 import sys
 from pathlib import Path
 
-SOURCES = (
-    ("pyproject.toml", re.compile(r'(?m)^version\s*=\s*"([^"]+)"')),
-    ("star_graph/__init__.py", re.compile(r'(?m)^__version__\s*=\s*["\']([^"\']+)["\']')),
-    ("nwc/__init__.py", re.compile(r'(?m)^__version__\s*=\s*["\']([^"\']+)["\']')),
-    ("README.md", re.compile(r"badge/version-([0-9]+\.[0-9]+(?:\.[0-9]+)*)")),
+MIN_PYTHON = (3, 11)
+if sys.version_info < MIN_PYTHON:
+    print(
+        f"ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; "
+        f"found {sys.version.split()[0]}.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+PROJECT_HEADER = re.compile(r"(?m)^\[project\]\s*$")
+NEXT_TABLE = re.compile(r"(?m)^\[")
+PROJECT_VERSION = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+INIT_VERSION = re.compile(r'(?m)^__version__\s*=\s*["\']([^"\']+)["\']')
+# Accept both the raw badge path and the full shields.io URL, and let the badge
+# style/colour suffix vary (`-blue`, `-orange?style=flat-square`, ...).
+README_VERSION = re.compile(
+    r"(?:badge/version-|img\.shields\.io/badge/version-)"
+    r"([0-9]+\.[0-9]+(?:\.[0-9]+)*)"
 )
 REFERENCE = "pyproject.toml"
 
 
-def read_version(root: Path, relative: str, pattern: re.Pattern[str]) -> tuple[str | None, str]:
+def project_version(text: str, relative: str) -> tuple[str | None, str]:
+    """Extract `[project].version`, never matching version keys in other tables."""
+    header = PROJECT_HEADER.search(text)
+    if not header:
+        return None, f"no [project] section in {relative}"
+    section = text[header.end():]
+    end = NEXT_TABLE.search(section)
+    if end:
+        section = section[: end.start()]
+    match = PROJECT_VERSION.search(section)
+    if not match:
+        return None, f"no version line in the [project] section of {relative}"
+    line = text[: header.end() + match.start()].count("\n") + 1
+    return match.group(1), f"{relative}:{line} (in [project])"
+
+
+def regex_version(pattern: re.Pattern[str]):
+    def extract(text: str, relative: str) -> tuple[str | None, str]:
+        match = pattern.search(text)
+        if not match:
+            return None, f"no version match in {relative} (pattern: {pattern.pattern})"
+        line = text[: match.start()].count("\n") + 1
+        return match.group(1), f"{relative}:{line}"
+    return extract
+
+
+SOURCES = (
+    ("pyproject.toml", project_version),
+    ("star_graph/__init__.py", regex_version(INIT_VERSION)),
+    ("nwc/__init__.py", regex_version(INIT_VERSION)),
+    ("README.md", regex_version(README_VERSION)),
+)
+
+
+def read_version(root: Path, relative: str, extractor) -> tuple[str | None, str]:
     path = root / relative
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         return None, f"cannot read {path}: {exc}"
-    match = pattern.search(text)
-    if not match:
-        return None, f"no version match in {relative} (pattern: {pattern.pattern})"
-    line = text[: match.start()].count("\n") + 1
-    return match.group(1), f"{relative}:{line}"
+    return extractor(text, relative)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,18 +95,18 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.root).resolve()
     results: list[tuple[str, str | None, str]] = []
-    for relative, pattern in SOURCES:
-        version, where = read_version(root, relative, pattern)
+    for relative, extractor in SOURCES:
+        version, where = read_version(root, relative, extractor)
         results.append((relative, version, where))
 
     expected = next((version for name, version, _ in results if name == REFERENCE), None)
     if expected is None:
-        print("ERROR: cannot determine reference version from pyproject.toml", file=sys.stderr)
+        print("ERROR: cannot determine reference version from pyproject.toml [project]", file=sys.stderr)
         for name, _, where in results:
             print(f"  {name}: {where}", file=sys.stderr)
         return 2
 
-    print(f"reference: {REFERENCE} -> {expected}")
+    print(f"reference: {REFERENCE} [project] -> {expected}")
     failures = 0
     for name, version, where in results:
         source = where if args.verbose else name

@@ -20,6 +20,15 @@ import sys
 import tomllib
 from pathlib import Path
 
+MIN_PYTHON = (3, 11)
+if sys.version_info < MIN_PYTHON:
+    print(
+        f"ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; "
+        f"found {sys.version.split()[0]}.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
 TEXT_FORMATS = {".toml", ".json"}
 BASE_CANDIDATES = ("origin/main", "HEAD~1")
 

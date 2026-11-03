@@ -16,6 +16,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+MIN_PYTHON = (3, 11)
+if sys.version_info < MIN_PYTHON:
+    print(
+        f"ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; "
+        f"found {sys.version.split()[0]}.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
 MAX_LINES = 1000
 DEFAULT_ALLOWLIST = "scripts/ci/line_budget_allowlist.txt"
 
@@ -68,9 +77,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     allowlist = read_allowlist(root / args.allowlist)
+    sizes = {name: count_lines(root / name) for name in files}
     over = sorted(
-        ((name, count_lines(root / name)) for name in files
-         if count_lines(root / name) > args.max_lines),
+        ((name, lines) for name, lines in sizes.items() if lines > args.max_lines),
         key=lambda item: -item[1],
     )
     violations = [item for item in over if item[0] not in allowlist]
