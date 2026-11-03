@@ -83,6 +83,6 @@ bash scripts/smoke_test.sh
 
 ## 6. 迁移状态、清理与禁止事项
 
-- 周度分支清理工作流由 **Issue #12** 承接（脚本 `scripts/cleanup_branches.sh` + 定时工作流）；本文不描述尚未落地的清理时间表，以 Issue #12 的验收为准。
+- 周度分支清理已由 `.github/workflows/branch-cleanup.yml` + `scripts/cleanup_branches.sh` 落地（每周一 03:00 UTC 定时 + 手动 dispatch，只 `--execute` 清理已合并分支，不构建、不安装依赖）；规则与用法见 [BRANCH_POLICY.md](BRANCH_POLICY.md) §2–§3。
 - 禁止：在 PR 工作流中新增 `pip install`、`python -m build`、全量 `pytest`；用 `continue-on-error` 掩盖失败；把 secrets 暴露给 `pull_request` 工作流。
 - 新增检查项必须：先有脚本 → 再进工作流 → 同步更新本文档表格与分支保护的必需检查（同一个 PR 内完成）；CI 因基础设施失败时新建 Issue 记录，不要把失败常态化。

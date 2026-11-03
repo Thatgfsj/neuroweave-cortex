@@ -1,0 +1,61 @@
+name: Branch cleanup
+
+# 周度分支治理（Issue #12）：统计活跃分支（上限 30），删除已合并分支与对应
+# worktree。只在 schedule / 手动触发时运行，不在 pull_request 上触发，不做构建。
+# 脚本规则与退出码见 scripts/cleanup_branches.sh --help、docs/engineering/BRANCH_POLICY.md。
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # 删除已合并 PR 的 head 分支（git push origin --delete）
+  pull-requests: read # 读取 merged / open PR 判断可删性
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Cleanup merged branches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + all branches)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cleanup merged branches + Step Summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -o pipefail
+
+          {
+            echo "## 周度分支清理（活跃分支上限 30）"
+            echo
+            echo '```text'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          set +e
+          bash scripts/cleanup_branches.sh --execute 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo '```'
+            echo
+            if [ "$status" -ne 0 ]; then
+              echo "**结果：失败** — 清理后活跃分支仍超过上限，或删除操作出错，需人工处理。"
+            else
+              echo "**结果：通过** — 活跃分支在上限内。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::清理后活跃分支仍超过 30 或清理失败；请人工关闭/合并长期 PR、删除已合并分支或回收不用的 worktree。"
+          fi
+          exit "$status"
