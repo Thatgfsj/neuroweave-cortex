@@ -8,7 +8,7 @@
 - [ ] 版本号已 +0.0.1（本次 `1.4.2` → `1.4.3`），且 `star_graph/_version.py` 为唯一事实源
 - [ ] 所有副本已同步（`pyproject.toml`、`star_graph/__init__.py`、`star_graph/defaults.yaml`、`star_graph/contrib/mcp_server.py`、README 徽章）
 - [ ] `python scripts/check_version.py` 通过
-- [ ] 发布说明已整理：按 `feat` / `fix` / `docs` / `ci` / `chore` 分组，且与 `git log` 对得上
+- [ ] 变更日志（Release Notes）已整理：按 `feat` / `fix` / `docs` / `ci` / `chore` 分组，且与 `git log` 对得上
 - [ ] 破坏性变更已显式标注（若有，说明迁移方式）
 
 ## 2. 构建
