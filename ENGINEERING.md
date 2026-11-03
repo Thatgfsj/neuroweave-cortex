@@ -23,7 +23,7 @@
 
 - 口径：**代码文件**的 additions + deletions 合计 <1000 行；文档、数据文件不计入。计入的源码扩展名清单与 `scripts/ci/check_pr.py` 的 `CODE_EXTS` 完全一致（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md) §2）。
 - 超出必须由 Lead 审核并添加 `size/exception` 标签，且在 PR 描述中写明拆分计划与理由。
-- 单文件同样不得超过 1000 行；4 个存量超限文件在拆分完成前进入 ratchet allowlist，拆分后必须移除（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md)、[CI_POLICY.md](docs/engineering/CI_POLICY.md)）。
+- 单文件同样不得超过 1000 行；4 个存量超限文件在拆分完成前进入 ratchet allowlist，拆分完成后由 #24 统一清理条目（见 [PR_POLICY.md](docs/engineering/PR_POLICY.md)、[CI_POLICY.md](docs/engineering/CI_POLICY.md)）。
 
 ### R4 PR CI 只做静态检查
 
@@ -47,9 +47,10 @@
 
 ### R8 版本号每次迭代 +0.0.1
 
-- SemVer；每次迭代 PATCH +1（例如 `1.4.2` → `1.4.3`，当前值以 `pyproject.toml` 为准）。
-- **目标态（#5 落地中）**：单一版本源 `star_graph/_version.py`；**当前事实基准**：`pyproject.toml` 的 `[project].version`，由 `scripts/check_version.py` 校验 `star_graph/__init__.py`、`nwc/__init__.py`、README 徽章与之一致（`star_graph/_version.py` 尚不存在）。
-- `star_graph/defaults.yaml` 与 server 模块的版本漂移由 #14 收敛后才纳入校验；功能 PR 不得顺手改版本，发布单独走一个 Issue/PR。见 [VERSIONING.md](docs/engineering/VERSIONING.md)。
+- SemVer；每次迭代 PATCH +1（例如 `1.4.2` → `1.4.3`，当前值以 `star_graph/_version.py` 为准）。
+- **唯一版本源：`star_graph/_version.py`** 的 `__version__`（零 import）；`pyproject.toml` 使用 `dynamic = ["version"]` + `[tool.setuptools.dynamic] version = {attr = "star_graph._version.__version__"}`，不再有静态 `[project].version`。
+- `scripts/check_version.py` 静态校验 **16 项**：源文件本身与包内 `__version__` 唯一性、pyproject dynamic 接线、`star_graph/__init__.py` 与 `nwc/__init__.py` 的导入、5 处文档镜像（README 徽章 / README_CN 首行 / plan.md 顶部 / ROADMAP 现状标题 / ROADMAP 当前版本）、`defaults.yaml` 无 `version:`、4 个 server 模块从 `_version` 导入、`verify.yml` 的 tag 校验读 `_version.py`。
+- 功能 PR 不得顺手改版本；版本只能通过 `python scripts/bump_version.py` 变更，发布单独走一个 Issue/PR。见 [VERSIONING.md](docs/engineering/VERSIONING.md)。
 
 ### R9 文档冲突以权威文档为准
 
