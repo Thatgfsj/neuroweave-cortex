@@ -245,6 +245,7 @@ def _check_verify_workflow(root: Path) -> Result:
 
 def _check_unique_source(root: Path) -> Result:
     offenders: list[str] = []
+    unreadable: list[str] = []
     for package in PACKAGES:
         for path in sorted((root / package).rglob("*.py")):
             if "__pycache__" in path.parts:
@@ -254,11 +255,18 @@ def _check_unique_source(root: Path) -> Result:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
-            except OSError:
+            except OSError as exc:
+                unreadable.append(f"{relative}: {exc}")
                 continue
             for lineno, line in enumerate(text.splitlines(), start=1):
                 if re.match(r"^__version__\s*=", line):
                     offenders.append(f"{relative}:{lineno}")
+    if unreadable:
+        return Result(
+            "unique version source",
+            False,
+            "unreadable package files (cannot prove single source): " + ", ".join(unreadable),
+        )
     if offenders:
         return Result(
             "unique version source",

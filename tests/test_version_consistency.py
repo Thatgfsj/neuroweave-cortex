@@ -25,7 +25,9 @@ import star_graph
 from star_graph import _version
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED = "1.4.3"
+# Never hardcode the release number here: bump_version.py only edits the
+# single source + documentation mirrors, so a literal would break the next bump.
+EXPECTED = _version.__version__
 SEMVER = r"\d+\.\d+\.\d+"
 
 SERVER_MODULES = (
