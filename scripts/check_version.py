@@ -20,6 +20,10 @@ Checked:
 5. No legacy hardcoded versions: ``star_graph/defaults.yaml`` has no top-level
    ``version:`` key and the HTTP/MCP server modules import ``__version__``
    instead of embedding a quoted ``x.y.z`` literal.
+6. The release workflow (``.github/workflows/verify.yml``) reads the tag
+   version from ``star_graph/_version.py`` — never from a static
+   ``[project].version`` that no longer exists — compares the tag on ``v*``
+   pushes, and still reports the version on ``workflow_dispatch``.
 
 This module uses only the standard library and never imports ``star_graph``
 (``pyproject.toml`` is parsed with ``tomllib``; sources are parsed with
@@ -43,6 +47,7 @@ SEMVER = r"\d+\.\d+\.\d+"
 
 VERSION_MODULE = "star_graph/_version.py"
 PYPROJECT = "pyproject.toml"
+VERIFY_WORKFLOW = ".github/workflows/verify.yml"
 EXPECTED_ATTR = "star_graph._version.__version__"
 
 README_BADGE = re.compile(rf"badge/version-({SEMVER})")
@@ -214,6 +219,30 @@ def _check_server(root: Path, relative: str) -> Result:
     return Result(relative, True, f"{relative}:{_line_of(text, match.start())} imports _version.__version__")
 
 
+def _check_verify_workflow(root: Path) -> Result:
+    """The release workflow must take the tag version from the single source.
+
+    ``pyproject.toml`` is dynamic, so ``[project].version`` no longer exists;
+    the old release job read it and raised ``KeyError`` on every ``v*`` tag.
+    """
+    try:
+        text = _read(root, VERIFY_WORKFLOW)
+    except MissingSourceError as exc:
+        return Result(VERIFY_WORKFLOW, False, str(exc))
+    problems: list[str] = []
+    if not re.search(r"star_graph[./]_version", text):
+        problems.append("does not read star_graph/_version.py")
+    if "tomllib" in text or re.search(r"""\[["']version["']\]""", text):
+        problems.append("parses a static [project].version from pyproject.toml (the version is dynamic)")
+    if "refs/tags/" not in text or "github.ref_name" not in text:
+        problems.append("does not compare the pushed tag against the source version")
+    if re.search(r"if:\s*startsWith\(github\.ref", text):
+        problems.append("tag step is gated to tag refs, so workflow_dispatch never reports the version")
+    if problems:
+        return Result(VERIFY_WORKFLOW, False, "; ".join(problems))
+    return Result(VERIFY_WORKFLOW, True, "tag check reads star_graph/_version.py")
+
+
 def _check_unique_source(root: Path) -> Result:
     offenders: list[str] = []
     for package in PACKAGES:
@@ -262,6 +291,7 @@ def run_checks(root: Path) -> list[Result]:
     results.append(_check_defaults_yaml(root))
     for relative in SERVER_MODULES:
         results.append(_check_server(root, relative))
+    results.append(_check_verify_workflow(root))
     return results
 
 
