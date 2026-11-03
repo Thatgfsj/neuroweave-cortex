@@ -546,6 +546,13 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "ObservationResult":       ("star_graph.observatory", "ObservationResult"),
     "GravityWell":             ("star_graph.gravity_well", "GravityWell"),
     "GravityWellManager":      ("star_graph.gravity_well", "GravityWellManager"),
+
+    # user-center memory chain (#11) — reference implementation only; not on the
+    # default retrieval path (see docs/spec/user-center-memory-chain.md)
+    "UserCenter":              ("star_graph.user_center", "UserCenter"),
+    "UserCenterConfig":        ("star_graph.user_center", "UserCenterConfig"),
+    "MemoryChain":             ("star_graph.user_center", "MemoryChain"),
+    "build_memory_chain":      ("star_graph.user_center", "build_memory_chain"),
 }
 
 
