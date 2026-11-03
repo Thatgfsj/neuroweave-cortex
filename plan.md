@@ -281,11 +281,11 @@ final_score =
 
 ### 务实的前提
 
-以上定位和架构是 NWC 的长期愿景。但在追求这个愿景之前，必须正视当前工程基础的差距。下文基于外部代码审查和基准数据分析，是 v1.1.0 时点的真实状态评估和重建计划（工程现状已推进至 v1.4.1，见第六节版本历史）。
+以上定位和架构是 NWC 的长期愿景。但在追求这个愿景之前，必须正视当前工程基础的差距。下文基于外部代码审查和基准数据分析，是 v1.1.0 时点的真实状态评估和重建计划（工程现状已推进至 v1.4.3，见第六节版本历史）。
 
-### 1.0 当前代码库状态
+### 1.0 代码库状态（v1.1.0 快照）
 
-- **134 modules** (112 star_graph + 20 nwc + 2 new: observatory + gravity_well)
+- **200+ modules**（现行口径：`python scripts/repo_stats.py`；v1.1.0 时点为 134 modules = 112 star_graph + 20 nwc + 2 new: observatory + gravity_well）
 - v1.2.12 — 观测者依赖的检索范式
 - **新核心**: `observatory.py` (天文台亮度引擎) + `gravity_well.py` (引力井惯性)
 - **类人记忆增强**: source_attribution, event-anchored timeline, temporal query detection
@@ -543,7 +543,9 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v1.4.3** | **2026-11** | **工程化治理: 可复用 PR CI, 工程文档, 分支保护, 版本单一源, 超限文件拆分** |
+| **v1.4.3** | **2026-11** | **工程化治理: 可复用 PR CI, 工程文档, 分支保护, 版本单一源, 4 个超限文件拆分, qdrant 未安装 client 崩溃修复, 用户中心记忆链规范** |
+| **v1.4.2** | **2026-06** | **Never-Delete 一致性、稳定性与性能大修** |
+| **v1.4.1** | **2026-06** | **Memory Revision 实验（revision experiments）** |
 | **v1.4.0** | **2026-06** | **全 Phase 完成: 3D衰减引擎, Goal-Aware检索, Context Compression, Schema增强, Savings Effect, theory.md+formalism.md, LongBench+Baseline框架, Scalability测试** |
 | **v1.3.6** | **2026-06** | **Unified Graph Layer (supports + 类型分类), MemoryNode alias, QdrantStorage** |
 | **v1.3.5** | **2026-06** | **LoCoMo 44.2% (NWC HybridFusion), 消融+统计+复杂度, Activation Graph, Never-Delete, nwc benchmark CLI** |

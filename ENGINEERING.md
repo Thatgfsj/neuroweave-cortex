@@ -54,9 +54,8 @@
 
 ### R9 文档冲突以权威文档为准
 
-- 以 `README.md` 与 `docs/spec/user-center-memory-chain.md`（用户中心记忆链路规范）为权威；二者或其它文档冲突时**以 README 为准**。该 spec 尚未合入仓库，**合入前 README 是唯一权威**，其它文档不得引用不存在的 spec 章节。
-- 禁止硬编码易过期计数（模块数、测试数、行数）；必须给出统计口径与脚本/命令来源。
-- 见 [DOC_POLICY.md](docs/engineering/DOC_POLICY.md)。
+- 以 `README.md` 与 [docs/spec/user-center-memory-chain.md](docs/spec/user-center-memory-chain.md)（用户中心记忆链路规范）为权威；该 spec 已合入仓库，与 README 同为权威（第 2 层），二者或其它文档冲突时**以 README 为准**。
+- 禁止硬编码易过期计数（模块数、测试数、行数）；必须给出统计口径与脚本/命令来源。全仓统一口径为 `python scripts/repo_stats.py`（见 [DOC_POLICY.md](docs/engineering/DOC_POLICY.md)）。
 
 ### R10 文档与代码同 PR 更新
 
@@ -87,6 +86,8 @@
 | [CI_POLICY.md](docs/engineering/CI_POLICY.md) | 静态 CI / 最终验证分工与脚本映射 |
 | [VERSIONING.md](docs/engineering/VERSIONING.md) | SemVer、版本源、校验 |
 | [DOC_POLICY.md](docs/engineering/DOC_POLICY.md) | 文档权威顺序与防过期规则 |
+| [docs/spec/user-center-memory-chain.md](docs/spec/user-center-memory-chain.md) | 用户中心记忆链规范（与 README 同为权威） |
+| [scripts/repo_stats.py](scripts/repo_stats.py) | 全仓统计口径：模块/测试/行数/版本 |
 | [REVIEW_CHECKLIST.md](docs/engineering/REVIEW_CHECKLIST.md) | 双评审清单 |
 | [RELEASE_CHECKLIST.md](docs/engineering/RELEASE_CHECKLIST.md) | 发布前检查 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献者入口（最短路径） |

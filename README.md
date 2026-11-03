@@ -165,7 +165,7 @@ mgr.save("agent_memory.db")
 
 | Command | Includes |
 |---------|---------|
-| `pip install NWcortex` | Core engine (138 modules) |
+| `pip install NWcortex` | Core engine (200+ modules) |
 | `pip install "NWcortex[embeddings]"` | + sentence-transformers |
 | `pip install "NWcortex[mcp]"` | + MCP Server |
 | `pip install "NWcortex[all]"` | Everything |
@@ -178,6 +178,37 @@ mgr.save("agent_memory.db")
 pip install pytest pytest-cov
 pytest tests/ -v
 ```
+
+The suite holds **2000+ tests** in **77+ test files**. Every count quoted in the
+docs (modules, test files, test functions, lines) comes from
+`python scripts/repo_stats.py`, the single source of truth for statistics.
+
+---
+
+## 🛠️ Engineering & Development
+
+NWC is developed Issue-first: branch → PR → static CI → dual review → squash.
+Start here:
+
+| Document | What it covers |
+|----------|----------------|
+| [ENGINEERING.md](ENGINEERING.md) | Engineering constitution: hard rules R1–R10 |
+| [docs/engineering/WORKFLOW.md](docs/engineering/WORKFLOW.md) | Issue → branch → PR → review → squash flow |
+| [docs/engineering/PR_POLICY.md](docs/engineering/PR_POLICY.md) | PR scope, code-size budget, `size/exception` |
+| [docs/engineering/CI_POLICY.md](docs/engineering/CI_POLICY.md) | Static PR checks vs. final verify |
+| [docs/spec/user-center-memory-chain.md](docs/spec/user-center-memory-chain.md) | User-Center Memory Chain spec (authoritative alongside this README) |
+
+Local pre-push checks:
+
+```bash
+python scripts/check_version.py
+python scripts/check_line_budget.py
+python scripts/ci/check_syntax.py
+python scripts/repo_stats.py
+```
+
+**Documentation conflicts:** `README.md` wins; counts must cite
+`scripts/repo_stats.py` rather than being hardcoded.
 
 ---
 
