@@ -300,6 +300,18 @@ count_active() {
   list_active_branches | wc -l | tr -d ' '
 }
 
+# 活跃分支数，扣除本次计划删除的本地/远程分支（dry-run 预检用）。
+projected_active() {
+  local deletions
+  deletions="$( { printf '%s\n' "${LOCAL_DELETE[@]}" "${REMOTE_DELETE[@]}"; } \
+    | sed '/^$/d' | sort -u || true )"
+  if [[ -n "$deletions" ]]; then
+    list_active_branches | grep -vxF -f <(printf '%s\n' "$deletions") | wc -l | tr -d ' '
+  else
+    count_active
+  fi
+}
+
 same_path() {
   local a b
   a="$(realpath -m -- "$1" 2>/dev/null || printf '%s' "$1")"
@@ -565,11 +577,19 @@ main() {
 
   local_count="$(count_lines "$LOCAL_BRANCHES")"
   remote_count="$(count_lines "$REMOTE_BRANCHES")"
-  after="$(count_active)"
+  if [[ "$MODE" == "execute" ]]; then
+    after="$(count_active)"
+  else
+    after="$(projected_active)"
+  fi
 
   say "结果"
   log "清理前：活跃分支 $before"
-  log "清理后：本地 $local_count / 远程 $remote_count / 活跃（去重） $after / 上限 $LIMIT"
+  if [[ "$MODE" == "execute" ]]; then
+    log "清理后：本地 $local_count / 远程 $remote_count / 活跃（去重） $after / 上限 $LIMIT"
+  else
+    log "预计清理后（dry-run）：本地 $local_count / 远程 $remote_count / 活跃（去重） $after / 上限 $LIMIT"
+  fi
 
   if (( rc != 0 )); then
     warn "部分删除操作失败，请按上面的告警人工处理。"

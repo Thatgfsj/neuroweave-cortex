@@ -45,7 +45,7 @@ bash scripts/cleanup_branches.sh --execute --force  # 清理后仍超限时不�
 ```
 
   行为约定：
-  1. 统计本地 + 远程活跃分支（不含 `main`），输出清理前后计数；远程清单用 `git ls-remote --heads origin`。
+  1. 统计本地 + 远程活跃分支（不含 `main`），输出清理前计数与清理后/预计清理后计数（dry-run 会扣除计划删除项）；远程清单用 `git ls-remote --heads origin`。
   2. 本地：删除已合并进 `main`、不是当前分支、未被其它 worktree 占用的分支（`git branch --merged` 口径）。
   3. 远程：用 `gh pr list --state merged` 找出已合并 PR 的 head 分支并 `git push origin --delete`；跳过 `main`、仍有 open PR 的分支、受保护分支与 fork（跨仓库）分支。
   4. worktree：指向已合并分支、工作区干净、未 locked、不是当前/主 worktree 的登记会被 `git worktree remove --force` 移除，随后 `git worktree prune`。
