@@ -2,24 +2,28 @@
 
 > **历史文档**：内容停留在 v1.0.x 时期（112 模块、GHOST/DEAD 等旧术语），数值与术语以 README / plan.md 为准；现行架构为 6 状态生命周期 + 8 阶段睡眠（Never-Delete）。
 
-> Last updated: 2026-05-16 | **v1.0.0** | 1,989 tests passing | 64 commits
+> **统计口径**：本页除下方 `Repository Snapshot` 表外，模块数、测试数、行数均为 v1.0.x 历史快照，**不得作为现状引用**。现行计数一律以 `python scripts/repo_stats.py` 为准（README 已改用 "200+ modules / 2000+ tests" 等稳定表述）；本页与 [README.md](../README.md) 冲突时以 README 为准。
+
+> 历史页脚（v1.0.0，2026-05-16）：其中 `1,989 tests` 为当时数据；现行计数见 `python scripts/repo_stats.py`，版本见 `star_graph/_version.py`。
 
 ---
 
 ## Repository Snapshot
 
+> 下表已按现行口径更新（来源 `python scripts/repo_stats.py`）；本页其余章节仍是 v1.0.x 历史快照。
+
 | Metric | Value |
 |--------|-------|
-| **Version** | 1.0.0 |
-| **Production modules** | 78 Python files in `star_graph/` |
-| **Production code** | ~36,000 lines |
-| **Test files** | 33 files in `tests/` |
-| **Test code** | ~9,300 lines |
-| **Total tests** | **649** (all passing) |
-| **Total commits** | 62 |
+| **Version** | 1.4.3（`star_graph/_version.py`，单一版本源） |
+| **Production modules** | 200+ Python files in `star_graph/` + `nwc/` |
+| **Production code** | ~52,000 lines |
+| **Test files** | 70+ files in `tests/` |
+| **Test code** | ~20,000 lines |
+| **Total tests** | **2000+** |
+| **Total commits** | `git rev-list --count HEAD`（不硬编码） |
 | **License** | MIT |
 
-### Module Inventory (78 modules)
+### Module Inventory (historical v1.0.x tree; current count: `python scripts/repo_stats.py`)
 
 ```
 star_graph/
@@ -115,7 +119,7 @@ star_graph/
 ├── cli.py                   # CLI commands
 ├── mcp_server.py            # MCP server (optional)
 │
-└── tests/ (33 files, 649 tests)
+└── tests/ (v1.0.x snapshot: 33 files / 649 tests — current counts: scripts/repo_stats.py)
     ├── test_v08_modules.py          # Core module smoke tests
     ├── test_sleep_consolidation.py  # Sleep + rebuild + dynamic rewiring + temporal slice + thermal + edge traversal
     ├── test_memory_tier.py          # STM/MTM/LTM/Core tier API + promotion pipeline (16 tests)

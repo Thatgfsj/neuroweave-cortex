@@ -12,7 +12,7 @@
 | 6 | [docs/architecture.md](../architecture.md) | **历史快照**（v1.0.x 时期），已带"历史文档"横幅，不作为现状依据 |
 
 - 第 1、2 层互相冲突时：**以 README 为准**，并在 Issue 中记录待修一方。
-- 第 2 层文档尚未合入仓库时，README 是唯一权威，其它文档不得引用不存在的 spec 章节。
+- 第 2 层 spec（`docs/spec/user-center-memory-chain.md`）已随 PR #28 合入仓库，与 README 同为权威；合入前 README 曾是唯一权威。其它文档不得引用不存在的 spec 章节。
 - 第 4、5、6 层与上面冲突时，一律服从上层，并尽快修正或加横幅。
 
 ## 2. 禁止硬编码易过期计数

@@ -291,8 +291,8 @@ print(chain.to_dict())                      # JSON 友好，便于日志/回放
   纯 Python，无 ANN 依赖。
 - **持久化不在本版范围**：`MemoryChain.to_dict()` 可用于日志/回放；`UserCenter` 未提供
   `to_dict/from_dict`，避免在语义未定时固化存储格式。
-- **文档关系**：本 spec 合入后，[ENGINEERING.md](../../ENGINEERING.md) R9 中"该 spec 尚未
-  合入仓库"的表述需要一次文档 PR 更新；本 PR 按约束未改 `README.md` 与 `docs/engineering/`。
+- **文档关系**：本 spec 与 [README.md](../../README.md) 同为第 2 层权威（见
+  [ENGINEERING.md](../../ENGINEERING.md) R9 与 [DOC_POLICY.md](../engineering/DOC_POLICY.md) §1）。
 
 ## 7. 测试
 

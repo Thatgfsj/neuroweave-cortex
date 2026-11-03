@@ -15,7 +15,7 @@
 - **v1.4.0** — 3D 衰减引擎、Goal-Aware 检索、Context Compression、Schema 增强、Savings Effect、`docs/theory.md` + `docs/formalism.md`、LongBench + Baseline 框架、可扩展性测试
 - **v1.4.1** — Memory Revision 实验（revision experiments）
 - **v1.4.2** — Never-Delete 一致性、稳定性与性能大修
-- **v1.4.3** — 工程化治理：可复用 PR CI、工程文档、分支保护、版本单一源、超限文件拆分
+- **v1.4.3** — 工程化治理：可复用 PR CI、工程文档、分支保护、版本单一源、4 个超限文件拆分、qdrant 未安装 client 崩溃修复、用户中心记忆链规范
 
 **版本撞号说明**：本文件下方"路线图"里的 v1.2.0 / v1.3.0 / v1.4.0 / v1.5.0 是 v1.1.0 时的**计划编号**，与实际发布版本号撞号但内容不同。例如：
 

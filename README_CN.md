@@ -7,7 +7,7 @@ LLM 可以读取记忆。LLM 可以维护记忆（摘要、合并、归档）。
 但 LLM **不决定**检索路径。
 
 ```
-v1.4.3 | 138 模块 | 永不遗忘 | 认知记忆引擎
+v1.4.3 | 200+ 模块 | 永不遗忘 | 认知记忆引擎
 ```
 
 ---
@@ -87,10 +87,46 @@ mgr.save("agent_memory.db")
 
 | 命令 | 包含 |
 |------|------|
-| `pip install NWcortex` | 核心引擎（138 模块） |
+| `pip install NWcortex` | 核心引擎（200+ 模块） |
 | `pip install "NWcortex[embeddings]"` | + sentence-transformers |
 | `pip install "NWcortex[mcp]"` | + MCP 服务 |
 | `pip install "NWcortex[all]"` | 全部 |
+
+---
+
+## 测试
+
+```bash
+pip install pytest pytest-cov
+pytest tests/ -v
+```
+
+当前测试套件为 **2000+ 测试**、**70+ 测试文件**。文档中引用的所有计数（模块数、测试文件数、测试函数数、代码行数）统一以 `python scripts/repo_stats.py` 为统计口径，不再硬编码。
+
+---
+
+## 工程治理与开发
+
+NWC 采用 Issue-first 流程：分支 → PR → 静态 CI → 双评审 → squash 合并。入口文档：
+
+| 文档 | 内容 |
+|------|------|
+| [ENGINEERING.md](ENGINEERING.md) | 工程宪法：硬规则 R1–R10 |
+| [docs/engineering/WORKFLOW.md](docs/engineering/WORKFLOW.md) | Issue → 分支 → PR → 评审 → 合并全流程 |
+| [docs/engineering/PR_POLICY.md](docs/engineering/PR_POLICY.md) | PR 范围、代码量口径、`size/exception` |
+| [docs/engineering/CI_POLICY.md](docs/engineering/CI_POLICY.md) | 静态 PR 检查与最终验证分工 |
+| [docs/spec/user-center-memory-chain.md](docs/spec/user-center-memory-chain.md) | 用户中心记忆链规范（与 README 同为权威） |
+
+提交前本地自检：
+
+```bash
+python scripts/check_version.py
+python scripts/check_line_budget.py
+python scripts/ci/check_syntax.py
+python scripts/repo_stats.py
+```
+
+**文档冲突时以 `README.md` 为准**；计数必须引用 `scripts/repo_stats.py`，不得硬编码。
 
 ---
 
