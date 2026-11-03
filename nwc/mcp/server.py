@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from star_graph._version import __version__
+
 
 class McpServer:
     """NWC MCP Server — stdio-based, Model Context Protocol compatible.
@@ -256,7 +258,7 @@ class McpServer:
                 "jsonrpc": "2.0", "id": req_id,
                 "result": {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "neuroweave-cortex", "version": "1.4.0"},
+                    "serverInfo": {"name": "neuroweave-cortex", "version": __version__},
                     "capabilities": {"tools": {}},
                 },
             }

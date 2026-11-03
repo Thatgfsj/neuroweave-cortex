@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from nwc.core.cortex import Cortex
+from star_graph._version import __version__
 
 cortex: Optional[Cortex] = None
 
@@ -31,7 +32,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NeuroWeave Cortex API",
-    version="1.4.0",
+    version=__version__,
     description="Cognitive Runtime API — memory, context, and graph for LLM agents.",
     lifespan=lifespan,
 )

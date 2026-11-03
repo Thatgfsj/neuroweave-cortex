@@ -1,6 +1,6 @@
 # NeuroWeave Cortex (NWC) — Plan
 
-> 最后更新: 2026-09-11 | **v1.4.2** | 6-layer cognitive memory architecture
+> 最后更新: 2026-11-04 | **v1.4.3** | 6-layer cognitive memory architecture
 
 ---
 
@@ -543,6 +543,7 @@ P3（后续论文）    Multi-Agent Memory · Collective Memory · Cognitive Rea
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v1.4.3** | **2026-11** | **工程化治理: 可复用 PR CI, 工程文档, 分支保护, 版本单一源, 超限文件拆分** |
 | **v1.4.0** | **2026-06** | **全 Phase 完成: 3D衰减引擎, Goal-Aware检索, Context Compression, Schema增强, Savings Effect, theory.md+formalism.md, LongBench+Baseline框架, Scalability测试** |
 | **v1.3.6** | **2026-06** | **Unified Graph Layer (supports + 类型分类), MemoryNode alias, QdrantStorage** |
 | **v1.3.5** | **2026-06** | **LoCoMo 44.2% (NWC HybridFusion), 消融+统计+复杂度, Activation Graph, Never-Delete, nwc benchmark CLI** |

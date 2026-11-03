@@ -15,7 +15,7 @@ CLI:
     nwc recall "query"
 """
 
-__version__ = "1.4.2"
+from star_graph._version import __version__  # single source: star_graph/_version.py
 __all__ = ["Cortex", "RecallResult", "ContextFrame"]
 
 from nwc.core.cortex import Cortex, RecallResult, ContextFrame

@@ -44,6 +44,8 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from star_graph._version import __version__
+
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 
@@ -114,7 +116,7 @@ def _warmup_embedder():
 
 server = Server(
     "star-graph-memory",
-    version="1.4.0",
+    version=__version__,
     instructions="Cognitive memory runtime for AI agents. Remembers, forgets, "
                   "strengthens, connects, abstracts, and evolves memories across "
                   "conversations. Stores a persistent memory graph with sleep "

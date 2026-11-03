@@ -16,7 +16,7 @@ All imports are lazy via PEP 562 __getattr__ — modules load only on first acce
 
 from __future__ import annotations
 
-__version__ = "1.4.2"
+from ._version import __version__  # noqa: F401 — single source: star_graph/_version.py
 
 import sys
 from typing import Any
