@@ -66,6 +66,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "MemoryRuntime":           ("star_graph.cortex_api.runtime", "MemoryRuntime"),
     "ManagerStats":            ("star_graph.cortex_api.manager_stats", "ManagerStats"),
     "RetrievalPipeline":       ("star_graph.retrieval_engine.retrieval_pipeline", "RetrievalPipeline"),
+    "RetrievalCore":           ("star_graph.retrieval_engine.retrieval_core", "RetrievalCore"),
 
     # scheduler
     "CognitiveMemoryScheduler": ("star_graph.cortex_api.scheduler", "CognitiveMemoryScheduler"),
