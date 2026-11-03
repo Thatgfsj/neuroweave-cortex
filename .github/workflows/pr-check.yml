@@ -1,0 +1,46 @@
+name: Reusable PR Checks
+
+# Reusable, non-building PR checks. Called by ci.yml on pull_request, and
+# usable from any other workflow via `uses: ./.github/workflows/pr-check.yml`.
+# Hard rule: no install, no build, no pytest — only sources + stdlib.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number to inspect (defaults to the triggering PR).
+        required: false
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  checks:
+    name: PR checks (no build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR metadata & change size
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+        run: python3 scripts/ci/check_pr.py
+
+      - name: Version consistency
+        run: python3 scripts/check_version.py
+
+      - name: Line budget (<= 1000 lines per file)
+        run: python3 scripts/check_line_budget.py
+
+      - name: Syntax check (ast.parse, no imports)
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: python3 scripts/ci/check_syntax.py

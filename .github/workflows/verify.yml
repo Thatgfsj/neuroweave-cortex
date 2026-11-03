@@ -1,0 +1,37 @@
+name: Verify (build + smoke)
+
+# Final verification only: never triggered by pull_request events.
+# Run manually (Actions -> Verify -> Run workflow) or by pushing a v* tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: Build wheel + smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build pytest
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Install built wheel
+        run: python -m pip install dist/*.whl
+
+      - name: Smoke tests (wheel contents + README doctest + graph)
+        run: bash scripts/smoke_test.sh

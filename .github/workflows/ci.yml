@@ -1,67 +1,26 @@
 name: CI
 
+# Thin pull_request entry point. It delegates to the reusable pr-check.yml
+# workflow, which runs metadata/size/version/line-budget/syntax checks only.
+# Building and smoke tests live in verify.yml (workflow_dispatch + v* tags).
+
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -e .
-          pip install pytest Pillow
-
-      - name: Run tests
-        run: python -m pytest tests/ -q
-
-  version-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check version consistency
-        run: |
-          set -euo pipefail
-
-          PYPROJECT_VERSION=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
-          INIT_VERSION=$(grep -Po '(?<=^__version__ = ")[^"]+' star_graph/__init__.py)
-          YAML_VERSION=$(grep -Po '(?<=^version: ")[^"]+' star_graph/defaults.yaml)
-          MCP_VERSION=$(grep -m1 -Po '(?<=version=")[^"]+' star_graph/contrib/mcp_server.py)
-
-          echo "pyproject.toml:          $PYPROJECT_VERSION"
-          echo "star_graph/__init__.py:   $INIT_VERSION"
-          echo "star_graph/defaults.yaml: $YAML_VERSION"
-          echo "star_graph/mcp_server.py: $MCP_VERSION"
-
-          if [ "$PYPROJECT_VERSION" != "$INIT_VERSION" ]; then
-            echo "ERROR: pyproject.toml ($PYPROJECT_VERSION) != __init__.py ($INIT_VERSION)"
-            exit 1
-          fi
-
-          if [ "$PYPROJECT_VERSION" != "$YAML_VERSION" ]; then
-            echo "ERROR: pyproject.toml ($PYPROJECT_VERSION) != defaults.yaml ($YAML_VERSION)"
-            exit 1
-          fi
-
-          if [ "$PYPROJECT_VERSION" != "$MCP_VERSION" ]; then
-            echo "ERROR: pyproject.toml ($PYPROJECT_VERSION) != mcp_server.py ($MCP_VERSION)"
-            exit 1
-          fi
-
-          echo "✅ All version strings match: $PYPROJECT_VERSION"
+  pr-checks:
+    name: PR checks
+    uses: ./.github/workflows/pr-check.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
