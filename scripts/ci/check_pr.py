@@ -39,13 +39,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-MIN_PYTHON = (3, 11)
-if sys.version_info < MIN_PYTHON:
-    print(
-        f"ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; "
-        f"found {sys.version.split()[0]}.",
-        file=sys.stderr,
-    )
+if sys.version_info < (3, 11):
+    print(f"ERROR: Python 3.11+ required; found {sys.version.split()[0]}.", file=sys.stderr)
     sys.exit(2)
 
 API_ROOT = "https://api.github.com"
@@ -114,9 +109,8 @@ class GitHub:
         try:
             return json.loads(raw) if raw.strip() else None
         except json.JSONDecodeError as exc:
-            raise ApiError(
-                0, f"invalid JSON response for {path} (line {exc.lineno}: {exc.msg})"
-            ) from None
+            raise ApiError(0, f"invalid JSON response for {path} "
+                               f"(line {exc.lineno}: {exc.msg})") from None
 
     def paged(self, path: str, max_pages: int = MAX_PAGES) -> list:
         items: list = []
@@ -133,11 +127,8 @@ class GitHub:
             if len(batch) < 100:
                 return items
             page += 1
-        print(
-            f"::warning::{path}: pagination capped at {max_pages} pages; "
-            "change size may be undercounted.",
-            file=sys.stderr,
-        )
+        print(f"::warning::{path}: pagination capped at {max_pages} pages; "
+              "change size may be undercounted.", file=sys.stderr)
         return items
 
 
@@ -403,10 +394,8 @@ def self_test() -> int:
          {42: ({**issue_ok, "labels": [{"name": "question"}]}, None)}, False, False),
         ("missing issue (404)", pr("Closes #999"), small,
          {999: (None, "HTTP 404: Not Found")}, False, False),
-        ("fenced code is not a link", pr("Example:\n```markdown\nCloses #42\n```\n"),
-         small, {}, False, False),
-        ("HTML comment is not a link", pr("<!-- Closes #42 -->\nNo link here."),
-         small, {}, False, False),
+        ("fenced code is not a link", pr("Example:\n```markdown\nCloses #42\n```\n"), small, {}, False, False),
+        ("HTML comment is not a link", pr("<!-- Closes #42 -->\nNo link here."), small, {}, False, False),
         ("blockquote/inline code are not links",
          pr("> Closes #42\nInline `Closes #42` example."), small, {}, False, False),
         ("Refs alone does not satisfy linkage", pr("Refs #42"), small,
@@ -416,14 +405,12 @@ def self_test() -> int:
         ("999 code lines passes", pr("Closes #42"), under_limit,
          {42: (issue_ok, None)}, True, False),
         ("reference to a pull request", pr("Closes #42"), small,
-         {42: ({**issue_ok, "pull_request": {"url": "https://example.invalid"}}, None)},
-         False, False),
+         {42: ({**issue_ok, "pull_request": {"url": "https://example.invalid"}}, None)}, False, False),
         ("missing issue created_at warns but passes", pr("Closes #42"), small,
          {42: ({k: v for k, v in issue_ok.items() if k != "created_at"}, None)}, True, True),
         ("missing PR created_at warns instead of skipping blindly",
          pr("Closes #42", created=None), small, {42: (issue_ok, None)}, True, True),
-        ("docs/config do not count as code",
-         pr("Closes #42"), docs_only, {42: (issue_ok, None)}, True, False),
+        ("docs/config do not count as code", pr("Closes #42"), docs_only, {42: (issue_ok, None)}, True, False),
     ]
     failures = 0
     for name, pull, files, lookups, want_ok, want_warning in cases:

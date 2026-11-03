@@ -19,13 +19,8 @@ import re
 import sys
 from pathlib import Path
 
-MIN_PYTHON = (3, 11)
-if sys.version_info < MIN_PYTHON:
-    print(
-        f"ERROR: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; "
-        f"found {sys.version.split()[0]}.",
-        file=sys.stderr,
-    )
+if sys.version_info < (3, 11):
+    print(f"ERROR: Python 3.11+ required; found {sys.version.split()[0]}.", file=sys.stderr)
     sys.exit(2)
 
 PROJECT_HEADER = re.compile(r"(?m)^\[project\]\s*$")
